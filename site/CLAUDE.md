@@ -34,3 +34,10 @@ documentação do MVP. **Apenas apresentação — não tem lógica de produto.*
 - Não comitar `.next/`, `out/`, `node_modules/` (já no .gitignore raiz)
 - Não desabilitar lint pra fazer passar — corrigir o erro
 - Não introduzir backend (API routes) sem registrar plano
+
+## Modo orquestrado
+
+Se receber um prompt começando com `[ORCH:<task-id>]`, leia
+`../.orchestration/INSTRUCTIONS.md` antes de qualquer outra ação. Esse marker
+indica que outro agente está coordenando o trabalho e tem regras específicas
+(onde escrever resultado, não comitar, etc).

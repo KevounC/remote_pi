@@ -34,3 +34,10 @@ chat com streaming, approval cards para tool calls.
 - Não rolar crypto manual — usar libsodium bindings
 - Não comitar `build/`, `.dart_tool/`, `ios/Pods/` (já no .gitignore raiz)
 - Não adicionar dependência sem registrar no plano correspondente
+
+## Modo orquestrado
+
+Se receber um prompt começando com `[ORCH:<task-id>]`, leia
+`../.orchestration/INSTRUCTIONS.md` antes de qualquer outra ação. Esse marker
+indica que outro agente está coordenando o trabalho e tem regras específicas
+(onde escrever resultado, não comitar, etc).
