@@ -66,7 +66,7 @@ de **Definition of Done** de cada plano:
 # rode da raiz do monorepo
 done=$(grep -h "^- \[x\]" plan/*.md | wc -l | tr -d ' ')
 total=$(grep -hE "^- \[(x| )\]" plan/*.md | wc -l | tr -d ' ')
-pct=$(awk "BEGIN { printf \"%.3f\", $done / $total }")
+pct=$(LC_NUMERIC=C awk "BEGIN { printf \"%.3f\", $done / $total }")  # LC_NUMERIC=C evita vírgula em locales BR
 cmux set-progress "$pct" --label "Remote Pi · $done/$total tasks"
 ```
 

@@ -110,7 +110,7 @@ de **Definition of Done** de cada plano:
 # rode da raiz do monorepo
 done=$(grep -h "^- \[x\]" plan/*.md | wc -l | tr -d ' ')
 total=$(grep -hE "^- \[(x| )\]" plan/*.md | wc -l | tr -d ' ')
-pct=$(awk "BEGIN { printf \"%.3f\", $done / $total }")
+pct=$(LC_NUMERIC=C awk "BEGIN { printf \"%.3f\", $done / $total }")  # LC_NUMERIC=C evita vírgula em locales BR
 cmux set-progress "$pct" --label "Remote Pi · $done/$total tasks"
 ```
 
@@ -511,18 +511,18 @@ Até lá, planejamento sequencial em `plan/NN-*.md` resolve.
 
 ## Definition of Done
 
-- [ ] `CLAUDE.md` na raiz com role de Orquestrador
-- [ ] `app/CLAUDE.md` com persona Flutter
-- [ ] `pi-extension/CLAUDE.md` com persona Node/TS
-- [ ] `relay/CLAUDE.md` com persona Rust
-- [ ] `site/CLAUDE.md` com persona NextJS
-- [ ] `.claude/agents/scout-app.md` (read-only Flutter scout)
-- [ ] `.claude/agents/scout-pi-extension.md` (read-only Node scout)
-- [ ] `.claude/agents/scout-relay.md` (read-only Rust scout)
-- [ ] `.claude/agents/scout-site.md` (read-only NextJS scout)
+- [x] `CLAUDE.md` na raiz com role de Orquestrador
+- [x] `app/CLAUDE.md` com persona Flutter
+- [x] `pi-extension/CLAUDE.md` com persona Node/TS
+- [x] `relay/CLAUDE.md` com persona Rust
+- [x] `site/CLAUDE.md` com persona NextJS
+- [x] `.claude/agents/scout-app.md` (read-only Flutter scout)
+- [x] `.claude/agents/scout-pi-extension.md` (read-only Node scout)
+- [x] `.claude/agents/scout-relay.md` (read-only Rust scout)
+- [x] `.claude/agents/scout-site.md` (read-only NextJS scout)
 - [ ] Validação manual: abrir Claude em cada cwd e fazer 1 pergunta por persona (ver critérios de aceite individuais)
-- [ ] Validação dos scouts: invocar os 4 em paralelo a partir da raiz e ver os 4 reportes no formato esperado
-- [ ] Commit: `ai: orchestrator + personas + 4 scout subagents`
+- [x] Validação dos scouts: invocar os 4 em paralelo a partir da raiz e ver os 4 reportes no formato esperado
+- [x] Commit: `ai: orchestrator + personas + 4 scout subagents`
 
 ---
 

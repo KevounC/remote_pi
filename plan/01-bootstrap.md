@@ -266,12 +266,12 @@ A definir.
 
 ## Definition of Done deste plano
 
-- [ ] `app/` existe e `flutter run` abre o app default
-- [ ] `pi-extension/` existe e `pnpm typecheck && pnpm build` passa
-- [ ] `relay/` existe e `cargo run` imprime stub
-- [ ] `site/` existe e `pnpm dev` serve a landing
-- [ ] `README.md` existe na raiz com as seções listadas
-- [ ] Commit inicial criado: "bootstrap: scaffold app/, pi-extension/, relay/, site/"
+- [x] `app/` existe e `flutter run` abre o app default
+- [x] `pi-extension/` existe e `pnpm typecheck && pnpm build` passa
+- [x] `relay/` existe e `cargo run` imprime stub
+- [x] `site/` existe e `pnpm dev` serve a landing
+- [x] `README.md` existe na raiz com as seções listadas
+- [x] Commit inicial criado: "bootstrap: scaffold app/, pi-extension/, relay/, site/"
 
 ---
 
