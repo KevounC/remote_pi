@@ -23,6 +23,14 @@ Você está na **raiz** do monorepo Remote Pi. Esta pasta é exclusivamente para
 
 Veja [README.md](./README.md) para visão geral e [plan/](./plan/) para os planos.
 
+## Decisões já tomadas
+
+Antes de propor mudança de direção (arquitetura, pareamento, escopo, UI, segurança),
+leia [`plan/00-decisions.md`](./plan/00-decisions.md). Esse arquivo lista decisões
+fechadas em conversa exploratória e **não devem ser revisitadas sem evidência forte**.
+
+Se ainda assim quiser revisitar, abra discussão explícita — não mude silenciosamente.
+
 ## Convenções de planos
 
 - Numeração sequencial: `01-bootstrap.md`, `02-ai-orchestration.md`, ...
