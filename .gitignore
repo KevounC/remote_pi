@@ -1,6 +1,11 @@
 # cmux / claude
 .fresh/
 
+# orchestration: results são efêmeros (logs de execução de cada task);
+# INSTRUCTIONS.md e contracts/ ficam versionados (contrato compartilhado).
+.orchestration/results/*
+!.orchestration/results/.gitkeep
+
 # Node
 node_modules/
 dist/

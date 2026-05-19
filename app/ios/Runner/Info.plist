@@ -2,6 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera is used to scan the QR code shown on your Mac terminal.</string>
+	<!-- Required for ws:// (non-TLS) connections to local relay during development.
+	     Remove or restrict to specific domains before App Store submission. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<!-- Required for iOS 14+ to connect to devices on the local network (LAN relay). -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Remote Pi connects to a relay on your local network to communicate with your Mac.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

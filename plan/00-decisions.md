@@ -38,29 +38,32 @@ Numeração `00-` é proposital: este arquivo carrega antes dos planos numerados
 
 | Decisão | Razão / nota |
 |---|---|
-| **Project scope via git root** | App pareado vê só sessões do projeto onde `/remote-pi` rodou. Detecção: subir a árvore procurando `.git`, `package.json`, `pyproject.toml`, `Cargo.toml`. Fallback: cwd exato |
-| **Refutados**: cwd-exato (perde sessões da raiz quando entra `src/`) e Mac-inteiro (vaza projetos pessoais) | |
-| **Pareamento global, vista por projeto** | Chave de longo prazo é por Mac (singleton). Lista de sessões filtra por project scope do Pi que tá rodando |
+| ~~**Project scope via git root**~~ | ~~App pareado vê só sessões do projeto onde `/remote-pi` rodou. Detecção: subir a árvore procurando `.git`, `package.json`, `pyproject.toml`, `Cargo.toml`. Fallback: cwd exato~~ |
+| ~~**Refutados**: cwd-exato (perde sessões da raiz quando entra `src/`) e Mac-inteiro (vaza projetos pessoais)~~ | |
+| ~~**Pareamento global, vista por projeto**~~ | ~~Chave de longo prazo é por Mac (singleton). Lista de sessões filtra por project scope do Pi que tá rodando~~ |
+| **Pareamento = 1 sessão (MVP)** | Revertido em 2026-05-18. Razão: enxugar MVP. QR gerado por `/remote-pi` é específico da sessão Pi corrente. App vê apenas essa sessão. Sem project scope, sem session manager, sem listagem multi-sessão por projeto. Multi-sessão volta a ser considerado em v2 (`plan/07-v2-multi-session.md` quando aparecer demanda real) |
 
 ## Multi-instância (vários Pi)
 
 | Cenário | Comportamento |
 |---|---|
-| 2 terminais Pi na mesma pasta | Cada um gera QR próprio → 2 pareamentos independentes. Zero conflito |
-| Pi A pediu `switch_session X`, X está LIVE em Pi B | `AgentSessionRuntime.resume(X)` lança `SessionLockedError`. App mostra "em uso em outro terminal" |
-| Pi numa subpasta (`projeto-a/src`) | Resolve project root = `projeto-a/` via marcador → mesmo conjunto de sessões |
-| App listando sessões | Estado por sessão: `LIVE aqui` (verde), `em outro Pi` (meio cheio), `histórico` (cinza) |
+| 2 terminais Pi na mesma pasta | Cada um gera QR próprio → 2 pareamentos independentes. Zero conflito (mantida — compatível com MVP 1-pareamento-1-sessão) |
+| ~~Pi A pediu `switch_session X`, X está LIVE em Pi B~~ | ~~`AgentSessionRuntime.resume(X)` lança `SessionLockedError`. App mostra "em uso em outro terminal"~~ (revertida 2026-05-18: sem switch_session no MVP) |
+| ~~Pi numa subpasta (`projeto-a/src`)~~ | ~~Resolve project root = `projeto-a/` via marcador → mesmo conjunto de sessões~~ (revertida 2026-05-18: sem project scope no MVP) |
+| App listando pareamentos | Cada item = um pareamento ativo = uma sessão. Estado: **online** (Pi rodando) ou **offline** (Pi fechado/inalcançável). Sem "histórico", sem "em outro Pi", sem cores de estado multi-instância. |
 
 ## UI / produto
 
 | Decisão | Razão / nota |
 |---|---|
-| **Hierarquia Peer → Projeto → Sessão** | Não árvore como home. Inbox de approvals + sessões ativas + recentes |
-| **Sessão histórica = read-only** | Tap abre histórico completo. Botão "Continuar essa sessão" dispara `switch_session` → vira active no Pi → libera write |
-| **Mobile pode ativar sessão histórica** | Não precisa o dev resumir no terminal. App envia `switch_session` e Pi process faz `AgentSessionRuntime.resume()` |
-| **Rename em 3 níveis** | Peer no Keychain (local), Projeto em `~/.pi/remote/projects.json` (sincroniza p/ outros celulares pareados), Sessão no metadata JSONL (sincroniza bidirecionalmente com a CLI) |
-| **Trabalho paralelo** | Emerge da arquitetura: N Pi processes = N AgentSessions LIVE. App mostra todas com swipe-rápido entre elas |
-| **Switcher por gesto** | Recomendação UX: swipe da borda esquerda alterna entre últimas N sessões |
+| ~~**Hierarquia Peer → Projeto → Sessão**~~ | ~~Não árvore como home. Inbox de approvals + sessões ativas + recentes~~ (revertida 2026-05-18) |
+| **Hierarquia plana: Pareamento ↔ Sessão (1:1)** | Lista de pareamentos = lista de sessões. Sem camada de projeto. Substitui a hierarquia anterior. |
+| ~~**Sessão histórica = read-only**~~ | ~~Tap abre histórico completo. Botão "Continuar essa sessão" dispara `switch_session` → vira active no Pi → libera write~~ (revertida 2026-05-18: sem conceito de sessão histórica no MVP) |
+| ~~**Mobile pode ativar sessão histórica**~~ | ~~Não precisa o dev resumir no terminal. App envia `switch_session` e Pi process faz `AgentSessionRuntime.resume()`~~ (revertida 2026-05-18: sem switch_session no MVP) |
+| ~~**Rename em 3 níveis**~~ | ~~Peer no Keychain (local), Projeto em `~/.pi/remote/projects.json` (sincroniza p/ outros celulares pareados), Sessão no metadata JSONL (sincroniza bidirecionalmente com a CLI)~~ (revertida 2026-05-18) |
+| **Rename apenas do pareamento** | Local no Keychain/Keystore do mobile. Nome default = cwd onde o Pi rodou (ex: `remote_pi · feature/protocol`). Sem 3 níveis. |
+| **Trabalho paralelo** | Emerge da arquitetura: N Pi processes pareados = N sessões no app. App mostra todas com swipe entre elas |
+| **Switcher por gesto** | Recomendação UX: swipe da borda esquerda alterna entre últimos N pareamentos |
 
 ## Approval / segurança operacional
 
@@ -72,16 +75,19 @@ Numeração `00-` é proposital: este arquivo carrega antes dos planos numerados
 | **Timeout default 60s** | `on_timeout=abort`. Conservador: se user não respondeu, não execute |
 | **Quando push entrar (v2)** | Aditivo. Schema atual não muda. Relay decora `tool_request` com push fire |
 
-## Crypto / E2E (resumo — detalhe no plano 04)
+## Crypto / E2E (resumo — detalhe nos planos 04 e 06)
 
 | Decisão | Razão / nota |
 |---|---|
 | **libsodium / Noise** | Curve25519 + ChaCha20-Poly1305. Pode ser Noise XX/IK (padrão WireGuard/WhatsApp) ou libsodium direto. **Não inventar protocolo** |
-| **Relay NUNCA decifra** | Vê só `{ peer, ct, tamanho, timestamp }`. Logs proibidos de conter payload (mesmo cifrado) |
-| **TLS 1.3 obrigatório** | Camada 1 (transporte). E2E é camada 2. Defesa em profundidade |
+| ~~**Handshake = Noise XX (fechado 2026-05-18)**~~ | ~~Stack: Node usa `noise-protocol` (npm, low-level Noise puro); Dart usa `cryptography` (dint.dev, 309k downloads/sem) + Noise XX implementado seguindo spec literalmente em ~200 LOC; relay só faz challenge-response Ed25519 (`ed25519-dalek`), sem participar do Noise. Validação obrigatória via test vectors oficiais do Noise + roundtrip Node↔Dart no localhost. Razão: não há lib Noise XX madura pura Dart (`noise_protocol_framework` tem 69 dl/sem — risco demais pra cripto).~~ |
+| **E2E removido no MVP (fechado 2026-05-19)** | Plano 06 executa rollback de Noise XX. Razão: handshake virou bottleneck depurativo (semanas perdidas em bugs entre Dart e Node), e relay é open-source + self-hostável — usuário paranoico roda o próprio em VPN/Tailscale. MVP roda sobre plaintext + Ed25519 auth + TLS no transporte. Re-ativar Noise é roadmap aditivo (plano 09 opcional), com pré-requisito de ferramental de debug (loopback test + wire dump). Trade-off explícito: operador do relay público vê conteúdo de mensagens — aceito pra MVP beta fechado. |
+| **Pacote Dart de cripto (fechado 2026-05-18)** | `cryptography` (dint.dev). Tem X25519, ChaCha20-Poly1305, HKDF, Ed25519. ~~Híbrido platform-crypto + Dart fallback. Substitui `sodium_libs` que era pré-considerado.~~ Após rollback (2026-05-19) usado apenas pra Ed25519 (auth no relay). X25519/ChaCha/HKDF saem do app. |
+| **Relay NUNCA decifra** | ~~Vê só `{ peer, ct, tamanho, timestamp }`. Logs proibidos de conter payload (mesmo cifrado)~~ Pós-rollback: relay continua opaco ao `ct` (nunca chama `JSON.parse(ct)`), mas `ct` é base64 do JSON em claro. Logs proibidos de incluir `ct` mesmo assim — princípio mantido. |
+| **TLS 1.3 obrigatório** | Camada 1 (transporte). ~~E2E é camada 2. Defesa em profundidade~~ Pós-rollback: TLS é a ÚNICA camada de proteção contra MITM externo até E2E voltar (plano 09 opcional). Cert pinning no app vira mais importante. |
 | **Cert pinning no app** | Bloqueia MITM via CA comprometida |
 | **Sem quantum-safe** | Curve25519 cai contra computador quântico estável. Trocar pra Kyber quando virar problema real (não 2026) |
-| **`ct` no MVP do protocolo (plano 03)** | É base64 do JSON em claro até o plano 04 ativar cifra real. Permite testar shape sem bloquear em crypto |
+| **`ct` no MVP do protocolo (plano 03)** | É base64 do JSON em claro. ~~até o plano 04 ativar cifra real.~~ Permanente após plano 06 (rollback E2E). Permite religar Noise no futuro só trocando geração/parse do `ct` — shape do envelope intacto. |
 
 ## Modelo de ameaças — o que NÃO protegemos
 
@@ -90,7 +96,8 @@ Para ser honesto desde o início:
 - **Mac comprometido** → atacante é o Pi. Fim de jogo
 - **Celular comprometido** → atacante tem Keychain. Fim de jogo
 - **Usuário aprovando comando malicioso** → sistema obedece. UI mostra diff, mas se você toca Aprovar sem ler, é problema seu
-- **Análise de tráfego** → relay sabe tamanho/timing. Não vaza conteúdo, mas vaza padrões ("Jacob ativo às 22h")
+- **Análise de tráfego** → relay sabe tamanho/timing. ~~Não vaza conteúdo, mas vaza padrões ("Jacob ativo às 22h")~~ Pós-rollback E2E (plano 06): relay vê tamanho/timing **e conteúdo**. Mitigação: self-host trivial + roadmap pra religar E2E (plano 09 opcional)
+- **Operador do relay público (pós-rollback E2E)** → vê todo conteúdo das mensagens (código, comandos shell, outputs). Aceito no MVP beta. Usuário sério deve self-hostar o relay (open-source, ~200 LOC Rust)
 - **Quantum** → ver linha acima
 
 ## Processo / meta
@@ -111,8 +118,8 @@ Estas decisões foram **propositalmente adiadas**. Quando alguém quiser fechar,
 
 | Item | Quando decidir |
 |---|---|
-| State management Flutter (Riverpod / bloc / signals_flutter) | Quando 1ª feature do app exigir state compartilhado |
-| Pacote libsodium pra Dart (`sodium_libs`, `cryptography`, outro) | Plano 04 (pareamento) |
+| ~~State management Flutter (Riverpod / bloc / signals_flutter)~~ | ~~Quando 1ª feature do app exigir state compartilhado~~ — fechado 2026-05-18: `ViewModel<T>` custom (single-field emit) + `provider` + `auto_injector`. Infra já existe em `app/lib/ui/core/viewmodel/viewmodel.dart` e `app/lib/config/dependencies.dart`. Convenção: sealed states em `ui/<feature>/states/`, `_injector.addViewModel<T>(T.new)` no setup, `ViewmodelProvider<T>()` no router. |
+| ~~Pacote libsodium pra Dart (`sodium_libs`, `cryptography`, outro)~~ | ~~Plano 04 (pareamento)~~ — fechado 2026-05-18: `cryptography` (dint.dev) |
 | Onde hospedar o relay | Plano 06 |
 | Versionamento de protocolo (`v` field) | Quando v2 do protocolo surgir e exigir migração |
 | Conta de usuário opcional | Quando aparecer dor multi-device |

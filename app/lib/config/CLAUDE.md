@@ -38,11 +38,78 @@ permissão.
 
 ```
 config/
-├── dependencies.dart    # setupDependencies / disposeDependencies
+├── dependencies.dart    # setupDependencies / disposeDependencies / ViewmodelProvider
 ├── env.dart             # leitura de --dart-define e feature flags
 ├── theme.dart           # ThemeData global
-└── utils/               # helpers horizontais (ver utils/CLAUDE.md se existir)
+└── utils/
+    └── injector.dart    # CustomInjector — fachada tipada sobre auto_injector
 ```
+
+## Sistema de DI — como usar
+
+A fachada [`CustomInjector`](utils/injector.dart) embrulha o `auto_injector`
+com métodos tipados por camada. Cada método declara intenção e amarra o tipo
+a um contrato do domínio (`Service`, `Repository`, `UseCase`, `ViewModel`).
+
+### Registrar dependências
+
+Tudo é registrado em `setupDependencies()` em
+[`config/dependencies.dart`](dependencies.dart), nesta ordem:
+
+```dart
+Future<void> setupDependencies() async {
+  // 1. Instâncias prontas (SDKs)
+  _injector.addInstance<SharedPreferences>(await SharedPreferences.getInstance());
+
+  // 2. Serviços de infra (singleton preguiçoso + dispose automático)
+  _injector.addService<NetworkService>(NetworkServiceImpl.new);
+
+  // 3. Factories utilitárias (sem contrato do domínio)
+  _injector.addOther<Dio>(dioFactory);
+
+  // 4. Repositórios (impl em data/, contrato em domain/)
+  _injector.addRepository<PairingRepository>(PairingRepositoryImpl.new);
+
+  // 5. Use cases (instância nova por chamada)
+  _injector.addUseCase<PairWithPiUseCase>(PairWithPiUseCase.new);
+
+  // 6. ViewModels (instância nova por tela)
+  _injector.addViewModel<HomeViewModel>(HomeViewModel.new);
+
+  _injector.commit(); // bloqueia novas inserções
+}
+```
+
+### Ciclo de vida
+
+- `addService` / `addRepository` → singleton preguiçoso; `dispose()` é
+  chamado quando `disposeDependencies()` roda.
+- `addUseCase` / `addViewModel` → `_injector.add(...)` puro: cada `get`
+  devolve **uma nova instância**. Estado de tela nunca vaza entre rotas.
+- `addInstance` → exatamente o objeto passado, para sempre.
+- `addOther` → singleton preguiçoso, **sem** dispose hook.
+
+### Como o ViewModel chega na UI
+
+`config/dependencies.dart` exporta `ViewmodelProvider<T>` — um
+`ChangeNotifierProvider` que pede ao injector uma nova instância do
+ViewModel quando a rota é montada. A composição em `routing/router.dart` é
+o **único** lugar onde ViewmodelProviders são declarados:
+
+```dart
+GoRoute(
+  path: routePaths.home,
+  builder: (_, __) => MultiProvider(
+    providers: [
+      ViewmodelProvider<HomeViewModel>(),
+      ViewmodelProvider<HomeFilterViewModel>(),
+    ],
+    child: const HomePage(),
+  ),
+)
+```
+
+Detalhes do consumo em `ui/CLAUDE.md`.
 
 ## Vocabulário
 

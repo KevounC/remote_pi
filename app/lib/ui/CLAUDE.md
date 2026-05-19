@@ -25,6 +25,116 @@ use cases para refletir o estado da aplicação por feature.
 8. **Adicionar `ViewmodelProvider<T>()` no `routing/router.dart`** na
    definição da rota correspondente.
 
+## ViewModel — a classe base do estado
+
+Todo ViewModel estende [`ViewModel<T>`](core/viewmodel/viewmodel.dart), que é
+um `ChangeNotifier` com **um único campo de estado imutável** e um único
+verbo para alterá-lo (`emit`). O estado vive em uma sealed class na pasta
+`states/` da feature.
+
+```dart
+// ui/pairing/states/pairing_state.dart
+sealed class PairingState {
+  const PairingState();
+}
+
+final class PairingIdle extends PairingState {
+  const PairingIdle();
+}
+
+final class PairingScanning extends PairingState {
+  const PairingScanning();
+}
+
+final class PairingPaired extends PairingState {
+  const PairingPaired(this.deviceId);
+  final String deviceId;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PairingPaired && other.deviceId == deviceId;
+
+  @override
+  int get hashCode => deviceId.hashCode;
+}
+
+final class PairingError extends PairingState {
+  const PairingError(this.message);
+  final String message;
+  // ... == / hashCode
+}
+```
+
+```dart
+// ui/pairing/viewmodels/pairing_viewmodel.dart
+class PairingViewModel extends ViewModel<PairingState> {
+  PairingViewModel(this._pairWithPi) : super(const PairingIdle());
+
+  final PairWithPiUseCase _pairWithPi;
+
+  Future<void> startScan() async {
+    emit(const PairingScanning());
+    final result = await _pairWithPi();
+    result.fold(
+      (device) => emit(PairingPaired(device.id)),
+      (error) => emit(PairingError(error.message)),
+    );
+  }
+}
+```
+
+`emit` só dispara `notifyListeners()` se o novo estado for `!=` do atual —
+por isso states precisam de `==` / `hashCode` corretos (use `equatable` ou
+escreva manualmente). Isso evita rebuilds desnecessários.
+
+## Como a UI consome o ViewModel
+
+Páginas **nunca** instanciam o ViewModel — o `ViewmodelProvider<T>` declarado
+em `routing/router.dart` (ver `config/CLAUDE.md`) já injeta a instância na
+árvore. A página acessa via `context`:
+
+```dart
+class PairingPage extends StatelessWidget {
+  const PairingPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    // Lê + escuta — rebuild quando state muda
+    final state = context.watch<PairingViewModel>().state;
+
+    // Lê sem escutar — para chamar métodos
+    final viewModel = context.read<PairingViewModel>();
+
+    return Scaffold(
+      body: switch (state) {
+        PairingIdle() => _IdleView(onScan: viewModel.startScan),
+        PairingScanning() => const _ScanningView(),
+        PairingPaired(:final deviceId) => _PairedView(deviceId: deviceId),
+        PairingError(:final message) => _ErrorView(message: message),
+      },
+    );
+  }
+}
+```
+
+Para reagir a **apenas um pedaço** do state (otimização):
+
+```dart
+final isScanning = context.select<PairingViewModel, bool>(
+  (vm) => vm.state is PairingScanning,
+);
+```
+
+### Checklist ao criar uma feature
+
+1. Criar `states/<feature>_state.dart` (sealed class com `==`/`hashCode`).
+2. Criar `viewmodels/<feature>_viewmodel.dart` estendendo `ViewModel<TState>`.
+3. Registrar em `config/dependencies.dart`:
+   `_injector.addViewModel<FooViewModel>(FooViewModel.new);`
+4. Bindar na rota em `routing/router.dart` dentro de `MultiProvider` com
+   `ViewmodelProvider<FooViewModel>()`.
+5. Página consome via `context.watch/read/select`.
+
 ## Regra crítica: `BuildContext` em código assíncrono
 
 Acessar `context` após uma operação assíncrona pode crashar

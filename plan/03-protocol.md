@@ -576,17 +576,17 @@ Não há comparação automatizada cross-linguagem no MVP. A confiança vem de:
 ## Definition of Done
 
 - [x] `.orchestration/INSTRUCTIONS.md` existe e está coerente com gatilho `[ORCH:]` nos CLAUDE.md
-- [ ] `.orchestration/contracts/protocol.md` cobre outer + inner + todos os tipos listados, incluindo `session_id` em push messages e tabela de erros estendida
-- [ ] `.orchestration/contracts/fixtures/` tem 1 fixture por `type` (≥ 12 arquivos); fixtures de push carregam `session_id`
-- [ ] `pi-extension/src/protocol/{types,codec,codec.test}.ts` implementados
-- [ ] `vitest` adicionado como devDep no pi-extension; script `"test": "vitest run"` no package.json
-- [ ] `pnpm test` passa contra fixtures e cobre rejeição de JSON inválido + type desconhecido (`DecodeError`)
-- [ ] `ErrorCode` é aberto (`KnownErrorCode | (string & {})`) — receivers toleram codes futuros
-- [ ] `app/lib/protocol/{protocol,codec}.dart` implementados, sealed switch exhaustive, push messages têm `sessionId` obrigatório
-- [ ] `app/test/protocol_test.dart` passa contra mesmas fixtures + teste explícito de `AgentChunk.sessionId`
-- [ ] `relay/src/protocol/outer.rs` parseia outer envelope, rejeita ct base64-decoded > 1 MiB
-- [ ] `cargo test` no relay passa (2+ tests)
-- [ ] `cargo clippy -- -D warnings` zero no relay
+- [x] `.orchestration/contracts/protocol.md` cobre outer + inner + todos os tipos listados, incluindo `session_id` em push messages e tabela de erros estendida
+- [x] `.orchestration/contracts/fixtures/` tem 1 fixture por `type` (≥ 12 arquivos); fixtures de push carregam `session_id`
+- [x] `pi-extension/src/protocol/{types,codec,codec.test}.ts` implementados
+- [x] `vitest` adicionado como devDep no pi-extension; script `"test": "vitest run"` no package.json
+- [x] `pnpm test` passa contra fixtures e cobre rejeição de JSON inválido + type desconhecido (`DecodeError`)
+- [x] `ErrorCode` é aberto (`KnownErrorCode | (string & {})`) — receivers toleram codes futuros
+- [x] `app/lib/protocol/{protocol,codec}.dart` implementados, sealed switch exhaustive, push messages têm `sessionId` obrigatório
+- [x] `app/test/protocol_test.dart` passa contra mesmas fixtures + teste explícito de `AgentChunk.sessionId`
+- [x] `relay/src/protocol/outer.rs` parseia outer envelope, rejeita ct base64-decoded > 1 MiB
+- [x] `cargo test` no relay passa (2+ tests)
+- [x] `cargo clippy -- -D warnings` zero no relay
 - [ ] Commit: `protocol: outer + inner envelopes, JSONL framing, fixtures`
 
 ---
