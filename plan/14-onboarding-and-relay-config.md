@@ -223,10 +223,10 @@ lados + criar onboarding stepper de 3 passos pro primeiro uso.
 
 ## Definition of Done
 
-- [ ] Wave 0: contratos atualizados (pairing.md sem `r`)
-- [ ] W1.A: pi-ext config + set-relay + QR sem `r` + tests
-- [ ] W1.B: app prefs + onboarding 3 steps + settings + redirect novo + tests
-- [ ] W1.C: relay sem mudança (smoke verde)
+- [x] Wave 0: contratos atualizados (pairing.md sem `r`)
+- [x] W1.A: pi-ext config + set-relay + QR sem `r` + tests (101 tests, +6)
+- [x] W1.B: app prefs + onboarding 3 steps + settings + redirect novo + tests (175 tests, +26)
+- [x] W1.C: relay sem mudança (smoke verde — sem alteração)
 - [ ] Wave 2: 7 cenários manuais OK
 - [ ] Wave 3: docs + commit
 

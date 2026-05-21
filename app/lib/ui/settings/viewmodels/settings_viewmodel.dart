@@ -1,5 +1,6 @@
 import 'package:app/data/preferences/preferences.dart';
 import 'package:app/data/transport/connection_manager.dart';
+import 'package:app/data/transport/relay_config.dart';
 import 'package:app/pairing/storage.dart';
 import 'package:app/ui/core/viewmodel/viewmodel.dart';
 import 'package:app/ui/settings/states/settings_state.dart';
@@ -46,10 +47,34 @@ class SettingsViewModel extends ViewModel<SettingsState> {
     await _load();
   }
 
+  /// Effective relay URL the app is connecting to right now.
+  String get effectiveRelayUrl => resolveRelayUrl(_prefs);
+
+  /// The user override (null = using the public default).
+  String? get relayUrlOverride => _prefs.relayUrl;
+
+  /// Persist a custom relay URL. Pass [value] = null or empty to clear
+  /// the override (falls back to [kDefaultRelayUrl]). Returns `null` on
+  /// success or an error message string when validation fails.
+  Future<String?> saveRelayUrl(String? value) async {
+    final trimmed = value?.trim();
+    if (trimmed == null || trimmed.isEmpty) {
+      await _prefs.setRelayUrl(null);
+      return null;
+    }
+    if (!isValidRelayUrl(trimmed)) {
+      return 'URL deve começar com ws:// ou wss://';
+    }
+    await _prefs.setRelayUrl(trimmed);
+    return null;
+  }
+
   /// Revoke pairing locally. Drops the peer from the relay's presence
   /// subscription too so we stop receiving updates about a peer that no
   /// longer exists on this device. Clears the selected pointer when it
-  /// matches.
+  /// matches. If this was the LAST peer, also resets
+  /// `onboardingCompleted=false` so the next boot lands on /onboarding
+  /// (matches user expectation of "revoke = start fresh").
   Future<void> revoke(String epk) async {
     if (_prefs.selectedPeerEpk == epk) {
       await _prefs.setSelectedPeerEpk(null);
@@ -57,6 +82,9 @@ class SettingsViewModel extends ViewModel<SettingsState> {
     await _storage.deletePeer(epk);
     final remaining = await _storage.listPeers();
     _conn.subscribeToPeers(remaining.map((p) => p.remoteEpk).toList());
+    if (remaining.isEmpty) {
+      await _prefs.setOnboardingCompleted(false);
+    }
     await _load();
   }
 

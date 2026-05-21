@@ -223,4 +223,53 @@ void main() {
       vm.dispose();
     });
   });
+
+  group('SettingsViewModel — plan 14 relay config', () {
+    test('saveRelayUrl with valid URL persists override + returns null',
+        () async {
+      final prefs = Preferences(_FakeSecureStorage());
+      final vm = SettingsViewModel(_FakeStorage([]), prefs, _conn());
+      await Future<void>.delayed(Duration.zero);
+
+      final err = await vm.saveRelayUrl('wss://custom.example');
+      expect(err, isNull);
+      expect(prefs.relayUrl, 'wss://custom.example');
+      expect(vm.effectiveRelayUrl, 'wss://custom.example');
+
+      vm.dispose();
+    });
+
+    test(
+      'saveRelayUrl with invalid URL returns error and does NOT persist',
+      () async {
+        final prefs = Preferences(_FakeSecureStorage());
+        final vm = SettingsViewModel(_FakeStorage([]), prefs, _conn());
+        await Future<void>.delayed(Duration.zero);
+
+        final err = await vm.saveRelayUrl('not-a-url');
+        expect(err, isNotNull);
+        expect(prefs.relayUrl, isNull);
+
+        vm.dispose();
+      },
+    );
+
+    test(
+      'saveRelayUrl with empty / null clears the override (falls back '
+      'to kDefaultRelayUrl via effectiveRelayUrl)',
+      () async {
+        final prefs = Preferences(_FakeSecureStorage());
+        await prefs.setRelayUrl('wss://x.example');
+        final vm = SettingsViewModel(_FakeStorage([]), prefs, _conn());
+        await Future<void>.delayed(Duration.zero);
+
+        final err = await vm.saveRelayUrl('');
+        expect(err, isNull);
+        expect(prefs.relayUrl, isNull);
+        expect(vm.effectiveRelayUrl, startsWith('wss://'));
+
+        vm.dispose();
+      },
+    );
+  });
 }

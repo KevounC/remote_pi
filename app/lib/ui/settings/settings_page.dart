@@ -1,4 +1,5 @@
 import 'package:app/data/preferences/preferences.dart';
+import 'package:app/data/transport/relay_config.dart';
 import 'package:app/pairing/storage.dart';
 import 'package:app/ui/app_theme.dart';
 import 'package:app/ui/settings/states/settings_state.dart';
@@ -34,6 +35,8 @@ class SettingsPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
+          const _RelaySection(),
+          const Divider(color: kBorder, height: 1),
           const _DisplaySection(),
           const Divider(color: kBorder, height: 1),
           const _SectionHeader('Pairings'),
@@ -51,6 +54,125 @@ class SettingsPage extends StatelessWidget {
           },
         ],
       ),
+    );
+  }
+}
+
+class _RelaySection extends StatefulWidget {
+  const _RelaySection();
+  @override
+  State<_RelaySection> createState() => _RelaySectionState();
+}
+
+class _RelaySectionState extends State<_RelaySection> {
+  late final TextEditingController _ctrl;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final vm = context.read<SettingsViewModel>();
+    _ctrl = TextEditingController(text: vm.relayUrlOverride ?? '');
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final vm = context.read<SettingsViewModel>();
+    final messenger = ScaffoldMessenger.of(context);
+    final err = await vm.saveRelayUrl(_ctrl.text);
+    if (!mounted) return;
+    setState(() => _error = err);
+    if (err == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Relay atualizado',
+            style: TextStyle(fontFamily: kMono),
+          ),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final vm = context.watch<SettingsViewModel>();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _SectionHeader('Relay'),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: _ctrl,
+                style: const TextStyle(
+                  fontFamily: kMono,
+                  fontSize: 13,
+                  color: kText,
+                ),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'Default Relay ($kDefaultRelayUrl)',
+                  hintStyle:
+                      const TextStyle(fontFamily: kMono, color: kMuted, fontSize: 12),
+                  errorText: _error,
+                  errorStyle: const TextStyle(
+                    fontFamily: kMono,
+                    fontSize: 10,
+                    color: Colors.redAccent,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 10),
+                  enabledBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: kBorder),
+                  ),
+                  focusedBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: kAccent),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Atual: ${vm.effectiveRelayUrl}',
+                style: const TextStyle(
+                  fontFamily: kMono,
+                  fontSize: 11,
+                  color: kMuted,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton(
+                  onPressed: _save,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: kAccent,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 18, vertical: 10),
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(6)),
+                    ),
+                  ),
+                  child: const Text(
+                    'Salvar',
+                    style: TextStyle(fontFamily: kMono, fontSize: 13),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

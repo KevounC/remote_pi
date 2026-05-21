@@ -6,6 +6,8 @@ import 'package:app/ui/chat/chat_page.dart';
 import 'package:app/ui/chat/viewmodels/chat_viewmodel.dart';
 import 'package:app/ui/home/home_page.dart';
 import 'package:app/ui/home/viewmodels/home_viewmodel.dart';
+import 'package:app/ui/onboarding/onboarding_page.dart';
+import 'package:app/ui/onboarding/viewmodels/onboarding_viewmodel.dart';
 import 'package:app/ui/pairing/pairing_page.dart';
 import 'package:app/ui/pairing/viewmodels/pairing_viewmodel.dart';
 import 'package:app/ui/settings/settings_page.dart';
@@ -19,17 +21,27 @@ import 'package:provider/provider.dart';
 class _BootState extends ChangeNotifier {
   bool _ready = false;
   bool _hasPeer = false;
+  bool _onboarded = false;
 
   bool get ready => _ready;
   bool get hasPeer => _hasPeer;
+  bool get onboarded => _onboarded;
 
   Future<void> load(
     PairingStorage storage,
     ConnectionManager conn,
     Preferences prefs,
   ) async {
+    await prefs.load();
     final peers = await storage.listPeers();
     _hasPeer = peers.isNotEmpty;
+    // Plan 14: a user who already has a peer is implicitly onboarded —
+    // they paired in an earlier app version that predates the
+    // onboarding flow. Auto-flip the flag so they don't re-run it.
+    if (_hasPeer && !prefs.onboardingCompleted) {
+      await prefs.setOnboardingCompleted(true);
+    }
+    _onboarded = prefs.onboardingCompleted;
     _ready = true;
     notifyListeners();
     // Plano 13: `Preferences.selectedPeerEpk` is the authoritative
@@ -37,7 +49,6 @@ class _BootState extends ChangeNotifier {
     // it's null — default to `peers.first` so subsequent boot()s have a
     // stable target and the user lands on a deterministic chat.
     if (_hasPeer) {
-      await prefs.load();
       var selected = prefs.selectedPeerEpk;
       if (selected == null) {
         selected = peers.first.remoteEpk;
@@ -67,7 +78,15 @@ GoRouter buildRouter(
     redirect: (context, state) {
       if (!boot.ready) return '/boot';
       if (state.uri.path == '/boot') {
-        return boot.hasPeer ? '/home' : '/pair';
+        // No peer == no app surface to render. Always route to
+        // /onboarding when peers are empty — this covers both the
+        // first-install case AND the "user revoked everything"
+        // case. The `onboardingCompleted` flag is preserved for
+        // analytics / migration purposes but no longer gates the
+        // redirect (was confusing: after revoke the app would land
+        // on a near-empty /home with just a Scan QR button instead
+        // of the full onboarding).
+        return boot.hasPeer ? '/home' : '/onboarding';
       }
       return null;
     },
@@ -93,6 +112,21 @@ GoRouter buildRouter(
         builder: (ctx, st) => MultiProvider(
           providers: [ViewmodelProvider<PairingViewModel>()],
           child: const PairingPage(),
+        ),
+      ),
+
+      // Onboarding (plan 14) — 3-step flow shown when the app has
+      // never been paired AND the user hasn't opted out. Provides
+      // both OnboardingViewModel (state machine) AND PairingViewModel
+      // (step 3 embeds the QR scanner reusing existing pair flow).
+      GoRoute(
+        path: '/onboarding',
+        builder: (ctx, st) => MultiProvider(
+          providers: [
+            ViewmodelProvider<OnboardingViewModel>(),
+            ViewmodelProvider<PairingViewModel>(),
+          ],
+          child: const OnboardingPage(),
         ),
       ),
 

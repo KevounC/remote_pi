@@ -8,6 +8,7 @@ import 'package:app/data/repositories/session_repository.dart';
 import 'package:app/data/transport/channel.dart'; // IChannel
 import 'package:app/data/transport/connection_manager.dart';
 import 'package:app/data/transport/peer_channel.dart';
+import 'package:app/data/transport/relay_config.dart';
 import 'package:app/data/transport/ws_transport.dart';
 import 'package:app/pairing/pair_request_flow.dart';
 import 'package:app/pairing/qr_scanner.dart';
@@ -15,6 +16,7 @@ import 'package:app/pairing/storage.dart';
 import 'package:app/ui/chat/viewmodels/chat_viewmodel.dart';
 import 'package:app/ui/core/viewmodel/viewmodel.dart';
 import 'package:app/ui/home/viewmodels/home_viewmodel.dart';
+import 'package:app/ui/onboarding/viewmodels/onboarding_viewmodel.dart';
 import 'package:app/ui/pairing/viewmodels/pairing_viewmodel.dart';
 import 'package:app/ui/settings/viewmodels/settings_viewmodel.dart';
 import 'package:cryptography/cryptography.dart';
@@ -78,7 +80,11 @@ Future<void> setupDependencies() async {
       _injector.get<PairingStorage>(),
       _productionPairingTransportFactory,
       _injector.get<SessionRepository>(),
+      _injector.get<Preferences>(),
     ),
+  );
+  _injector.addViewModel<OnboardingViewModel>(
+    () => OnboardingViewModel(_injector.get<Preferences>()),
   );
 
   _injector.commit();
@@ -111,14 +117,18 @@ Future<IChannel> _productionConnectionFactory(
   // its retry/backoff path, which is observable as `StatusRetrying` and
   // renders a "reconnecting" banner rather than an empty spinner.
   const wsConnectTimeout = Duration(seconds: 10);
+  // Resolve the GLOBAL relay URL (plan 14): user override > default.
+  // `peer.relayUrl` is kept on PeerRecord for legacy QR payloads but is
+  // no longer consulted when opening a connection.
+  final relayUrl = resolveRelayUrl(_injector.get<Preferences>());
   final transport = await WsTransport.connect(
-    relayUrl: peer.relayUrl,
+    relayUrl: relayUrl,
     peerPubkey: peer.remoteEpk,
     ed25519Key: deviceKey,
   ).timeout(
     wsConnectTimeout,
     onTimeout: () => throw TimeoutException(
-      'WS connect to ${peer.relayUrl} timed out after '
+      'WS connect to $relayUrl timed out after '
       '${wsConnectTimeout.inSeconds}s',
     ),
   );
@@ -139,8 +149,14 @@ Future<PeerTransport> _productionPairingTransportFactory(
   QrPairPayload qr,
   SimpleKeyPair deviceEd25519,
 ) async {
+  // Plan 14: pairing connects via the GLOBAL relay URL (Preferences),
+  // not whatever was embedded in the QR. Mismatch between qr.relayUrl
+  // and the user's configured relay is handled upstream by
+  // `pair_request_flow.dart` (raises a `relay_mismatch` error that
+  // PairingViewModel surfaces as a "trocar relay?" modal).
+  final relayUrl = resolveRelayUrl(_injector.get<Preferences>());
   return WsTransport.connect(
-    relayUrl: qr.relayUrl,
+    relayUrl: relayUrl,
     peerPubkey: qr.epk,
     ed25519Key: deviceEd25519,
   );

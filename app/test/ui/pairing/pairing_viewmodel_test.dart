@@ -5,9 +5,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:app/data/preferences/preferences.dart';
 import 'package:app/data/repositories/i_session_repository.dart'
     show ISessionRepository, SessionEvent;
 import 'package:app/data/transport/channel.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:app/domain/session_state.dart';
 import 'package:app/pairing/pair_request_flow.dart' show PeerTransport;
 import 'package:app/pairing/storage.dart';
@@ -48,6 +50,68 @@ class _MemTransport implements PeerTransport {
   @override Future<void> send(Uint8List d) async => _s.add(d);
   @override Future<Uint8List> receive() => _r.next();
   @override Future<void> close() async {}
+}
+
+/// In-memory fake of FlutterSecureStorage so Preferences can be
+/// constructed in tests without touching the platform channel.
+class _FakeSecureStorage implements FlutterSecureStorage {
+  final Map<String, String> _store = {};
+  @override
+  Future<String?> read({
+    required String key,
+    IOSOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    MacOsOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async =>
+      _store[key];
+  @override
+  Future<void> write({
+    required String key,
+    required String? value,
+    IOSOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    MacOsOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    if (value == null) {
+      _store.remove(key);
+    } else {
+      _store[key] = value;
+    }
+  }
+  @override
+  Future<void> delete({
+    required String key,
+    IOSOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    MacOsOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    _store.remove(key);
+  }
+  @override
+  noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// Synchronous Preferences subclass for tests. Pre-set relay URL to
+/// `ws://localhost` so it matches `_qrUri` (which still embeds the
+/// legacy `r=ws://localhost`); avoids tripping the relay-mismatch
+/// guard in `pair_request_flow.performPairing`. Pass `null` to force
+/// a different URL and exercise the mismatch path.
+class _PrefsForTest extends Preferences {
+  final String? _relay;
+  _PrefsForTest({String? relay = 'ws://localhost'})
+      : _relay = relay,
+        super(_FakeSecureStorage());
+  @override
+  String? get relayUrl => _relay;
 }
 
 class _FakeStorage extends PairingStorage {
@@ -153,7 +217,7 @@ void main() {
     test('initial state is PairingScanning', () {
       final vm = PairingViewModel(_FakeStorage(), (qr, key) async {
         throw Exception('should not be called');
-      }, _FakeSessionRepo());
+      }, _FakeSessionRepo(), _PrefsForTest());
       expect(vm.state, isA<PairingScanning>());
       vm.dispose();
     });
@@ -161,7 +225,7 @@ void main() {
     test('invalid QR is ignored — stays PairingScanning', () async {
       final vm = PairingViewModel(_FakeStorage(), (qr, key) async {
         throw Exception('should not be called');
-      }, _FakeSessionRepo());
+      }, _FakeSessionRepo(), _PrefsForTest());
       await vm.onQrScanned('https://example.com/not-a-qr');
       expect(vm.state, isA<PairingScanning>());
       vm.dispose();
@@ -174,7 +238,7 @@ void main() {
         'type': 'pair_ok',
         'session_name': 'test session',
       });
-      final vm = PairingViewModel(storage, factory, fakeRepo);
+      final vm = PairingViewModel(storage, factory, fakeRepo, _PrefsForTest());
 
       final fut = vm.onQrScanned(_qrUri);
       expect(vm.state, isA<PairingConnecting>());
@@ -199,7 +263,7 @@ void main() {
         'code': 'token_expired',
         'message': 'Token expired',
       });
-      final vm = PairingViewModel(storage, factory, _FakeSessionRepo());
+      final vm = PairingViewModel(storage, factory, _FakeSessionRepo(), _PrefsForTest());
 
       await vm.onQrScanned(_qrUri);
       await Future<void>.delayed(const Duration(milliseconds: 30));
@@ -218,6 +282,7 @@ void main() {
         _FakeStorage(),
         (qr, key) async => throw Exception('socket exception'),
         _FakeSessionRepo(),
+        _PrefsForTest(),
       );
 
       await vm.onQrScanned(_qrUri);
@@ -242,7 +307,7 @@ void main() {
         'type': 'pair_ok',
         'session_name': 'test session',
       });
-      final vm = PairingViewModel(storage, factory, _FakeSessionRepo());
+      final vm = PairingViewModel(storage, factory, _FakeSessionRepo(), _PrefsForTest());
 
       await tester.pumpWidget(
         MaterialApp(
@@ -271,7 +336,7 @@ void main() {
         'code': 'token_consumed',
         'message': 'Already used',
       });
-      final vm = PairingViewModel(_FakeStorage(), factory, _FakeSessionRepo());
+      final vm = PairingViewModel(_FakeStorage(), factory, _FakeSessionRepo(), _PrefsForTest());
 
       await tester.pumpWidget(
         MaterialApp(

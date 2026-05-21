@@ -35,6 +35,19 @@ class _FakeSecureStorage implements FlutterSecureStorage {
   }
 
   @override
+  Future<void> delete({
+    required String key,
+    IOSOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    MacOsOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    _store.remove(key);
+  }
+
+  @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
@@ -72,5 +85,53 @@ void main() {
       expect(p.hideToolCalls, isFalse);
       expect(notifs, 2);
     });
+
+    test('relayUrl defaults to null and round-trips via setRelayUrl',
+        () async {
+      final store = _FakeSecureStorage();
+      final p = Preferences(store);
+      expect(p.relayUrl, isNull);
+
+      await p.setRelayUrl('wss://custom.example.com');
+      expect(p.relayUrl, 'wss://custom.example.com');
+      expect(await store.read(key: 'prefs.relay_url'),
+          'wss://custom.example.com');
+
+      // Reload from cold start → value survives.
+      final p2 = Preferences(store);
+      await p2.load();
+      expect(p2.relayUrl, 'wss://custom.example.com');
+
+      // Clearing sends null and removes the key.
+      await p.setRelayUrl(null);
+      expect(p.relayUrl, isNull);
+      expect(await store.read(key: 'prefs.relay_url'), isNull);
+
+      // Empty string also clears.
+      await p.setRelayUrl('wss://x');
+      await p.setRelayUrl('');
+      expect(p.relayUrl, isNull);
+    });
+
+    test(
+      'onboardingCompleted defaults to false and round-trips via '
+      'setOnboardingCompleted',
+      () async {
+        final store = _FakeSecureStorage();
+        final p = Preferences(store);
+        expect(p.onboardingCompleted, isFalse);
+
+        await p.setOnboardingCompleted(true);
+        expect(p.onboardingCompleted, isTrue);
+        expect(
+          await store.read(key: 'prefs.onboarding_completed'),
+          'true',
+        );
+
+        final p2 = Preferences(store);
+        await p2.load();
+        expect(p2.onboardingCompleted, isTrue);
+      },
+    );
   });
 }

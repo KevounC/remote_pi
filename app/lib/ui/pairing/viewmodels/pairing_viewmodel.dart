@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:io' show Platform;
 
+import 'package:app/data/preferences/preferences.dart';
 import 'package:app/data/repositories/i_session_repository.dart';
 import 'package:app/data/transport/peer_channel.dart';
+import 'package:app/data/transport/relay_config.dart';
 import 'package:app/pairing/pair_request_flow.dart' as pair_flow;
 import 'package:app/pairing/qr_scanner.dart';
 import 'package:app/pairing/storage.dart';
@@ -21,11 +23,16 @@ class PairingViewModel extends ViewModel<PairingState> {
   final PairingStorage _storage;
   final PairingTransportFactory _transportFactory;
   final ISessionRepository _sessionRepo;
+  final Preferences _prefs;
   pair_flow.PeerTransport? _transport;
   PlainPeerChannel? _liveChannel;
 
-  PairingViewModel(this._storage, this._transportFactory, this._sessionRepo)
-    : super(const PairingScanning());
+  PairingViewModel(
+    this._storage,
+    this._transportFactory,
+    this._sessionRepo,
+    this._prefs,
+  ) : super(const PairingScanning());
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -58,6 +65,7 @@ class PairingViewModel extends ViewModel<PairingState> {
         transport: transport,
         storage: _storage,
         deviceName: _deviceName(),
+        currentRelayUrl: resolveRelayUrl(_prefs),
       ).timeout(
         const Duration(seconds: 30),
         onTimeout: () => throw const pair_flow.PairingError(

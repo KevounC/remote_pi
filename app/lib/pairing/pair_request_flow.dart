@@ -12,6 +12,8 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:app/data/transport/relay_config.dart';
+
 import 'qr_scanner.dart';
 import 'storage.dart';
 
@@ -47,7 +49,27 @@ Future<PeerRecord> performPairing({
   required PeerTransport transport,
   required PairingStorage storage,
   required String deviceName,
+  /// Effective relay URL the app is currently connected to. Used to
+  /// detect mismatch vs `qr.relayUrl` for legacy QRs. Passed in by
+  /// the caller (PairingViewModel reads it from Preferences).
+  required String currentRelayUrl,
 }) async {
+  // Plan 14: legacy QRs may carry `r=<url>`. If that URL does not
+  // match the app's configured relay, the device would attempt to
+  // pair on the WRONG relay (or, after we centralised the connect
+  // factory on resolveRelayUrl, would silently pair against the
+  // user's relay while the Pi is waiting on another). Detect and
+  // surface — UI (PairingViewModel) can show "trocar relay?" modal.
+  if (qr.relayUrl != null && qr.relayUrl != currentRelayUrl) {
+    throw PairingError(
+      code: 'relay_mismatch',
+      message: 'QR aponta para "${qr.relayUrl}", '
+          'mas o app está configurado para "$currentRelayUrl". '
+          'Atualize o relay nas configurações ou peça ao Pi para gerar '
+          'um QR novo.',
+    );
+  }
+
   final id = _uuid7();
   final req = {
     'type': 'pair_request',
@@ -65,7 +87,10 @@ Future<PeerRecord> performPairing({
     final peer = PeerRecord(
       remoteEpk: qr.epk,
       sessionName: inner['session_name'] as String,
-      relayUrl: qr.relayUrl,
+      // Persist whichever relay we just paired on. For legacy QRs
+      // this equals qr.relayUrl (we'd have thrown above otherwise);
+      // for new QRs (no `r`) it's the currently configured relay.
+      relayUrl: qr.relayUrl ?? currentRelayUrl,
       pairedAt: DateTime.now().toUtc().toIso8601String(),
     );
     await storage.savePeer(peer);
@@ -84,6 +109,30 @@ Future<PeerRecord> performPairing({
     message: 'Unknown response type: $type',
   );
 }
+
+/// Convenience overload that derives `currentRelayUrl` from a
+/// [Preferences]-aware caller. Use directly from production code; tests
+/// can still call [performPairing] with an explicit URL.
+Future<PeerRecord> performPairingWithRelay(
+  String currentRelayUrl, {
+  required QrPairPayload qr,
+  required PeerTransport transport,
+  required PairingStorage storage,
+  required String deviceName,
+}) =>
+    performPairing(
+      qr: qr,
+      transport: transport,
+      storage: storage,
+      deviceName: deviceName,
+      currentRelayUrl: currentRelayUrl,
+    );
+
+// Silence "unused" once we wire helpers from caller-side; relay_config
+// is intentionally imported because PairingViewModel and tests may
+// resolve currentRelayUrl via it.
+// ignore: unused_element
+void _keepRelayConfigImport() => resolveRelayUrl;
 
 // ---------------------------------------------------------------------------
 // UUIDv7 — random-based, sufficient for inner correlation IDs.
