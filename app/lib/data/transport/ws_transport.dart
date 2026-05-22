@@ -20,6 +20,7 @@ import 'package:app/data/transport/channel.dart';
 import 'package:app/protocol/protocol.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../pairing/pair_request_flow.dart';
@@ -46,7 +47,17 @@ class WsTransport implements PeerTransport, IControlLink {
     required String peerPubkey, // base64 standard or url — destination peer
     required SimpleKeyPair ed25519Key, // this device's Ed25519 long-term key
   }) async {
-    final ws = WebSocketChannel.connect(Uri.parse(relayUrl));
+    // Plan-18 follow-up — set a WS-level pingInterval (RFC 6455
+    // control frames). This keeps the TCP connection alive through
+    // NAT / corporate proxies that aggressively close idle sockets,
+    // and surfaces a dead WS as `onDone` / `onError` instead of
+    // letting it silently linger until the next user action. The
+    // protocol-level Ping/Pong handled by ConnectionManager covers
+    // app↔Pi liveness; this one covers app↔relay TCP liveness.
+    final WebSocketChannel ws = IOWebSocketChannel.connect(
+      Uri.parse(relayUrl),
+      pingInterval: const Duration(seconds: 20),
+    );
     final transport = WsTransport._(ws);
 
     final challengeCompleter = Completer<Map<String, dynamic>>();

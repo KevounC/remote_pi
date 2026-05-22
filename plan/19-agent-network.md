@@ -1,10 +1,17 @@
-# Plano 17 — Agent Network (sessão local via UDS + reestruturação dos comandos `/remote-pi`)
+# Plano 19 — Agent Network (sessão local via UDS + reestruturação dos comandos `/remote-pi`)
 
 > **Status**: PROPOSTA — não executar antes do MVP atual estar shippado e validado.
-> **Pré-requisito**: ler [`17-agent-network-rfc.md`](./17-agent-network-rfc.md)
+> **Pré-requisito**: ler [`19-agent-network-rfc.md`](./19-agent-network-rfc.md)
 > para motivação, contexto e decisões abertas.
-> **Artefato**: skill em [`17-agent-network-skill.md`](./17-agent-network-skill.md)
+> **Artefato**: skill em [`19-agent-network-skill.md`](./19-agent-network-skill.md)
 > será extraído pra `pi-extension/skills/agent-network.md` durante implementação.
+>
+> **Renumerado 2026-05-21** (era plano 17 — colidia com `17-rooms.md` executado).
+>
+> **Restrições do usuário (2026-05-21)** — relevantes pra escopo deste plano:
+> - **(a)** README/docs atualizados só ao final — não bloqueia execução
+> - **(b)** **Sem migração de storage**: **Passo 1 abaixo CAI**. Mantém `~/.pi/remote/`; broker/sessions vivem em `~/.pi/remote/sessions/<name>/` (subdir novo dentro do path existente)
+> - **(c)** Relay features (pairing/presence/rooms/etc do plano 17) ficam **intactas**. Este plano só **adiciona** camada agent-network local + **refatora nomes** dos comandos `/remote-pi`
 
 ---
 
@@ -78,50 +85,42 @@ remote_pi/
 ```
 
 ```
-~/.pi/remote-pi/                           ← novo home global
-├── settings.json                           ← relay_url
-├── identity.json                           ← Ed25519 keypair (singleton)
-├── skills/
+~/.pi/remote/                               ← path EXISTENTE, sem migração (decisão b)
+├── settings.json                           ← relay_url (já existe)
+├── identity.json                           ← Ed25519 keypair (já existe)
+├── peers.json                              ← celulares pareados (já existe — não move)
+├── skills/                                 ← NOVO
 │   └── agent-network.md                   ← extraída pra cá no install
-└── sessions/
+└── sessions/                               ← NOVO subdir
     └── <session-name>/
         ├── broker.sock                     ← UDS endpoint
         ├── session.json                    ← metadata (created_at, owner)
-        ├── peers.json                      ← celulares pareados nesta sessão
         └── audit.jsonl                     ← log append-only
 ```
 
 ```
 <cwd>/.pi/remote-pi/
-└── config.json                             ← {agent_name, session_name}
+└── config.json                             ← {agent_name, session_name} (NOVO; só por cwd)
 ```
+
+> Nota: `peers.json` (mobile pairings) continua **global** em `~/.pi/remote/peers.json`,
+> não migra pra `sessions/<name>/peers.json` como previsto originalmente.
+> Pareamento mobile continua escopado ao Mac inteiro (decisão c — features de relay
+> intactas).
 
 ---
 
 ## Passos
 
-### Passo 1 — Storage layout + migração
+### ~~Passo 1 — Storage layout + migração~~ **CANCELADO** (decisão b, 2026-05-21)
 
-**Localização**: `pi-extension/src/migrate.ts` + `global_config.ts`
-
-**Função**: criar `~/.pi/remote-pi/`, migrar dados do legado `~/.pi/remote/`.
-
-**Migração one-shot** (na primeira invocação após upgrade):
-1. Se `~/.pi/remote-pi/` não existe, criar diretório + subdir `sessions/`
-2. Se `~/.pi/remote/` existe:
-   - Backup automático em `~/.pi/remote.backup-<ts>/`
-   - Mover `identity.json` → `~/.pi/remote-pi/identity.json`
-   - Mover `settings.json` → `~/.pi/remote-pi/settings.json`
-   - Criar sessão `default` em `~/.pi/remote-pi/sessions/default/`
-   - Mover `peers.json` → `~/.pi/remote-pi/sessions/default/peers.json`
-   - Deletar `~/.pi/remote/` (já no backup)
-3. Logar no console: "Migrated ~/.pi/remote/ → ~/.pi/remote-pi/. Backup em <path>"
-
-**Critério de aceite**:
-- [ ] Diretório novo é criado com mode 0700
-- [ ] Migração roda apenas uma vez (idempotente — checa se já migrou)
-- [ ] Backup é criado antes de mover qualquer arquivo
-- [ ] Teste manual: instalar versão nova sobre versão antiga, ver migração rodando, peers preservados
+> Manter `~/.pi/remote/` como hoje. Criar **apenas** os subdirs novos:
+> `~/.pi/remote/sessions/` (para broker per-sessão) e `~/.pi/remote/skills/`
+> (para a skill agent-network deployada). Não move nem renomeia nada existente.
+>
+> Implementação reduzida: `pi-extension/src/session/global_config.ts` faz
+> `mkdirSync('~/.pi/remote/sessions', { recursive: true })` no init e segue.
+> Sem `migrate.ts`, sem backup, sem renomeação.
 
 ### Passo 2 — Envelope + serialização
 
@@ -425,7 +424,7 @@ pi.on("resources_discover", () => ({
 
 ## Definition of Done
 
-- [ ] Migração `~/.pi/remote/` → `~/.pi/remote-pi/` (passo 1)
+- [x] ~~Migração `~/.pi/remote/` → `~/.pi/remote-pi/`~~ — cancelada (decisão b). Em vez disso: `mkdirSync` dos subdirs novos `sessions/` e `skills/` dentro do `~/.pi/remote/` existente
 - [ ] Envelope serialize/parse + validação (passo 2)
 - [ ] Leader election com 4 testes (passo 3)
 - [ ] Broker com roteamento + filtragem + audit (passo 4)

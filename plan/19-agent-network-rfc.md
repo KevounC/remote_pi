@@ -1,10 +1,17 @@
-# RFC 17 — Agent Network (sessão local + relay no mesmo `/remote-pi`)
+# RFC 19 — Agent Network (sessão local + relay no mesmo `/remote-pi`)
 
 > **Status**: PROPOSTA — análise pós-MVP.
 > **Não executar antes do MVP atual ter sido shippado, dogfooded, e validado.**
+>
+> **Renumerado em 2026-05-21**: era plano 17, colidia com `17-rooms.md` (executado). Movido pra 19. Plano 18 = model no tile (executado).
+>
+> **Restrições adicionais fechadas com o usuário (2026-05-21)**:
+> - **(a)** README/docs só atualizados **quando estiver pronto** — não bloqueia execução
+> - **(b)** **Sem migração de storage** — mantém `~/.pi/remote/`. Se executado, sessões/broker ficam **dentro de `~/.pi/remote/sessions/`**. Passo 1 do plano cai
+> - **(c)** **Features de relay ficam intactas** (zero refactor em pareamento/presence/rooms/etc do plano 17). Esta proposta atua **apenas em adicionar a camada agent-network local (UDS) + refatorar nomes dos comandos `/remote-pi`**
 
 Este documento captura a motivação e o contexto da conversa que originou o
-[`Plano 17`](./17-agent-network.md). Aqui vai o **porquê**; no plano vai o **como**.
+[`Plano 19`](./19-agent-network.md). Aqui vai o **porquê**; no plano vai o **como**.
 
 ---
 
@@ -200,7 +207,7 @@ Também `ctx.ui.setTitle()` espelhando estado pra aba do terminal.
 | Q4 | Pareamento mobile = 1 sessão (Opção A original) ou multi-sessão? | Mantém A (já decidido em `00-decisions.md`) |
 | Q5 | Relay config = global ou per-session? | GLOBAL (uma URL pra instalação inteira) |
 | Q6 | Sessão sem relay é caso válido? | SIM (modo agent-network puro, sem mobile) |
-| Q7 | Migração `~/.pi/remote/` → `~/.pi/remote-pi/`? | One-shot na primeira execução, cria sessão "default" e move peers existentes |
+| Q7 | Migração `~/.pi/remote/` → `~/.pi/remote-pi/`? | ~~One-shot na primeira execução, cria sessão "default" e move peers existentes~~ **FECHADA 2026-05-21: NÃO migrar**. Mantém `~/.pi/remote/`. Sessões/broker viram subdirs (`~/.pi/remote/sessions/`, `~/.pi/remote/skills/`). Zero risco de perda de dados existente |
 | Q8 | Skill ships junto da extensão ou instala em `~/.pi/skills/`? | Embedded na extension, copiada pra `~/.pi/skills/` no install |
 
 ---

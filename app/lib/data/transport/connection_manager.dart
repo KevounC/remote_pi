@@ -808,9 +808,16 @@ class ConnectionManager extends Service {
   void _watchChannel(PeerRecord peer, IChannel ch) {
     _channelSub?.cancel();
     _channelSub = ch.serverMessages.listen(
-      (_) {
+      (msg) {
         // Real inbound — the Pi is alive and reachable. Safe to reset
         // both the ping miss counter and the retry backoff.
+        final wasMissed = _missedPings;
+        if (wasMissed > 0) {
+          debugPrint(
+            '[conn] heartbeat: inbound (${msg.runtimeType}) → '
+            'reset missedPings=$wasMissed → 0',
+          );
+        }
         if (_retryAttempt != 0) {
           debugPrint('[conn] inbound received → retry attempt reset 0');
         }
@@ -851,17 +858,37 @@ class ConnectionManager extends Service {
     _pingTimer = Timer.periodic(const Duration(seconds: 25), (_) async {
       if (_status is! StatusOnline) return;
       // Count this tick as a missed ping up-front. Inbound traffic
-      // (any server message) on the watch listener resets `_missedPings`
-      // to 0, so a healthy Pi never lets the counter accumulate. With the
-      // Pi offline the WS app↔relay stays up but no inbound arrives, so
-      // two ticks (~50s) elapse and we declare the channel lost.
+      // (ANY server message, including the Pong) on the watch
+      // listener resets `_missedPings` to 0, so a healthy Pi never
+      // lets the counter accumulate.
+      //
+      // Plan-18 follow-up — threshold is 3 misses (~75s window).
+      // Was 2 (~50s) which was too aggressive: a brief network
+      // hiccup or a slow Pi response would trip the channel-lost
+      // path and the relay icon would flip to "Offline" while the
+      // connection was actually fine. 75s gives one extra tick for
+      // any in-flight Pong to land.
       _missedPings++;
-      if (_missedPings >= 2) {
+      debugPrint(
+        '[conn] heartbeat tick: missedPings=$_missedPings/3 '
+        'room=$_activeRoomId',
+      );
+      if (_missedPings >= 3) {
+        debugPrint(
+          '[conn] heartbeat: $_missedPings consecutive misses → '
+          'declaring channel lost (no Pong from Pi for ~75s)',
+        );
         _cancelPing();
         _onChannelLost(peer, ch);
         return;
       }
-      try { await ch.send(Ping(id: _newId())); } catch (_) {}
+      try {
+        final id = _newId();
+        await ch.send(Ping(id: id));
+        debugPrint('[conn] heartbeat: ping sent id=$id room=$_activeRoomId');
+      } catch (e) {
+        debugPrint('[conn] heartbeat: ping SEND failed: $e');
+      }
     });
   }
 

@@ -8,6 +8,11 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+/// Plan-18 follow-up — iOS-style large title that collapses into a
+/// compact bar when scrolled. Built with `SliverAppBar +
+/// FlexibleSpaceBar`. Subtitle shows the first paired Mac + relay
+/// status. Body is sectioned by pairing always (single peer also
+/// gets the pairing header, per the mock).
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
@@ -18,118 +23,236 @@ class HomePage extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: kBg,
-      appBar: AppBar(
-        backgroundColor: kBg,
-        title: const Text('Remote Pi'),
-        actions: [
-          // IconButton(
-          //   tooltip: 'Add pairing',
-          //   icon: const Icon(Icons.add_rounded, color: kAccent),
-          //   onPressed: () => context.push('/pair'),
-          // ),
-          IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings),
-            onPressed: () => context.push('/settings'),
-          ),
-        ],
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(color: kBorder, height: 1),
+      body: SafeArea(
+        child: CustomScrollView(
+          slivers: [
+            _buildLargeTitleBar(context, vm, state),
+            switch (state) {
+              HomeLoading() => const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Center(
+                    child: CircularProgressIndicator(color: kAccent),
+                  ),
+                ),
+              HomeNoPeer() => const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _EmptyState(),
+                ),
+              HomeList() => _buildListSlivers(context, vm, state),
+            },
+          ],
         ),
       ),
-      body: switch (state) {
-        HomeLoading() => const Center(
-          child: CircularProgressIndicator(color: kAccent),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Large title (iOS-style)
+  // ---------------------------------------------------------------------------
+
+  Widget _buildLargeTitleBar(
+    BuildContext context,
+    HomeViewModel vm,
+    HomeState state,
+  ) {
+    final subtitle = _subtitleFor(vm, state);
+    const maxExpanded = 124.0;
+    return SliverAppBar(
+      backgroundColor: kBg,
+      surfaceTintColor: kBg,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      pinned: true,
+      stretch: false,
+      expandedHeight: maxExpanded,
+      collapsedHeight: 56,
+      toolbarHeight: 56,
+      automaticallyImplyLeading: false,
+      actions: [
+        IconButton(
+          tooltip: 'Settings',
+          icon: const Icon(Icons.settings_outlined, color: kMuted2),
+          onPressed: () => context.push('/settings'),
         ),
-        HomeNoPeer() => const _EmptyState(),
-        HomeList() => _buildItems(context, vm, state),
-      },
+        const SizedBox(width: 4),
+      ],
+      // Title rendering happens entirely inside flexibleSpace so we
+      // can cross-fade between the large form (expanded) and the
+      // compact form (collapsed). Using `SliverAppBar.title` here
+      // would overlay the compact title on top of the large one
+      // while expanded — that was the "two app bars" bug.
+      flexibleSpace: LayoutBuilder(
+        builder: (ctx, constraints) {
+          final maxH = constraints.maxHeight;
+          const minH = 56.0;
+          // t=1 → fully expanded; t=0 → fully collapsed.
+          final t =
+              ((maxH - minH) / (maxExpanded - minH)).clamp(0.0, 1.0);
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              Container(color: kBg),
+              // Large title block — fades OUT as we collapse.
+              Positioned(
+                left: 20,
+                right: 20,
+                bottom: 8,
+                child: IgnorePointer(
+                  ignoring: t < 0.05,
+                  child: Opacity(
+                    opacity: t,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Remote Pi',
+                          style: TextStyle(
+                            fontFamily: kMono,
+                            color: kText,
+                            fontSize: 32,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.8,
+                            height: 1.05,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        subtitle,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // Compact title — fades IN as we collapse.
+              Positioned(
+                left: 20,
+                right: 64, // leave space for the actions icon
+                top: 0,
+                height: 56,
+                child: IgnorePointer(
+                  ignoring: t > 0.95,
+                  child: Opacity(
+                    opacity: 1 - t,
+                    child: const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Remote Pi',
+                        style: TextStyle(
+                          fontFamily: kMono,
+                          color: kText,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // Bottom divider — only shows once collapsed.
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Opacity(
+                  opacity: 1 - t,
+                  child: const Divider(
+                    color: kBorder,
+                    height: 1,
+                    thickness: 1,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
-  Widget _buildItems(BuildContext context, HomeViewModel vm, HomeList state) {
+  /// Subtitle line under "Remote Pi": ● Relay · [Connected|Offline].
+  /// Reflects the app→relay WS state (not per-Pi presence) so the
+  /// user always knows whether the app itself is reachable.
+  Widget _subtitleFor(HomeViewModel vm, HomeState state) {
+    final connected = vm.isRelayConnected;
+    final dotColor = connected ? kSuccess : Colors.amber.shade600;
+    final statusLabel = connected ? 'Connected' : 'Offline';
+    final statusColor = connected ? kMuted : Colors.amber.shade600;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: dotColor,
+          ),
+        ),
+        const SizedBox(width: 8),
+        const Text(
+          'Relay',
+          style: TextStyle(
+            fontFamily: kMono,
+            color: kText,
+            fontSize: 13,
+          ),
+        ),
+        const SizedBox(width: 6),
+        const Text(
+          '·',
+          style: TextStyle(fontFamily: kMono, color: kMuted, fontSize: 13),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          statusLabel,
+          style: TextStyle(
+            fontFamily: kMono,
+            color: statusColor,
+            fontSize: 13,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // List body
+  // ---------------------------------------------------------------------------
+
+  Widget _buildListSlivers(
+    BuildContext context,
+    HomeViewModel vm,
+    HomeList state,
+  ) {
     final items = state.items(normalizeEpk: toStandardB64);
-    // Plan-17 follow-up — paired peers but ZERO rooms announced (Pi
-    // offline / nothing running). Show a soft "loneliness" empty
-    // state instead of a blank ListView. HomeNoPeer (no peer at all)
-    // still uses the louder empty state with Scan QR.
     if (items.isEmpty) {
-      return const _LonelyEmptyState();
+      return const SliverFillRemaining(
+        hasScrollBody: false,
+        child: _LonelyEmptyState(),
+      );
     }
-    // When multiple Macs are paired, group by peer with a section
-    // header. Single Mac → flat list (no extra chrome).
-    final macCount = state.peers.length;
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount:
-          items.length + (macCount > 1 ? _headerOffsets(items).length : 0),
-      itemBuilder: (ctx, i) {
-        if (macCount <= 1) {
-          return _buildItemRow(context, vm, state, items, i);
-        }
-        // Interleave per-peer headers when there are multiple Macs.
-        return _buildGrouped(context, vm, state, items, i);
-      },
-    );
-  }
-
-  /// Positions in the OUTPUT list (with headers interleaved) where a
-  /// new peer section starts. Used by `itemCount`.
-  List<int> _headerOffsets(List<HomeItem> items) {
-    final offsets = <int>[];
+    // Build the per-peer groups: each group is [header, tile, tile, …].
+    // Plan-18 follow-up — always include a header even when there's a
+    // single Mac, per the mock ("SESSIONS"-style header per pairing).
+    final children = <Widget>[];
     String? lastEpk;
-    var pos = 0;
     for (final it in items) {
       if (it.peer.remoteEpk != lastEpk) {
-        offsets.add(pos);
-        pos++; // header slot
+        children.add(_PeerSectionHeader(peer: it.peer));
         lastEpk = it.peer.remoteEpk;
       }
-      pos++; // tile slot
+      children.add(_buildItemRowAt(context, vm, state, it));
     }
-    return offsets;
-  }
-
-  /// Render a single (peer, room) row + the surrounding section header
-  /// when groups span multiple peers.
-  Widget _buildGrouped(
-    BuildContext context,
-    HomeViewModel vm,
-    HomeList state,
-    List<HomeItem> items,
-    int outIdx,
-  ) {
-    // Walk the output index back through (header, tile, tile, …, header, tile)
-    // to find the underlying HomeItem (or header).
-    var pos = 0;
-    String? lastEpk;
-    for (var i = 0; i < items.length; i++) {
-      final it = items[i];
-      if (it.peer.remoteEpk != lastEpk) {
-        if (pos == outIdx) {
-          return _PeerSectionHeader(peer: it.peer);
-        }
-        pos++;
-        lastEpk = it.peer.remoteEpk;
-      }
-      if (pos == outIdx) {
-        return _buildItemRowAt(context, vm, state, it);
-      }
-      pos++;
-    }
-    return const SizedBox.shrink();
-  }
-
-  Widget _buildItemRow(
-    BuildContext context,
-    HomeViewModel vm,
-    HomeList state,
-    List<HomeItem> items,
-    int i,
-  ) {
-    final it = items[i];
-    return _buildItemRowAt(context, vm, state, it);
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (ctx, i) => children[i],
+          childCount: children.length,
+        ),
+      ),
+    );
   }
 
   Widget _buildItemRowAt(
@@ -138,11 +261,6 @@ class HomePage extends StatelessWidget {
     HomeList state,
     HomeItem it,
   ) {
-    // Plan-17 follow-up — presence is now per-(peer, room): green if
-    // the relay currently announces this specific roomId, grey if it
-    // was cached but is offline now. Plan-18 follow-up — when the
-    // app's WS to the relay is down, propagate a "reconnecting"
-    // signal so tiles don't lie about live state.
     final isLive = vm.isRoomLive(it.peer.remoteEpk, it.room.roomId);
     final isReconnecting = !vm.isRelayConnected;
     final isWorking = vm.isRoomWorking(it.peer.remoteEpk, it.room.roomId);
@@ -163,6 +281,10 @@ class HomePage extends StatelessWidget {
       ],
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Long-press menu (preserved from prior plan-17 wiring)
+  // ---------------------------------------------------------------------------
 
   void _showSessionMenu(
     BuildContext context,
@@ -221,9 +343,7 @@ class HomePage extends StatelessWidget {
 
   Future<void> _promptRename(
       BuildContext context, HomeViewModel vm, HomeItem it) async {
-    final controller = TextEditingController(
-      text: it.room.name ?? '',
-    );
+    final controller = TextEditingController(text: it.room.name ?? '');
     final result = await showDialog<String?>(
       context: context,
       builder: (dCtx) => AlertDialog(
@@ -278,7 +398,8 @@ class HomePage extends StatelessWidget {
           ),
           TextButton(
             onPressed: () => Navigator.of(dCtx).pop(true),
-            child: const Text('Excluir', style: TextStyle(color: Colors.redAccent)),
+            child:
+                const Text('Excluir', style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -287,20 +408,8 @@ class HomePage extends StatelessWidget {
     await vm.deleteRoom(it.peer.remoteEpk, it.room.roomId);
   }
 
-  // Plan-17 follow-up: AWAIT openSession before pushing /chat. This
-  // closes the race where ChatViewModel.bootstrap would read
-  // `Preferences.selectedRoomId` BEFORE `setSelectedRoom` had a chance
-  // to land, picking up the previous chat's room and rendering its
-  // cache. The earlier "fire-and-forget" comment was from before
-  // openSession touched prefs; today the body is just Hive read +
-  // Hive write + a sync ConnectionManager call (~ms), so awaiting is
-  // imperceptible.
   static Future<void> _open(
-    BuildContext context,
-    HomeViewModel vm,
-    String epk,
-    String roomId,
-  ) async {
+      BuildContext context, HomeViewModel vm, String epk, String roomId) async {
     await vm.openSession(epk, roomId: roomId);
     if (!context.mounted) return;
     context.push('/chat');
@@ -316,18 +425,18 @@ class _PeerSectionHeader extends StatelessWidget {
     final label = (peer.nickname?.isNotEmpty ?? false)
         ? peer.nickname!
         : peer.sessionName.isNotEmpty
-        ? peer.sessionName
-        : peer.remoteEpk.substring(0, 8);
+            ? peer.sessionName
+            : peer.remoteEpk.substring(0, 8);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
       child: Text(
         label.toUpperCase(),
         style: const TextStyle(
           fontFamily: kMono,
-          fontSize: 10,
+          fontSize: 11,
           color: kMuted,
           fontWeight: FontWeight.w600,
-          letterSpacing: 0.5,
+          letterSpacing: 1.0,
         ),
       ),
     );
@@ -335,9 +444,6 @@ class _PeerSectionHeader extends StatelessWidget {
 }
 
 /// Plan-17 follow-up — soft empty state for paired-but-no-rooms.
-/// Different vibe from `_EmptyState` (which is loud + Scan QR CTA):
-/// no actions, very low opacity, just acknowledges that nothing is
-/// happening on any paired Pi right now.
 class _LonelyEmptyState extends StatelessWidget {
   const _LonelyEmptyState();
 
@@ -351,11 +457,7 @@ class _LonelyEmptyState extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.bedtime_outlined,
-                color: kMuted,
-                size: 56,
-              ),
+              const Icon(Icons.bedtime_outlined, color: kMuted, size: 56),
               const SizedBox(height: 18),
               const Text(
                 'Nada aqui…',

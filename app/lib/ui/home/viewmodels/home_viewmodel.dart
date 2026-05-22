@@ -63,6 +63,12 @@ class HomeViewModel extends ViewModel<HomeState> {
     return _workingEpk == epk && _workingRoomId == roomId;
   }
 
+  /// Plan-18 follow-up — expose just the working peer (without room).
+  /// The Home large-title subtitle uses this to flip the global
+  /// status to "Working" when any active room of that peer is
+  /// streaming.
+  String? get workingEpk => _workingEpk;
+
   Future<void> _load() async {
     final peers = await _storage.listPeers();
     if (_disposed) return;
