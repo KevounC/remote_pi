@@ -21,7 +21,7 @@
 
 | Platform | Status |
 |---|---|
-| Google Play (Android) | _Coming soon_ |
+| Google Play (Android) | [Get it on Google Play](https://play.google.com/store/apps/details?id=work.jacobmoura.remotepi) |
 | App Store (iOS) | _Coming soon_ |
 | APK (sideload, Android) | [GitHub Releases](https://github.com/jacobaraujo7/remote_pi/releases) |
 

@@ -1,5 +1,7 @@
 const GITHUB_RELEASES_URL =
   "https://github.com/jacobaraujo7/remote_pi/releases";
+const GOOGLE_PLAY_URL =
+  "https://play.google.com/store/apps/details?id=work.jacobmoura.remotepi";
 
 export function DownloadButtons() {
   return (
@@ -8,8 +10,8 @@ export function DownloadButtons() {
         platform="Google Play"
         label="GET IT ON"
         icon={<GooglePlayIcon />}
-        disabled
-        sublabel="Coming soon"
+        href={GOOGLE_PLAY_URL}
+        sublabel="Now available"
       />
       <StoreButton
         platform="App Store"
