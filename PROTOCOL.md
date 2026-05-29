@@ -173,6 +173,57 @@ Detalhes em `plan/24-mesh-membership.md`.
 
 ---
 
+## Slash commands
+
+Camada acima do envelope. O app expõe um picker de slash commands (`/compact`, `/model`, comandos `/remote-pi …`, etc.) que listam o catálogo do Pi pareado e invocam comandos curados como se o usuário tivesse digitado no TUI.
+
+### Request — `list_commands`
+
+```json
+{ "type": "list_commands", "id": "<uuid>" }
+```
+
+### Reply — `commands_list`
+
+```json
+{
+  "type": "commands_list",
+  "in_reply_to": "<uuid>",
+  "commands": [
+    { "name": "compact", "description": "Manually compact context", "source": "builtin",   "invokable": true,  "takes_args": false },
+    { "name": "model",   "description": "Select model",             "source": "builtin",   "invokable": true,  "takes_args": true  },
+    { "name": "fork",    "description": "Fork from previous user message", "source": "builtin", "invokable": false, "takes_args": false },
+    { "name": "remote-pi", "description": "Mesh control",           "source": "extension", "invokable": true,  "takes_args": true  }
+  ]
+}
+```
+
+`source ∈ {builtin, extension, prompt, skill}`. `invokable: false` marca comandos que existem no Pi mas só funcionam na TUI hoje — o app os mostra como hint informativo (grayed). Razão da limitação: o SDK do Pi `@mariozechner/pi-coding-agent` não expõe API programática genérica de invocação de builtins; só alguns têm equivalente em `ExtensionContextActions` (`compact`, `shutdown`, `setModel`).
+
+### Invocação — `command_invoke`
+
+```json
+{ "type": "command_invoke", "id": "<uuid>", "name": "compact", "args": "" }
+```
+
+### Resultado — `command_result`
+
+```json
+{ "type": "command_result", "in_reply_to": "<uuid>", "ok": true }
+```
+
+Reply diz apenas se o dispatch funcionou. Efeitos visíveis (chat output, troca de modelo, aviso de compactação) chegam pelos canais normais (`agent_chunk`, `agent_done`, `model_select`, etc.). Erros vêm como `{ ok: false, error: "<motivo>" }` — ex: `"not_invokable"` se o app tentar invocar um comando marcado `invokable: false`.
+
+### Limitações conhecidas
+
+- **Mirror manual de builtins**: SDK do Pi não exporta `BUILTIN_SLASH_COMMANDS` publicamente. Pi-extension carrega a lista espelhada de `pi-coding-agent` 0.73.1. Updates do SDK exigem update manual do mirror até PR upstream aterrissar.
+- **Subset invocável**: apenas comandos com equivalente programático (`compact`, `quit`, `model`, comandos extension-registered como `/remote-pi *`). Demais marcados `invokable: false`.
+- **Cross-PC**: app lista comandos só do Pi diretamente pareado. Listar comandos de Pis irmãos via mesh fica pra plano futuro.
+
+Detalhes em `plan/28-pi-commands.md`.
+
+---
+
 ## Pareamento
 
 QR code mostra Pi-pubkey + room hint + token de uso único.
