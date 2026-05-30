@@ -194,16 +194,16 @@ verde; builds iOS+Android passam.
 
 ## Definition of Done
 
-- [ ] Wave A: `user_message.images` + `WireModel.vision` nos 2 lados; `PROTOCOL.md`; typecheck+analyze verdes
-- [ ] Wave B: ingest→`sendUserMessage` multimodal + echo com images + vision flag; vitest; `pnpm test` sem regressão
-- [ ] Wave C1: `image_picker_service` (pick+compress 1568px/q80) + testes
-- [ ] Wave C2: attach sheet + preview/remover + send-mode + gating por vision/offline/streaming
-- [ ] Wave C3: `image_bubble` thumbnail estático + legenda
-- [ ] Permissões câmera (iOS/Android) + guia pros Ajustes na negativa
-- [ ] `flutter analyze` 0 issues; `flutter test` verde; builds iOS+Android
-- [ ] Wave D: histórico/mirror cache trafega images; smoke manual; docs
-- [ ] Verificação: relay inalterado (forward opaco); modelo text-only desabilita anexo
-- [ ] Commit: `feat(plan-30): image attachments (camera/gallery → multimodal)`
+- [x] Wave A: `user_message.images` + `WireModel.vision` nos 2 lados; `PROTOCOL.md`; typecheck+analyze verdes
+- [x] Wave B: ingest→`sendUserMessage` multimodal + echo com images + vision flag; vitest; `pnpm test` sem regressão
+- [x] Wave C1: `image_picker_service` (pick+compress 1568px/q80) + testes
+- [x] Wave C2: attach sheet + preview/remover + send-mode + gating por vision/offline/streaming
+- [x] Wave C3: `image_bubble` thumbnail estático + legenda
+- [x] Permissões câmera (iOS/Android) + guia pros Ajustes na negativa
+- [x] `flutter analyze` 0 issues; `flutter test` verde; builds iOS+Android
+- [ ] Wave D: histórico/mirror cache trafega images (código ok, sob o SSOT do plan-31) + docs ✅ (PROTOCOL/README/site) — **falta só o smoke manual**
+- [x] Verificação: relay inalterado (forward opaco); modelo text-only desabilita anexo
+- [x] Commit: `feat(plan-30): image attachments` — `584bdbf` (pi-ext) + `f329a89` (app)
 
 ---
 

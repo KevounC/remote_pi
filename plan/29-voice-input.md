@@ -240,16 +240,16 @@ deixa claro). Soltar = encerra; arrastar além do threshold = cancela.
 
 ## Definition of Done
 
-- [ ] `speech_to_text` no `pubspec.yaml`; permissões iOS/Android declaradas (passo 1)
-- [ ] `data/voice/speech_service.dart` + testes (passo 2)
-- [ ] `voice/states/*` + `voice/viewmodels/*` registrados em `config/` e router (passo 3)
-- [ ] `voice/widgets/recording_strip.dart` + widget test (passo 4)
-- [ ] `chat_page` passa `onStartAudio`; `InputBar` integra a faixa; fallbacks de permissão/locale (passo 5)
-- [ ] Spike de detecção on-device por locale resolvido (risco 1)
-- [ ] `flutter analyze` 0 issues; `flutter test` verde
+- [x] `speech_to_text` no `pubspec.yaml`; permissões iOS/Android declaradas (passo 1)
+- [x] `data/voice/speech_service.dart` + testes (passo 2)
+- [x] `voice/states/*` + `voice/viewmodels/*` registrados em `config/` e router (passo 3)
+- [x] `voice/widgets/recording_strip.dart` + widget test (passo 4)
+- [x] `chat_page` passa `onStartAudio`; `InputBar` integra a faixa; fallbacks de permissão/locale (passo 5)
+- [x] Spike de detecção on-device por locale resolvido (risco 1)
+- [x] `flutter analyze` 0 issues; `flutter test` verde
 - [ ] Smoke manual em device real: ditar pt-BR popula o campo; soltar/cancelar/60s; permissão negada guia pros Ajustes
-- [ ] Verificação: nenhum arquivo de áudio criado; nada cruza o relay (só `user_message{text}` no envio manual)
-- [ ] Commit: `feat(plan-29): voice input (native STT → text)`
+- [x] Verificação: nenhum arquivo de áudio criado; nada cruza o relay (só `user_message{text}` no envio manual)
+- [x] Commit: `feat(plan-29): voice input (native STT → text)` — feito em `f329a89` (combinado com plan-30 no app)
 
 ---
 

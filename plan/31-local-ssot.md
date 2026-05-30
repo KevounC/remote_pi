@@ -207,13 +207,13 @@ não cresce ao reentrar na página (fonte = banco). `flutter analyze` 0 issues;
 
 ## Definition of Done
 
-- [ ] Passo 1: boxes v2 + 3 records + wipe volátil no boot; testes roundtrip
-- [ ] Passo 2: `SyncService` único mutador; dedupe optimistic↔echo; status working/idle; streaming fora do banco; re-sync no boot; testes
-- [ ] Passo 3: `SessionReadRepository` + `HomeReadRepository` read-only com projeção incremental; testes
-- [ ] Passo 4: `ChatViewModel` (banco + streaming em memória) + `HomeViewModel` (working/idle); `SessionRepository` antigo removido; router/DI atualizados
-- [ ] `flutter analyze` 0 issues; `flutter test` verde; builds iOS+Android
-- [ ] Verificação: UI só lê dos read-repos (nenhum widget assina o canal direto); volátil não sobrevive a restart; nenhum write de delta de streaming no banco
-- [ ] Commit: `feat(plan-31): local DB as single source of truth (reactive SSOT)`
+- [x] Passo 1: boxes v2 + 3 records + wipe volátil no boot; testes roundtrip
+- [x] Passo 2: `SyncService` único mutador; dedupe optimistic↔echo; status working/idle; streaming fora do banco; re-sync no boot; testes
+- [x] Passo 3: `SessionReadRepository` + `HomeReadRepository` read-only com projeção incremental; testes
+- [x] Passo 4: `ChatViewModel` (banco + streaming em memória) + `HomeViewModel` (working/idle); `SessionRepository` antigo removido; router/DI atualizados
+- [x] `flutter analyze` 0 issues; `flutter test` verde; builds iOS+Android
+- [x] Verificação: UI só lê dos read-repos (nenhum widget assina o canal direto); volátil não sobrevive a restart; nenhum write de delta de streaming no banco
+- [x] Commit: `feat(plan-31): local DB as single source of truth (reactive SSOT)` — `51181b0`
 
 ---
 
