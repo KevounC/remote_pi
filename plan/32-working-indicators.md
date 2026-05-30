@@ -125,12 +125,12 @@ half-open silencioso fica descoberto.
 ## Definition of Done
 
 - [x] Parte A: cursor "pensando" restaurado (commit `8282e4a`)
-- [ ] Wave 1 (relay): campo `working` em RoomMeta/RoomMetaPatch + extração + forward; cargo test; clippy
-- [ ] Wave 2 (pi-ext): publish `working` no room_meta em turn_start/turn_end (cru); vitest; typecheck
-- [ ] Wave 3 (app): meta.working → sessions_index com debounce; presença limpa órfão; seed-on-entry; chat ativo overlay local; Home lê do índice; analyze 0 + test verde + builds
+- [x] Wave 1 (relay): campo `working` em RoomMeta/RoomMetaPatch + extração + forward; cargo test; clippy — `9e4754b` (deployado)
+- [x] Wave 2 (pi-ext): publish `working` no room_meta em turn_start/turn_end (cru); vitest; typecheck — `78eb9d2`
+- [ ] Wave 3 (app): meta.working → sessions_index com debounce; presença limpa órfão; seed-on-entry; chat ativo overlay local; Home lê do índice; analyze 0 + test verde + builds — **dono fazendo à mão**
 - [ ] Verificação: bolinha acende pra sessão NÃO-ativa; apaga ao ficar offline; entrar mostra working na hora; turnos colados não piscam
 - [ ] Smoke manual (device): 2 sessões, uma trabalhando enquanto você olha a outra → bolinha azul na Home da que trabalha
-- [ ] Commits: `feat(plan-32b): working via room_meta` por wave (relay/pi-ext/app)
+- [x] Commits relay+pi-ext (`9e4754b`, `78eb9d2`); app pendente na Wave 3
 
 ---
 
@@ -138,4 +138,4 @@ half-open silencioso fica descoberto.
 
 - Se o tráfego de room_meta em rajada (risco 1) doer, mover a histerese pra fonte
   (pi-ext) — vira aditivo, não muda contrato.
-- Status rico (erro/unread) na Home: aditivo ao `SessionIndexRecord`, fora de escopo.
+- ~~Status rico (erro/unread) na Home.~~ **Descartado (2026-05-30)** — decisão do dono.

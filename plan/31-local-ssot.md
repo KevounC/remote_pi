@@ -219,9 +219,7 @@ não cresce ao reentrar na página (fonte = banco). `flutter analyze` 0 issues;
 
 ## Próximos planos
 
-- **Swap de engine (condicional)**: se, com o blob eliminado, medições ainda
-  mostrarem `box.watch()` grosso como gargalo de rebuild, avaliar **Drift**
-  (query reativa tipada fina, sem dívida de vendor) — agora com o data layer já
-  no formato SSOT, a troca fica isolada à camada `data/local/`.
-- **Status rico na Home** (se houver demanda): unread/badge/erro — aditivo ao
-  `SessionIndexRecord`.
+- ~~**Swap de engine (condicional)**: avaliar Drift se `box.watch()` virar gargalo.~~
+  **Descartado (2026-05-30)** — decisão do dono: **não trocar de engine**, fica no Hive.
+- ~~**Status rico na Home**: unread/badge/erro.~~ **Descartado (2026-05-30)** —
+  decisão do dono: **não fazer status rico**.
