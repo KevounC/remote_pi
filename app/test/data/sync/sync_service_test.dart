@@ -583,5 +583,84 @@ void main() {
         s2.conn.dispose();
       },
     );
+
+    test('(d) an offline (held-pending) send is reaped too', () async {
+      // No channel ever adopted → sendMessage takes the offline path. Decision:
+      // held-pending is reaped 20s after its ts as well (nothing spins forever).
+      final conn = ConnectionManager(
+        factory: (_, _) async => _FakeChannel(),
+        storage: _FakeStorage(),
+      );
+      final sync = SyncService(conn, LocalBoxes(), pendingSendTimeout: short);
+      final epk = 'epk_offline_${++_counter}';
+      await sync.activate(epk, 'main');
+      await _settle();
+
+      await sync.sendMessage('typed while offline');
+      await _settle();
+      expect(messages(epk), hasLength(1), reason: 'held pending row written');
+      expect(messages(epk).first.pending, isTrue);
+      expect(
+        sync.debugPendingSendTimerCount,
+        1,
+        reason: 'reaper armed offline',
+      );
+
+      await Future<void>.delayed(const Duration(milliseconds: 140));
+      await _settle();
+      expect(
+        messages(epk),
+        isEmpty,
+        reason: 'offline bubble reaped (decision)',
+      );
+      conn.dispose();
+      sync.dispose();
+    });
+
+    test(
+      '(e) returning to a session reaps a bubble already past the window',
+      () async {
+        // Quick exit then return: the live timer is cancelled on switch-away,
+        // but _loadIndex re-arms on return using the saved ts → an already-stale
+        // row fires immediately. Covers app-restart + quick-switch orphans.
+        final s = await setup(pendingSendTimeout: short);
+        await s.sync.sendMessage('hi');
+        await _settle();
+        expect(messages(s.epk), hasLength(1));
+
+        // Leave quickly → live timer cancelled; row stays pending in the box.
+        await s.sync.activate('epk_away_${++_counter}', 'main');
+        await _settle();
+        expect(
+          s.sync.debugPendingSendTimerCount,
+          0,
+          reason: 'timers cleared on switch',
+        );
+        expect(
+          messages(s.epk),
+          hasLength(1),
+          reason: 'orphaned row still in box',
+        );
+
+        // Time passes beyond the window while away from the session.
+        await Future<void>.delayed(const Duration(milliseconds: 140));
+        expect(
+          messages(s.epk),
+          hasLength(1),
+          reason: 'no live timer reaps it while away',
+        );
+
+        // Return → load re-arms by ts → already stale → reaped on arrival.
+        await s.sync.activate(s.epk, 'main');
+        await _settle();
+        expect(
+          messages(s.epk),
+          isEmpty,
+          reason: 'stale pending reaped on return',
+        );
+        s.conn.dispose();
+        s.sync.dispose();
+      },
+    );
   });
 }

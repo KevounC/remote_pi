@@ -133,9 +133,11 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byType(TextField)).enabled, isFalse);
-    expect(find.byIcon(LucideIcons.square), findsOneWidget); // stop
-    expect(find.byIcon(LucideIcons.send), findsNothing);
-    expect(find.byIcon(LucideIcons.mic), findsNothing);
+    // The composer action button uses the heavier `600` weight variants
+    // (see _ComposerActionButton._icon) — match those, not the plain glyphs.
+    expect(find.byIcon(LucideIcons.square600), findsOneWidget); // stop
+    expect(find.byIcon(LucideIcons.send600), findsNothing);
+    expect(find.byIcon(LucideIcons.mic600), findsNothing);
   });
 
   testWidgets('tap fires onOpenQuickActions', (tester) async {
@@ -151,11 +153,15 @@ void main() {
     expect(tapped, 1);
   });
 
-  testWidgets('quick actions button hidden when callback is null', (
+  testWidgets('quick actions button stays collapsed when callback is null', (
     tester,
   ) async {
+    // The button is always mounted now (so it can animate in/out); with no
+    // handler `show` is false, so it collapses to zero width — hidden, but in
+    // the tree. Same "hidden" contract as the typing/disabled/streaming cases.
     await pumpBar(tester, disabled: false, streaming: false);
-    expect(find.byKey(const Key('input-bar-quick-actions')), findsNothing);
+    await tester.pumpAndSettle();
+    expectCollapsed(tester);
   });
 
   // Hardware keyboard (iPad keyboard case): plain Enter SENDS, Shift+Enter

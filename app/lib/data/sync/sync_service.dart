@@ -170,10 +170,19 @@ class SyncService extends Service {
         ),
       );
       _setWorking(true, preview: _preview(text, image), replyTo: id);
+      // Arm the no-echo backstop for this row. The timeout is keyed off the
+      // row's `ts`, NOT online-ness: an offline "held pending" send is reaped
+      // 20s after its ts too, and ANY pending row is re-armed on session load
+      // (see _loadIndex). So a quick session-switch or an app restart still
+      // reaps a stale bubble instead of letting it spin "sending…" forever.
+      _armSendTimeout(id, now);
     }
     final ch = _conn.channel;
     if (ch == null) {
-      debugPrint('[msg-send] id=$id (offline → held pending)');
+      debugPrint(
+        '[msg-send] id=$id (offline → held pending, reaped in '
+        '${pendingSendTimeout.inSeconds}s)',
+      );
       return;
     }
     // Seed an EMPTY streaming buffer so the blinking cursor shows during the
@@ -191,11 +200,17 @@ class SyncService extends Service {
             : [WireImage(data: image.data, mime: image.mime)],
       ),
     );
-    // Arm the no-echo backstop. ONLY here (the send was actually attempted) —
-    // never on the offline `return` above, where "held pending" is deliberate.
+  }
+
+  /// Arm (or re-arm) the silent no-echo backstop for a pending row, keyed by
+  /// `id`. The window is the time REMAINING relative to the row's [ts], so a
+  /// row loaded from disk already past [pendingSendTimeout] fires immediately
+  /// (floored at zero). Idempotent — cancels any existing timer for `id`.
+  void _armSendTimeout(String id, DateTime ts) {
     _pendingSendTimers.remove(id)?.cancel();
+    final remaining = pendingSendTimeout - DateTime.now().difference(ts);
     _pendingSendTimers[id] = Timer(
-      pendingSendTimeout,
+      remaining > Duration.zero ? remaining : Duration.zero,
       () => _onSendTimeout(id),
     );
   }
@@ -706,6 +721,11 @@ class SyncService extends Service {
         final r = MessageRecord.fromJson(_coerce(box.get(k)));
         _idToSeq[_key(r.role, r.id)] = seq;
         _nextSeq = math.max(_nextSeq, seq + 1);
+        // Re-arm the no-echo backstop for any pending row this session owns, so
+        // a bubble persisted across an app restart / quick session-switch is
+        // reaped by its `ts` instead of spinning forever (already-stale → fires
+        // immediately). Timers were cleared by _resetTurnState before this load.
+        if (r.role == MsgRole.user && r.pending) _armSendTimeout(r.id, r.ts);
       }
       _indexLoaded = true;
     });

@@ -112,46 +112,82 @@ void main() {
     });
   });
 
-  group('isWideLayout', () {
-    testWidgets('true at/above breakpoint, false below', (tester) async {
+  group('isWideLayout — device class by shortestSide (rotation-invariant)', () {
+    Future<bool> wideAt(WidgetTester tester, Size size) async {
       late bool wide;
-      Future<void> probe(double width) async {
-        await tester.pumpWidget(
-          MediaQuery(
-            data: MediaQueryData(size: Size(width, 800)),
-            child: Builder(
-              builder: (ctx) {
-                wide = isWideLayout(ctx);
-                return const SizedBox();
-              },
-            ),
+      await tester.pumpWidget(
+        MediaQuery(
+          data: MediaQueryData(size: size),
+          child: Builder(
+            builder: (ctx) {
+              wide = isWideLayout(ctx);
+              return const SizedBox();
+            },
           ),
-        );
-      }
+        ),
+      );
+      return wide;
+    }
 
-      await probe(kTabletBreakpoint - 1);
-      expect(wide, isFalse);
-      await probe(kTabletBreakpoint);
-      expect(wide, isTrue);
-      await probe(1024);
-      expect(wide, isTrue);
+    testWidgets(
+      'phone landscape stays phone (regression: width>=600 but height<600)',
+      (tester) async {
+        expect(await wideAt(tester, const Size(932, 430)), isFalse);
+      },
+    );
+
+    testWidgets('phone portrait is phone', (tester) async {
+      expect(await wideAt(tester, const Size(420, 900)), isFalse);
+    });
+
+    testWidgets('iPad portrait is tablet', (tester) async {
+      expect(await wideAt(tester, const Size(768, 1024)), isTrue);
+    });
+
+    testWidgets('iPad landscape is tablet', (tester) async {
+      expect(await wideAt(tester, const Size(1024, 768)), isTrue);
+    });
+
+    testWidgets('narrow Split View window collapses to phone', (tester) async {
+      expect(await wideAt(tester, const Size(400, 1000)), isFalse);
+    });
+
+    testWidgets('breakpoint needs BOTH sides >= 600', (tester) async {
+      expect(await wideAt(tester, const Size(600, 600)), isTrue);
+      expect(
+        await wideAt(tester, const Size(599, 1200)),
+        isFalse,
+        reason: 'one side below 600 → phone',
+      );
     });
   });
 
   group('adaptive shell layout', () {
-    testWidgets('wide → master AND detail are both shown', (tester) async {
-      await _pumpAt(tester, const Size(1200, 800));
+    testWidgets('tablet (both sides >= 600) → master AND detail', (
+      tester,
+    ) async {
+      await _pumpAt(tester, const Size(1024, 768)); // iPad landscape
       expect(find.text('MASTER'), findsOneWidget);
       expect(find.text('DETAIL'), findsOneWidget);
     });
 
-    testWidgets('narrow → only the active branch (master) is shown', (
+    testWidgets('phone portrait → only the active branch (master)', (
       tester,
     ) async {
       await _pumpAt(tester, const Size(420, 900));
       expect(find.text('MASTER'), findsOneWidget);
       expect(find.text('DETAIL'), findsNothing);
     });
+
+    testWidgets(
+      'phone landscape → only master (regression: width 932 >= 600 but it is a '
+      'phone, so no two-pane)',
+      (tester) async {
+        await _pumpAt(tester, const Size(932, 430));
+        expect(find.text('MASTER'), findsOneWidget);
+        expect(find.text('DETAIL'), findsNothing);
+      },
+    );
   });
 
   group('zero-state collapse', () {
@@ -228,17 +264,20 @@ void main() {
     );
   });
 
-  group('two-pane SafeArea insets (notch / iPhone landscape)', () {
+  group('two-pane SafeArea insets (side insets beside the divider)', () {
     // Mirrors app_router's navigatorContainerBuilder two-pane Row. Each pane is
     // a Scaffold whose body is wrapped in SafeArea (like HomePage / ChatPage).
     // The regression: each pane's SafeArea reads the *full screen* padding, so
     // it also insets the edge facing the divider — a phantom horizontal gutter.
     // The fix strips the divider-facing inset per pane via MediaQuery.removePadding.
+    //
+    // Uses a tablet-class window (both sides >= 600) since two-pane is now
+    // gated on shortestSide — a phone in landscape no longer reaches here.
     const masterKey = Key('master-body');
     const detailKey = Key('detail-body');
-    const screen = Size(1200, 500);
-    const padLeft = 60.0; // notch side
-    const padRight = 30.0; // rounded-corner side
+    const screen = Size(1024, 768); // iPad landscape
+    const padLeft = 60.0; // inset side (e.g. camera housing / rounded corner)
+    const padRight = 30.0; // opposite-edge inset
     const padTop = 12.0;
     const padBottom = 21.0; // home indicator
     const dividerW = 1.0;

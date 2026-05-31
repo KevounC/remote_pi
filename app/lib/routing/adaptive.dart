@@ -1,16 +1,30 @@
 import 'package:flutter/widgets.dart';
 
-/// Largura mínima (em pixels lógicos de largura *disponível*) a partir da
-/// qual o app entra no modo tablet de dois painéis (master + detail).
-///
-/// É medida por largura disponível — não por `shortestSide` do device —
-/// para reagir ao Split View / Slide Over do iPadOS: se o usuário encolher
-/// o app para uma coluna estreita, ele colapsa graciosamente para um painel.
+/// Lado menor (em pixels lógicos) a partir do qual o app entra no modo tablet
+/// de dois painéis (master + detail).
 const double kTabletBreakpoint = 600.0;
 
-/// `true` quando a largura disponível comporta o layout de dois painéis.
+/// `true` quando a janela é "classe tablet" — larga o bastante, em qualquer
+/// orientação, para o layout de dois painéis.
+///
+/// Classificamos por `shortestSide` (= `min(width, height)`), **não** por
+/// `width`, porque a largura sozinha confunde classe-de-device com orientação:
+/// um CELULAR em landscape tem `width >= 600` e virava "tablet" por engano (o
+/// bug que isto corrige). `shortestSide` é invariante à rotação:
+///   • Celular: shortestSide ~360–430 (< 600) em qualquer orientação → phone.
+///   • Tablet:  shortestSide >= 768 em qualquer orientação → tablet.
+///
+/// Split View / Slide Over do iPadOS continua colapsando pra painel único: o
+/// `MediaQuery` mede a JANELA dada ao app, não o device físico. Quando o usuário
+/// encolhe o app numa coluna estreita, `shortestSide` cai junto abaixo de 600 e
+/// voltamos a phone. Ou seja, `shortestSide` atende os dois objetivos de uma vez
+/// — estável como classe-de-device E sensível a multitarefa estreita.
+///
+/// É estritamente mais rígido que `width` (exige AMBAS as dimensões >= 600). A
+/// única diferença de comportamento vs. o critério antigo é justamente
+/// "landscape com altura < 600" (= celulares) passar a ser phone — o desejado.
 bool isWideLayout(BuildContext context) =>
-    MediaQuery.sizeOf(context).width >= kTabletBreakpoint;
+    MediaQuery.sizeOf(context).shortestSide >= kTabletBreakpoint;
 
 /// Largura máxima de conteúdo de coluna única (onboarding, empty states).
 /// Acima disso o conteúdo é centralizado em vez de esticar borda-a-borda —

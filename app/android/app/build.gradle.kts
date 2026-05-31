@@ -72,3 +72,17 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // 16 KB page-size compliance (Google Play, enforced since Nov 2025).
+    // mobile_scanner 5.2.3 pulls ML Kit + CameraX whose prebuilt native libs
+    // are only 4 KB-aligned (libbarhopper_v3.so, libimage_processing_util_jni.so),
+    // which Play now rejects. Force the newer, 16 KB-aligned releases — Gradle
+    // version-conflict resolution picks these over mobile_scanner's transitive
+    // 17.2.0 / 1.3.3. No Dart-side scanner API change. CameraX modules are kept
+    // on one matching version to avoid cross-module runtime mismatches.
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("androidx.camera:camera-core:1.4.2")
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+}
