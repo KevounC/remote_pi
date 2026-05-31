@@ -159,7 +159,12 @@ app_router.dart:311-316).
 **Ganho**: sem flicker, sem load async no mount pro subtítulo, sem micro-gestão
 de estado da AppBar. **Status**: ✅ feito (`32g`) — 417 testes.
 
-### Fade na troca de chat (tablet detail pane)
+### Fade na troca de chat (tablet detail pane) — DISPENSADO (2026-05-30)
+
+> Decisão do dono: a transição já está **rápida o suficiente** com `32f` (bleed)
+> + `32g` (AppBar) + `_applyHistory` idempotente + o `_DetailPane` widget. Fade
+> e keep-alive **não serão implementados**. Mantido abaixo só como referência se
+> alguém reabrir.
 
 **Mecanismo atual**: `_detailPane()` (em refactor → `_DetailPane` widget) monta o
 `MultiProvider` keyed por `ValueKey('chat-$epk-$room')` → troca de sessão =
