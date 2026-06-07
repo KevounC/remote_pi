@@ -2,9 +2,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Share Docker caches from the primary worktree, not each linked worktree.
+MAIN_ROOT="$(git -C "$ROOT" worktree list --porcelain 2>/dev/null | awk '/^worktree / { sub(/^worktree /, ""); print; exit }')"
+MAIN_ROOT="${MAIN_ROOT:-$ROOT}"
 IMAGE="${FLUTTER_DOCKER_IMAGE:-ghcr.io/cirruslabs/flutter:stable}"
 MODE="${1:-debug}"
-CACHE_DIR="$ROOT/dockercache"
+CACHE_DIR="$MAIN_ROOT/dockercache"
 PUB_CACHE="$CACHE_DIR/pub"
 GRADLE_CACHE="$CACHE_DIR/gradle"
 ANDROID_CACHE="$CACHE_DIR/android-sdk"

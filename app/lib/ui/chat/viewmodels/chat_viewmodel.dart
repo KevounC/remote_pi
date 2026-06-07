@@ -122,8 +122,19 @@ class ChatViewModel extends ViewModel<ChatState> {
       emit(const ChatNoPeer());
       return;
     }
-    _activePeer = peer;
+    final sessionPeer = peer.copyWith(roomId: roomId);
+    _activePeer = sessionPeer;
     _activeRoomId = roomId;
+
+    // Bind transport before the singleton writer. Otherwise a same-peer room
+    // switch can briefly accept old-room frames while SyncService already
+    // writes to the new room.
+    _conn.switchRoom(roomId);
+    if (_conn.activePeer?.remoteEpk != sessionPeer.remoteEpk) {
+      await _conn.switchTo(sessionPeer);
+      if (_disposed) return;
+      _conn.switchRoom(roomId);
+    }
 
     // Bind the writer + watch the DB for this (peer, room).
     await _sync.activate(epk, roomId);
@@ -134,16 +145,9 @@ class ChatViewModel extends ViewModel<ChatState> {
     // the constructor avoids inheriting the previous chat's bubble/pill.
     _streaming = _sync.streaming;
     _working = _sync.isWorking;
-    _conn.switchRoom(roomId);
     _msgsSub = _read.watchMessages(epk, roomId).listen(_onMessages);
     _runtimeSub = _read.watchRuntime(epk, roomId).listen(_onRuntime);
 
-    // Drive the connection lifecycle (plano 12/13): connect to this peer if
-    // the manager isn't already on it.
-    if (_conn.activePeer?.remoteEpk != peer.remoteEpk) {
-      await _conn.switchTo(peer);
-      if (_disposed) return;
-    }
     _bootstrapping = false;
     _sync.requestSync();
     _recompute();

@@ -844,6 +844,24 @@ class ConnectionManager extends Service {
     return false;
   }
 
+  /// App-side correction for the connected room's working flag.
+  ///
+  /// The relay remains the source for non-active rooms, but the active channel
+  /// also sees the actual `user_input` / `agent_done` frames. Use that local
+  /// observation as a backstop so a missed or delayed `meta.working=false`
+  /// broadcast cannot leave the active chat/Home tile stuck as working.
+  void markRoomWorking(String epk, String roomId, bool working) {
+    final key = toStandardB64(epk);
+    final list = _roomsByPeer[key];
+    if (list == null) return;
+    final idx = list.indexWhere((r) => r.roomId == roomId);
+    if (idx < 0 || list[idx].working == working) return;
+    list[idx] = list[idx].copyWith(working: working);
+    _scheduleRoomsEmit();
+    // ignore: unawaited_futures
+    _persistRoomsForPeer(key);
+  }
+
   /// Plan-17 follow-up — hydrate `_roomsByPeer` from disk on boot so
   /// Home tiles persist across cold starts even before the relay
   /// pushes a fresh snapshot. Idempotent.

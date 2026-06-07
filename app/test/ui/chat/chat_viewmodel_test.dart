@@ -248,7 +248,15 @@ void main() {
       expect((vm.state as ChatReady).isWorking, isTrue,
           reason: 'state carries isWorking so the flip rebuilds the UI');
 
-      // turn_end → working=false.
+      // If the app sees agent_done but the relay's meta.working=false
+      // broadcast is delayed/missed, the active chat must not stay stuck on
+      // the stop button. The local channel observation clears the room flag.
+      ch.push(AgentDone(inReplyTo: 'u1'));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(vm.isWorking, isFalse);
+      expect((vm.state as ChatReady).isWorking, isFalse);
+
+      // A later turn_end broadcast remains idempotent.
       ch.pushControl(const RoomMetaUpdated(
         peer: 'epk_chat',
         roomId: 'main',

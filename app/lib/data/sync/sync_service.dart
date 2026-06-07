@@ -292,16 +292,18 @@ class SyncService extends Service {
   Future<void> clearActiveSession() async {
     final epk = _activeEpk;
     if (epk == null) return;
+    final room = _activeRoomId;
     // Session wiped → any optimistic sends are moot; disarm their backstops.
     _cancelAllSendTimers();
     await _enqueue(() async {
-      final box = await _boxes.msgsBox(epk, _activeRoomId);
+      if (_activeEpk != epk || _activeRoomId != room) return;
+      final box = await _boxes.msgsBox(epk, room);
       await box.clear();
       _idToSeq.clear();
       _nextSeq = 0;
       _indexLoaded = true;
       final idx = _boxes.sessionsIndexBox();
-      await idx.delete(LocalBoxes.sessionKey(epk, _activeRoomId));
+      await idx.delete(LocalBoxes.sessionKey(epk, room));
     });
   }
 
@@ -549,10 +551,11 @@ class SyncService extends Service {
   Future<void> _applyHistory(SessionHistory h) async {
     final epk = _activeEpk;
     if (epk == null) return;
+    final room = _activeRoomId;
     final rows = _convertHistory(h.events);
     final historyIds = {for (final r in rows) _key(r.role, r.id)};
     await _enqueue(() async {
-      final box = await _boxes.msgsBox(epk, _activeRoomId);
+      final box = await _boxes.msgsBox(epk, room);
       // Preserve local pending user rows the Pi hasn't echoed yet.
       final preserved = <MessageRecord>[];
       for (final v in box.values) {
@@ -596,21 +599,25 @@ class SyncService extends Service {
           await box.put(i, newJson);
         }
       }
-      _idToSeq
-        ..clear()
-        ..addEntries([
-          for (var i = 0; i < desired.length; i++)
-            MapEntry(_key(desired[i].role, desired[i].id), i),
-        ]);
-      _nextSeq = desired.length;
-      _indexLoaded = true;
+      if (_activeEpk == epk && _activeRoomId == room) {
+        _idToSeq
+          ..clear()
+          ..addEntries([
+            for (var i = 0; i < desired.length; i++)
+              MapEntry(_key(desired[i].role, desired[i].id), i),
+          ]);
+        _nextSeq = desired.length;
+        _indexLoaded = true;
+      }
     });
-    final started = h.sessionStartedAt;
-    _updateIndex(
-      (cur) => cur.copyWith(
-        sessionStartedAt: DateTime.fromMillisecondsSinceEpoch(started),
-      ),
-    );
+    if (_activeEpk == epk && _activeRoomId == room) {
+      final started = h.sessionStartedAt;
+      _updateIndex(
+        (cur) => cur.copyWith(
+          sessionStartedAt: DateTime.fromMillisecondsSinceEpoch(started),
+        ),
+      );
+    }
   }
 
   List<MessageRecord> _convertHistory(List<SessionHistoryEvent> events) {
@@ -710,10 +717,12 @@ class SyncService extends Service {
   String _key(MsgRole role, String id) => '${role.name}:$id';
 
   Future<void> _loadIndex() {
+    final epk = _activeEpk;
+    if (epk == null) return Future<void>.value();
+    final room = _activeRoomId;
     return _enqueue(() async {
-      final epk = _activeEpk;
-      if (epk == null) return;
-      final box = await _boxes.msgsBox(epk, _activeRoomId);
+      if (_activeEpk != epk || _activeRoomId != room) return;
+      final box = await _boxes.msgsBox(epk, room);
       _idToSeq.clear();
       _nextSeq = 0;
       for (final k in box.keys) {
@@ -736,10 +745,13 @@ class SyncService extends Service {
     String id,
     MessageRecord Function(int seq, MessageRecord? existing) build,
   ) {
+    final epk = _activeEpk;
+    if (epk == null) return Future<void>.value();
+    final room = _activeRoomId;
     return _enqueue(() async {
-      final epk = _activeEpk;
-      if (epk == null) return;
-      final box = await _boxes.msgsBox(epk, _activeRoomId);
+      final active = _activeEpk == epk && _activeRoomId == room;
+      if (!active) return;
+      final box = await _boxes.msgsBox(epk, room);
       final mapKey = _key(role, id);
       final existingSeq = _idToSeq[mapKey];
       if (existingSeq != null) {
@@ -754,10 +766,12 @@ class SyncService extends Service {
   }
 
   Future<void> _removeById(String id) {
+    final epk = _activeEpk;
+    if (epk == null) return Future<void>.value();
+    final room = _activeRoomId;
     return _enqueue(() async {
-      final epk = _activeEpk;
-      if (epk == null) return;
-      final box = await _boxes.msgsBox(epk, _activeRoomId);
+      if (_activeEpk != epk || _activeRoomId != room) return;
+      final box = await _boxes.msgsBox(epk, room);
       for (final role in MsgRole.values) {
         final seq = _idToSeq.remove(_key(role, id));
         if (seq != null) await box.delete(seq);
@@ -782,6 +796,11 @@ class SyncService extends Service {
       on ? SessionActivity.working : SessionActivity.idle,
       preview: preview,
     );
+    // Snapshot nullable field once; Dart won't promote mutable fields safely.
+    final epk = _activeEpk;
+    if (epk != null) {
+      _conn.markRoomWorking(epk, _activeRoomId, on);
+    }
     if (on) {
       if (replyTo != null) _workingReplyTo = replyTo;
     } else {
