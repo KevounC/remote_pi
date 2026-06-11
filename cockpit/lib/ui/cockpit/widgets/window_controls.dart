@@ -66,15 +66,18 @@ class _WindowControlsState extends State<WindowControls> {
   }
 }
 
-/// Controles de janela **à direita** (convenção Windows): botões quadrados
-/// minimizar/maximizar/fechar, com hover de fundo (fechar fica vermelho). Em
-/// plataformas não-Windows não renderiza nada. Posicione no fim da topbar.
+/// Controles de janela **à direita** (convenção Windows/Linux): botões quadrados
+/// minimizar/maximizar/fechar, com hover de fundo (fechar fica vermelho). No
+/// macOS não renderiza nada (lá o semáforo fica à esquerda via [WindowControls]).
+/// Posicione no fim da topbar.
 class WindowControlsTrailing extends StatelessWidget {
   const WindowControlsTrailing({super.key});
 
   @override
   Widget build(BuildContext context) {
-    if (!Platform.isWindows) return const SizedBox.shrink();
+    if (!Platform.isWindows && !Platform.isLinux) {
+      return const SizedBox.shrink();
+    }
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [

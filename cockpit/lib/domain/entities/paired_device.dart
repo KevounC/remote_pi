@@ -1,4 +1,4 @@
-/// Um aparelho pareado com o relay, visto via `remote-pi devices`.
+/// Um aparelho pareado com o relay, lido de `~/.pi/remote/peers.json`.
 ///
 /// O Cockpit só **lista e revoga** — o pareamento em si (gerar QR) acontece do
 /// lado do app/agente, não aqui (não há comando `remote-pi pair`).

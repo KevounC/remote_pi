@@ -48,11 +48,45 @@ class RelayGatewayImpl implements RelayGateway {
 
   @override
   Future<Result<List<PairedDevice>, RelayError>> listDevices() async {
-    final result = await _capture(
-      <String>['devices'],
-      'Falha ao listar os aparelhos pareados.',
-    );
-    return result.map(_parseDevices);
+    // Lê os pares direto de `~/.pi/remote/peers.json` (mesma fonte do
+    // `/remote-pi`). Não há subcomando `remote-pi devices` na CLI, e ler o
+    // arquivo funciona igual em macOS/Linux/Windows.
+    final home = _home;
+    if (home == null) {
+      return const Failure(RelayError('HOME não encontrado no ambiente.'));
+    }
+    try {
+      final file = File('$home/.pi/remote/peers.json');
+      if (!await file.exists()) return const Success(<PairedDevice>[]);
+      final json = jsonDecode(await file.readAsString());
+      if (json is! Map) return const Success(<PairedDevice>[]);
+      final peers = json['peers'];
+      if (peers is! List) return const Success(<PairedDevice>[]);
+
+      final devices = <PairedDevice>[];
+      for (final p in peers.whereType<Map>()) {
+        final epk = p['remote_epk'];
+        if (epk is! String || epk.isEmpty) continue;
+        final name = p['name'];
+        // shortId = remote_epk (o que `/remote-pi revoke <epk>` aceita);
+        // label = nome legível do pareamento (ex.: "iPhone").
+        devices.add(
+          PairedDevice(
+            shortId: epk,
+            label: name is String && name.isNotEmpty ? name : epk,
+          ),
+        );
+      }
+      return Success(devices);
+    } catch (e, s) {
+      return Failure(
+        RelayError(
+          'Falha ao listar os aparelhos pareados.',
+          cause: e,
+          stackTrace: s,
+        ),
+      );
+    }
   }
 
   @override
@@ -134,27 +168,6 @@ class RelayGatewayImpl implements RelayGateway {
     } catch (e, s) {
       return Failure(RelayError(onError, cause: e, stackTrace: s));
     }
-  }
-
-  /// Parseia a saída do `remote-pi devices`. Formato por linha:
-  /// `• <shortId> — <label>` (bullet opcional; separador em-dash ou hífen).
-  List<PairedDevice> _parseDevices(String stdout) {
-    final devices = <PairedDevice>[];
-    for (final raw in const LineSplitter().convert(stdout)) {
-      var line = raw.trim();
-      if (line.isEmpty) continue;
-      if (line.startsWith('•')) line = line.substring(1).trim();
-      final sep = line.contains(' — ')
-          ? ' — '
-          : (line.contains(' - ') ? ' - ' : null);
-      if (sep == null) continue;
-      final idx = line.indexOf(sep);
-      final shortId = line.substring(0, idx).trim();
-      if (shortId.isEmpty) continue;
-      final label = line.substring(idx + sep.length).trim();
-      devices.add(PairedDevice(shortId: shortId, label: label));
-    }
-    return devices;
   }
 
   Future<({String exe, List<String> prefixArgs})?> _cmd() =>
