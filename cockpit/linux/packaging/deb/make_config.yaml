@@ -20,6 +20,9 @@ dependencies:
   - libgtk-3-0
   - libblkid1
   - liblzma5
+  # Plano 46 — preview de A/V via media_kit (libmpv). No Linux usamos a libmpv
+  # do sistema (em macOS/Windows é embarcada pelo media_kit_libs_video).
+  - libmpv2
 generic_name: Remote Pi Cockpit
 categories:
   - Development

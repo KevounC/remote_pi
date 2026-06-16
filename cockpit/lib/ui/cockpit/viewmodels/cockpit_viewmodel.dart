@@ -1093,6 +1093,9 @@ class CockpitViewModel extends ChangeNotifier {
   /// que volta `FileViewUnsupported` (sumiu/binário transitório) é ignorado pra
   /// não piscar. Tudo guardado por id de sessão e cancelado no `_disposeSession`.
   void _watchFileViewer(FileViewerSession viewer) {
+    // A/V: live-reload desligado (plano 46). Recarregar recriaria o player no
+    // meio da reprodução; mídia raramente é reescrita em disco.
+    if (viewer.view is FileViewAudio || viewer.view is FileViewVideo) return;
     final id = viewer.id;
     _fileWatchers.remove(id)?.cancel();
     _fileWatchers[id] = _fileReader.watch(viewer.path).listen(

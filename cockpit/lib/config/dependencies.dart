@@ -60,6 +60,7 @@ import 'package:cockpit/ui/settings/cron_viewmodel.dart';
 import 'package:cockpit/ui/settings/daemons_viewmodel.dart';
 import 'package:cockpit/ui/settings/settings_controller.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:media_kit/media_kit.dart';
 
 final CustomInjector _injector = CustomInjector();
 
@@ -68,6 +69,9 @@ CustomInjector get injector => _injector;
 
 /// Inicializa Hive e registra as dependências. Chamado uma vez no `main`.
 Future<void> setupDependencies() async {
+  // Plano 46 — inicializa o media_kit (libmpv) antes de qualquer Player. Idempotente.
+  MediaKit.ensureInitialized();
+
   // Mata processos `pi --mode rpc` órfãos do ciclo anterior antes de qualquer
   // novo spawn. Cobre hot restart (main() re-executa mas Process.start não mata
   // os filhos) e cold restart com crash (processo morre, filhos ficam órfãos).

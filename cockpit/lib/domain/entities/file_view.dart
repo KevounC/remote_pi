@@ -24,7 +24,19 @@ final class FileViewImage extends FileView {
   final String path;
 }
 
-/// Binário/vídeo/grande demais — **não abre**.
+/// Áudio (mp3/wav/flac/…) — só o caminho; o player (media_kit) carrega. Plano 46.
+final class FileViewAudio extends FileView {
+  const FileViewAudio(this.path);
+  final String path;
+}
+
+/// Vídeo (mp4/mov/mkv/…) — só o caminho; o player (media_kit) carrega. Plano 46.
+final class FileViewVideo extends FileView {
+  const FileViewVideo(this.path);
+  final String path;
+}
+
+/// Binário/grande demais — **não abre**.
 final class FileViewUnsupported extends FileView {
   const FileViewUnsupported();
 }

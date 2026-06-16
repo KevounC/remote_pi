@@ -5,7 +5,8 @@ import 'package:cockpit/domain/contracts/file_reader.dart';
 import 'package:cockpit/domain/entities/file_view.dart';
 
 /// Classifica o arquivo por extensão + conteúdo:
-/// - vídeo → não-suportado;
+/// - vídeo → [FileViewVideo] (só o caminho);
+/// - áudio → [FileViewAudio] (só o caminho);
 /// - imagem → [FileViewImage] (só o caminho);
 /// - markdown → [FileViewMarkdown];
 /// - texto legível (utf8, sem null byte, ≤ 2MB) → [FileViewText];
@@ -35,11 +36,23 @@ class FileReaderImpl implements FileReader {
     'wmv',
     'flv',
   };
+  static const Set<String> _audio = {
+    'mp3',
+    'wav',
+    'aac',
+    'm4a',
+    'flac',
+    'ogg',
+    'opus',
+  };
 
   @override
   Future<FileView> read(String path) async {
     final ext = _ext(path);
-    if (_video.contains(ext)) return const FileViewUnsupported();
+    // A/V e imagem só passam o caminho — o player/widget carrega (sem ler bytes,
+    // sem limite de tamanho). Decisão cedo, antes de qualquer leitura de disco.
+    if (_video.contains(ext)) return FileViewVideo(path);
+    if (_audio.contains(ext)) return FileViewAudio(path);
     if (_image.contains(ext)) return FileViewImage(path);
 
     final file = File(path);

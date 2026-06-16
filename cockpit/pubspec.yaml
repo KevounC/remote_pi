@@ -70,6 +70,14 @@ dependencies:
   # Wave 2 — viewer de arquivo: renderiza SVG no pane (PNG/JPEG via Image.file).
   flutter_svg: ^2.0.10
 
+  # Plano 46 — preview de áudio e vídeo no viewer (libmpv via media_kit): um
+  # motor só cobre A/V, com aceleração de hardware, cross-platform. O
+  # `media_kit_libs_video` embarca a libmpv em macOS/Windows; no Linux usamos a
+  # do sistema (ver linux/packaging/*). NOTA: registrar no plano 46.
+  media_kit: ^1.1.10
+  media_kit_video: ^1.2.4
+  media_kit_libs_video: ^1.0.4
+
   # Wave 2 — syntax highlight no viewer de texto. Port Dart do highlight.js; o
   # import default registra todas as 189 linguagens + aliases. Convertemos a
   # árvore de nós em TextSpan e pintamos com a paleta `SyntaxColors` do tema.

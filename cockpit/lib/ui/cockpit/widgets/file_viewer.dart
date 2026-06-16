@@ -3,14 +3,19 @@ import 'dart:io';
 import 'package:cockpit/domain/entities/file_view.dart';
 import 'package:cockpit/ui/cockpit/widgets/agent_markdown.dart';
 import 'package:cockpit/ui/cockpit/widgets/code_highlight.dart';
+import 'package:cockpit/ui/cockpit/widgets/media_view.dart';
 import 'package:cockpit/ui/core/themes/themes.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
-/// Corpo do viewer read-only: markdown (gpt_markdown), texto puro, ou imagem.
+/// Corpo do viewer read-only: markdown (gpt_markdown), texto, imagem ou A/V.
 class FileViewer extends StatelessWidget {
-  const FileViewer({super.key, required this.view});
+  const FileViewer({super.key, required this.view, this.active = true});
   final FileView view;
+
+  /// `true` enquanto esta é a aba ativa (visível). Repassado ao player A/V, que
+  /// pausa ao virar `false` (plano 46). Tipos não-mídia ignoram.
+  final bool active;
 
   @override
   Widget build(BuildContext context) {
@@ -24,6 +29,18 @@ class FileViewer extends StatelessWidget {
           language: language,
         ),
         FileViewImage(:final path) => _ImageView(path: path),
+        FileViewAudio(:final path) => MediaView(
+          key: ValueKey('media:$path'),
+          path: path,
+          kind: MediaKind.audio,
+          active: active,
+        ),
+        FileViewVideo(:final path) => MediaView(
+          key: ValueKey('media:$path'),
+          path: path,
+          kind: MediaKind.video,
+          active: active,
+        ),
         FileViewUnsupported() => Center(
           child: Text(
             'Can\'t open this file.',

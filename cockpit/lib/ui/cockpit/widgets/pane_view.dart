@@ -115,6 +115,7 @@ class PaneView extends StatelessWidget {
       key: ValueKey('body-$tabId'),
       item: session,
       focused: focused && tabId == pane.active,
+      active: tabId == pane.active,
       onFillEmpty: (terminal) => onFillEmpty(tabId, terminal),
     );
   }
@@ -859,10 +860,16 @@ class _PaneBody extends StatefulWidget {
     super.key,
     required this.item,
     required this.focused,
+    required this.active,
     required this.onFillEmpty,
   });
   final PaneItem item;
   final bool focused;
+
+  /// `true` quando esta é a aba **ativa** (visível) da pane — independente do
+  /// foco da pane. Repassado ao viewer A/V, que pausa quando deixa de ser ativa
+  /// (o `IndexedStack` mantém todas as abas montadas). Plano 46.
+  final bool active;
 
   /// `(terminal)` — qual tipo criar ao preencher a pane vazia.
   final ValueChanged<bool> onFillEmpty;
@@ -931,7 +938,7 @@ class _PaneBodyState extends State<_PaneBody> {
 
     // Viewer de arquivo (read-only): markdown / texto / imagem.
     if (item is FileViewerSession) {
-      return FileViewer(view: item.view);
+      return FileViewer(view: item.view, active: widget.active);
     }
 
     // Terminal: só o TerminalView (ele se atualiza sozinho pelo Terminal model).
