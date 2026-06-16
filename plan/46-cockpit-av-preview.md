@@ -126,7 +126,8 @@ pausado no ponto. Dois vídeos em abas diferentes não tocam juntos.
 - [x] Teste unitário da detecção (vídeo/áudio → tipos novos) — 5/5
 - [x] Pacotes Linux declaram libmpv (deb `libmpv2`, rpm `mpv-libs`); CI instala `libmpv-dev` no build — feito 2026-06-12; deb/rpm instalam e linkam → valida no CI
 - [x] `flutter analyze` zero issues; build macOS ok (Windows/Linux pelo pipeline)
-- [ ] Validação tátil no macOS + primeira release com A/V (deb/rpm linkando libmpv no CI)
+- [x] Primeira release com A/V: `cockpit-v1.2.0` (2026-06-16) — 6 jobs verdes; DMG +21MB / EXE +14MB (libmpv embarcado), deb/rpm +0.3MB (libmpv do sistema, linkou no CI)
+- [ ] Validação tátil no macOS (abrir mp4/mp3, play, pausa ao trocar de aba) — passo manual do usuário
 
 ## Próximos planos / fora de escopo
 
