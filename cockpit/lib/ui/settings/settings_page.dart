@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:cockpit/domain/cron_schedule.dart';
 import 'package:cockpit/domain/entities/app_settings.dart';
@@ -22,7 +21,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
-import 'package:window_manager/window_manager.dart';
 
 /// Tela cheia de Configurações (push). Categorias à esquerda (Aparência ·
 /// Conectividade) e o conteúdo à direita. Por ora só **Aparência** está
@@ -79,51 +77,37 @@ class _SettingsHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return DragToMoveArea(
-      child: Container(
-        height: 46,
-        // Windows/Linux: botões de caption colam no canto direito (sem padding).
-        padding: EdgeInsets.only(
-          left: 18,
-          right: Platform.isWindows || Platform.isLinux ? 0 : 12,
-        ),
-        decoration: BoxDecoration(
-          color: colors.bg,
-          border: Border(bottom: BorderSide(color: colors.border)),
-        ),
-        child: Row(
-          children: [
-            const WindowControls(),
-            const SizedBox(width: 14),
-            Tooltip(
-              message: 'Back',
-              child: InkWell(
-                borderRadius: BorderRadius.circular(6),
-                onTap: () => context.pop(),
-                child: SizedBox(
-                  width: 30,
-                  height: 30,
-                  child: Icon(
-                    Icons.arrow_back,
-                    size: 18,
-                    color: colors.text2,
-                  ),
-                ),
+    return WindowTitleBar(
+      children: [
+        const WindowControls(),
+        const SizedBox(width: 14),
+        Tooltip(
+          message: 'Back',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: () => context.pop(),
+            child: SizedBox(
+              width: 30,
+              height: 30,
+              child: Icon(
+                Icons.arrow_back,
+                size: 18,
+                color: colors.text2,
               ),
             ),
-            const SizedBox(width: 8),
-            Text(
-              'Settings',
-              style: context.typo.title.copyWith(
-                fontSize: 14,
-                color: colors.text,
-              ),
-            ),
-            const Spacer(),
-            const WindowControlsTrailing(),
-          ],
+          ),
         ),
-      ),
+        const SizedBox(width: 8),
+        Text(
+          'Settings',
+          style: context.typo.title.copyWith(
+            fontSize: 14,
+            color: colors.text,
+          ),
+        ),
+        const Spacer(),
+        const WindowControlsTrailing(),
+      ],
     );
   }
 }

@@ -4,12 +4,11 @@ import 'package:cockpit/domain/entities/launchable_app.dart';
 import 'package:cockpit/ui/cockpit/widgets/window_controls.dart';
 import 'package:cockpit/ui/core/themes/themes.dart';
 import 'package:flutter/material.dart';
-import 'package:window_manager/window_manager.dart';
 
 /// Top bar (~46px) customizada — substitui a barra nativa da janela. Semáforo
 /// macOS **funcional** (fecha/minimiza/maximiza) · toggle da rail · nome do
 /// projeto · botão "Abrir" (split: IDE | dropdown). A barra inteira arrasta a
-/// janela ([DragToMoveArea]).
+/// janela (via [WindowTitleBar]).
 class CockpitTopbar extends StatelessWidget {
   const CockpitTopbar({
     super.key,
@@ -45,54 +44,40 @@ class CockpitTopbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return DragToMoveArea(
-      child: Container(
-        height: 46,
-        // Windows/Linux: botões de caption colam no canto direito (sem padding).
-        padding: EdgeInsets.only(
-          left: 18,
-          right: Platform.isWindows || Platform.isLinux ? 0 : 12,
+    return WindowTitleBar(
+      children: [
+        const WindowControls(),
+        const SizedBox(width: 12),
+        _IconBtn(
+          icon: Icons.view_sidebar_outlined,
+          tooltip: 'Collapse sidebar',
+          active: !railVisible,
+          onTap: onToggleRail,
         ),
-        decoration: BoxDecoration(
-          color: colors.bg,
-          border: Border(bottom: BorderSide(color: colors.border)),
+        const SizedBox(width: 8),
+        Text(
+          projectName,
+          style: context.typo.title.copyWith(
+            fontSize: 14,
+            color: colors.text,
+          ),
         ),
-        child: Row(
-          children: [
-            const WindowControls(),
-            const SizedBox(width: 12),
-            _IconBtn(
-              icon: Icons.view_sidebar_outlined,
-              tooltip: 'Collapse sidebar',
-              active: !railVisible,
-              onTap: onToggleRail,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              projectName,
-              style: context.typo.title.copyWith(
-                fontSize: 14,
-                color: colors.text,
-              ),
-            ),
-            const Spacer(),
-            _OpenInIdeButton(
-              apps: availableApps,
-              lastAppId: lastOpenAppId,
-              enabled: openEnabled && availableApps.isNotEmpty,
-              onOpen: (id) => onOpenInApp(id),
-            ),
-            const SizedBox(width: 8),
-            _IconBtn(
-              icon: Icons.view_sidebar_outlined,
-              tooltip: 'Show/hide files',
-              active: !treeVisible,
-              onTap: onToggleTree,
-            ),
-            const WindowControlsTrailing(),
-          ],
+        const Spacer(),
+        _OpenInIdeButton(
+          apps: availableApps,
+          lastAppId: lastOpenAppId,
+          enabled: openEnabled && availableApps.isNotEmpty,
+          onOpen: (id) => onOpenInApp(id),
         ),
-      ),
+        const SizedBox(width: 8),
+        _IconBtn(
+          icon: Icons.view_sidebar_outlined,
+          tooltip: 'Show/hide files',
+          active: !treeVisible,
+          onTap: onToggleTree,
+        ),
+        const WindowControlsTrailing(),
+      ],
     );
   }
 }

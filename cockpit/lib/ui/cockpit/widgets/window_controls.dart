@@ -12,6 +12,58 @@ Future<void> _toggleMaximize() async {
   }
 }
 
+/// Barra de título customizada (~46px): arrasta a janela e maximiza no
+/// duplo-clique, **sem atrasar o tap dos botões**.
+///
+/// O pulo do gato é manter o [DragToMoveArea] numa **camada de fundo** (atrás
+/// dos [children]) em vez de envelopá-los. O `DragToMoveArea` usa `onDoubleTap`,
+/// e o `DoubleTapGestureRecognizer` dele **segura a arena de gestos** por
+/// `kDoubleTapTimeout` (300ms) esperando um segundo clique. Se os botões forem
+/// descendentes dele, **todo** `onTap` herda esse atraso — o "input lag" de ~1s
+/// percebido ao fechar/minimizar/maximizar e nos toggles de pane.
+///
+/// Com o drag no fundo, os botões capturam o tap na hora; vãos, `Spacer` e
+/// textos da [Row] não absorvem o ponteiro e caem (translúcidos) pro fundo
+/// arrastável — então arrastar a janela e o duplo-clique-maximiza continuam
+/// funcionando em qualquer área vazia da barra.
+class WindowTitleBar extends StatelessWidget {
+  const WindowTitleBar({super.key, required this.children});
+
+  /// Conteúdo da barra (semáforo, toggles, título, …). Vão direto numa [Row].
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      height: 46,
+      decoration: BoxDecoration(
+        color: colors.bg,
+        border: Border(bottom: BorderSide(color: colors.border)),
+      ),
+      child: Stack(
+        children: [
+          // Fundo arrastável — ATRÁS dos botões (ver doc da classe).
+          const Positioned.fill(
+            child: DragToMoveArea(child: SizedBox.expand()),
+          ),
+          // Camada interativa — botões disparam o onTap sem o hold da arena.
+          Positioned.fill(
+            child: Padding(
+              // Windows/Linux: caption cola no canto direito (sem padding).
+              padding: EdgeInsets.only(
+                left: 18,
+                right: Platform.isWindows || Platform.isLinux ? 0 : 12,
+              ),
+              child: Row(children: children),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Controles de janela **à esquerda** (convenção macOS): semáforo
 /// fechar/minimizar/maximizar. Em plataformas não-macOS não renderiza nada —
 /// no Windows os controles vão à direita via [WindowControlsTrailing].
