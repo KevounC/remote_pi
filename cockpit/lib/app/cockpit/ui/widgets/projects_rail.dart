@@ -582,6 +582,18 @@ class _GitBadge extends StatelessWidget {
               ),
             ),
           ),
+          if (info.behind > 0) ...[
+            const SizedBox(width: 4),
+            _AheadBehind(glyph: '↓', count: info.behind, color: colors.warn),
+          ],
+          if (info.ahead > 0) ...[
+            const SizedBox(width: 3),
+            _AheadBehind(
+              glyph: '↑',
+              count: info.ahead,
+              color: colors.accentText,
+            ),
+          ],
           if (dirty) ...[
             const SizedBox(width: 4),
             Text(
@@ -594,6 +606,30 @@ class _GitBadge extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Indicador compacto de commits à frente (`↑`) / atrás (`↓`) do upstream.
+class _AheadBehind extends StatelessWidget {
+  const _AheadBehind({
+    required this.glyph,
+    required this.count,
+    required this.color,
+  });
+  final String glyph;
+  final int count;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      '$glyph$count',
+      style: context.typo.mono.copyWith(
+        fontSize: 9.5,
+        color: color,
+        fontWeight: FontWeight.w700,
       ),
     );
   }

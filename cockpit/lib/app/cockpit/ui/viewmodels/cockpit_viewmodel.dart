@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Directory, FileSystemEvent;
 import 'dart:math' show max;
 
 import 'package:cockpit/app/cockpit/domain/contracts/app_launcher.dart';
@@ -17,6 +18,7 @@ import 'package:cockpit/app/cockpit/domain/contracts/workspace_layout_store.dart
 import 'package:cockpit/app/cockpit/domain/contracts/worktree_manager.dart';
 import 'package:cockpit/app/cockpit/domain/entities/file_node.dart';
 import 'package:cockpit/app/cockpit/domain/entities/file_view.dart';
+import 'package:cockpit/app/cockpit/domain/entities/git_file_status.dart';
 import 'package:cockpit/app/cockpit/domain/entities/git_info.dart';
 import 'package:cockpit/app/cockpit/domain/entities/launchable_app.dart';
 import 'package:cockpit/app/cockpit/domain/entities/project.dart';
@@ -107,6 +109,19 @@ class CockpitViewModel extends ChangeNotifier {
   /// null) = não é repo git → a rail mostra só o título.
   final Map<String, GitInfo?> _gitInfo = <String, GitInfo?>{};
 
+  /// Status git por **caminho relativo** (arquivos + pastas agregadas), por
+  /// projeto. Derivado de [_gitInfo]; alimenta a coloração da árvore de
+  /// arquivos. Pasta agrega o estado mais forte dos descendentes ([
+  /// GitFileStatus.strongest]).
+  final Map<String, Map<String, GitFileStatus>> _gitTree =
+      <String, Map<String, GitFileStatus>>{};
+
+  /// Watcher do working tree do projeto **selecionado** (filesystem ao vivo).
+  /// Recriado ao trocar de projeto; debounce junta rajadas de eventos.
+  StreamSubscription<FileSystemEvent>? _gitWatch;
+  Timer? _gitWatchDebounce;
+  String? _gitWatchPath;
+
   /// Worktrees (forks) por workspace raiz, na ordem do `git worktree list`
   /// (decisão 20). Reconciliado contra o git nos ganchos de refresh; a
   /// existência mora no git, não no Hive (decisões 4, 17). Os mesmos `Project`s
@@ -173,6 +188,20 @@ class CockpitViewModel extends ChangeNotifier {
 
   /// Estado git do projeto (branch + sujos), ou `null` se não for repo git.
   GitInfo? gitInfo(String projectId) => _gitInfo[projectId];
+
+  /// Status git (cor) de um caminho **absoluto** dentro do projeto selecionado —
+  /// arquivo ou pasta (agregada). `null` = limpo/fora de repo. Usado pela árvore
+  /// de arquivos pra colorir cada linha.
+  GitFileStatus? gitStatusForPath(String absolutePath) {
+    final pid = _selectedProjectId;
+    if (pid == null) return null;
+    final tree = _gitTree[pid];
+    if (tree == null || tree.isEmpty) return null;
+    final root = _projectById(pid)?.path;
+    if (root == null) return null;
+    final rel = _subOf(absolutePath, root);
+    return rel.isEmpty ? null : tree[rel];
+  }
 
   /// Aba que o usuário está olhando.
   PaneItem? get focusedAgent {
@@ -273,6 +302,7 @@ class CockpitViewModel extends ChangeNotifier {
     // Só o projeto selecionado é ativado (sobe os processos) no boot.
     final selected = _selectedProjectId;
     if (selected != null) await _activateProject(selected);
+    _startGitWatch(selected); // watcher ao vivo do projeto inicial
     _ready = true;
     notifyListeners();
     // Estado git + worktrees de todos os projetos (assíncrono — a rail atualiza
@@ -444,6 +474,7 @@ class CockpitViewModel extends ChangeNotifier {
     _focused.remove(id);
     _savedLayouts.remove(id);
     _gitInfo.remove(id);
+    _gitTree.remove(id);
     _saveTimers.remove(id)?.cancel();
   }
 
@@ -536,6 +567,7 @@ class CockpitViewModel extends ChangeNotifier {
     unawaited(_projects.saveLastSelected(_rootOf(id)));
     _clearFocusedNotification();
     unawaited(_activateProject(id)); // reconstrói (lazy) se ainda não ativo
+    _startGitWatch(id); // segue o working tree do novo projeto ao vivo
     unawaited(_refreshGit(id)); // pode ter mudado desde a última vez
     unawaited(_refreshWorktrees(_rootOf(id))); // reflete worktrees externas
     notifyListeners();
@@ -1459,14 +1491,72 @@ class CockpitViewModel extends ChangeNotifier {
     final project = _projectById(projectId);
     if (project == null) return;
     final info = await _gitReader.read(project.path);
-    // Evita rebuild se nada mudou (branch + sujos iguais).
+    // Evita rebuild se nada mudou (branch + ahead/behind + mapa de arquivos).
     final old = _gitInfo[projectId];
-    if (old?.branch == info?.branch && old?.dirtyCount == info?.dirtyCount) {
+    if (old == info) {
       _gitInfo[projectId] = info; // garante a chave mesmo sem mudança visível
       return;
     }
     _gitInfo[projectId] = info;
+    _gitTree[projectId] = _buildGitTree(info?.files);
     notifyListeners();
+  }
+
+  /// Expande o mapa path→status (só arquivos) num índice que também cobre as
+  /// **pastas ancestrais**, cada uma com o estado mais forte dos descendentes.
+  static Map<String, GitFileStatus> _buildGitTree(
+    Map<String, GitFileStatus>? files,
+  ) {
+    if (files == null || files.isEmpty) return const <String, GitFileStatus>{};
+    final tree = <String, GitFileStatus>{};
+    for (final entry in files.entries) {
+      final path = entry.key; // relativo, separador '/'
+      tree[path] = GitFileStatus.strongest(tree[path], entry.value)!;
+      // Propaga pros ancestrais: 'a/b/c.dart' → 'a/b', 'a'.
+      var slash = path.lastIndexOf('/');
+      while (slash > 0) {
+        final dir = path.substring(0, slash);
+        tree[dir] = GitFileStatus.strongest(tree[dir], entry.value)!;
+        slash = dir.lastIndexOf('/');
+      }
+    }
+    return tree;
+  }
+
+  /// (Re)inicia o watcher de filesystem do projeto **selecionado** → mantém a
+  /// árvore/branch atualizadas ao vivo conforme o disco muda (o agente edita
+  /// arquivos, troca de branch, comita). No-op se já observa esse mesmo path.
+  void _startGitWatch(String? projectId) {
+    final path = projectId == null ? null : _projectById(projectId)?.path;
+    if (path == _gitWatchPath) return; // já observando este projeto
+    _gitWatch?.cancel();
+    _gitWatchDebounce?.cancel();
+    _gitWatch = null;
+    _gitWatchPath = path;
+    if (path == null || projectId == null) return;
+    try {
+      _gitWatch = Directory(path)
+          .watch(recursive: true)
+          .listen((event) => _onGitFsEvent(projectId, event));
+    } catch (_) {
+      _gitWatchPath = null; // pasta inacessível → sem watcher (refresh manual)
+    }
+  }
+
+  /// Evento de filesystem do watcher. Filtra o ruído interno do `.git/` (o
+  /// próprio `git status` mexe em `index.lock` etc. → loop), exceto `HEAD` e
+  /// `index`, que sinalizam checkout/commit/staging. Debounce junta rajadas.
+  void _onGitFsEvent(String projectId, FileSystemEvent event) {
+    final p = event.path.replaceAll('\\', '/');
+    final gitIdx = p.indexOf('/.git/');
+    if (gitIdx != -1) {
+      final rest = p.substring(gitIdx + 6); // depois de '/.git/'
+      if (rest != 'HEAD' && rest != 'index') return;
+    }
+    _gitWatchDebounce?.cancel();
+    _gitWatchDebounce = Timer(const Duration(milliseconds: 400), () {
+      unawaited(_refreshGit(projectId));
+    });
   }
 
   /// Reconcilia as worktrees de um workspace raiz contra o git (decisões 4, 5,
@@ -1552,6 +1642,8 @@ class CockpitViewModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    _gitWatch?.cancel();
+    _gitWatchDebounce?.cancel();
     for (final t in _saveTimers.values) {
       t.cancel();
     }

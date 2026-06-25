@@ -24,6 +24,10 @@ class AppColors {
     required this.warn,
     required this.edited,
     required this.editedBg,
+    required this.gitStaged,
+    required this.gitUntracked,
+    required this.gitDeleted,
+    required this.gitConflict,
   });
 
   final Color bg; // app backdrop, deepest
@@ -46,6 +50,12 @@ class AppColors {
   final Color edited; // recently-edited file accent
   final Color editedBg;
 
+  // Git status (file tree). Modificado reusa [warn] (âmbar, mesma da branch).
+  final Color gitStaged; // staged no index → verde
+  final Color gitUntracked; // novo / não-rastreado → azul
+  final Color gitDeleted; // removido → vermelho
+  final Color gitConflict; // conflito de merge → laranja
+
   static const AppColors dark = AppColors(
     bg: Color(0xFF0D0D0F),
     panel: Color(0xFF18181B),
@@ -66,6 +76,10 @@ class AppColors {
     warn: Color(0xFFE0A33A),
     edited: Color(0xFFC98A2B),
     editedBg: Color(0xFF2A210F),
+    gitStaged: Color(0xFF3FB868),
+    gitUntracked: Color(0xFF4F9DF0),
+    gitDeleted: Color(0xFFE5484D),
+    gitConflict: Color(0xFFF0883E),
   );
 
   /// Variante light — mesmos papéis, luminância invertida; accent azul mantido.
@@ -89,6 +103,10 @@ class AppColors {
     warn: Color(0xFFB7791F),
     edited: Color(0xFFB7791F),
     editedBg: Color(0xFFFBF1DC),
+    gitStaged: Color(0xFF2E9E54),
+    gitUntracked: Color(0xFF2F6FF0),
+    gitDeleted: Color(0xFFD32F2F),
+    gitConflict: Color(0xFFD9730D),
   );
 
   AppColors copyWith({
@@ -111,6 +129,10 @@ class AppColors {
     Color? warn,
     Color? edited,
     Color? editedBg,
+    Color? gitStaged,
+    Color? gitUntracked,
+    Color? gitDeleted,
+    Color? gitConflict,
   }) {
     return AppColors(
       bg: bg ?? this.bg,
@@ -132,6 +154,10 @@ class AppColors {
       warn: warn ?? this.warn,
       edited: edited ?? this.edited,
       editedBg: editedBg ?? this.editedBg,
+      gitStaged: gitStaged ?? this.gitStaged,
+      gitUntracked: gitUntracked ?? this.gitUntracked,
+      gitDeleted: gitDeleted ?? this.gitDeleted,
+      gitConflict: gitConflict ?? this.gitConflict,
     );
   }
 }

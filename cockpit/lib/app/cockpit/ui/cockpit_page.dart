@@ -406,6 +406,7 @@ class _CockpitPageState extends State<CockpitPage> {
                             width: _treeWidth,
                             rootPath: vm.selectedProject?.path ?? '',
                             listChildren: vm.listChildren,
+                            gitStatusOf: vm.gitStatusForPath,
                             onOpenFile: vm.openFile,
                             onOpenWith: vm.openWithDefaultApp,
                             onCreateInFolder: (sub, terminal) =>

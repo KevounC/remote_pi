@@ -1,6 +1,7 @@
 import 'dart:io' show Platform;
 
 import 'package:cockpit/app/cockpit/domain/entities/file_node.dart';
+import 'package:cockpit/app/cockpit/domain/entities/git_file_status.dart';
 import 'package:cockpit/app/core/ui/widgets/app_menu.dart';
 import 'package:cockpit/app/core/ui/file_icons/file_icons.dart';
 import 'package:cockpit/app/core/ui/themes/themes.dart';
@@ -17,6 +18,7 @@ class FileTreePanel extends StatefulWidget {
     super.key,
     required this.rootPath,
     required this.listChildren,
+    required this.gitStatusOf,
     required this.onOpenFile,
     required this.onOpenWith,
     required this.onCreateInFolder,
@@ -25,6 +27,10 @@ class FileTreePanel extends StatefulWidget {
 
   final String rootPath;
   final Future<List<FileNode>> Function(String path) listChildren;
+
+  /// Status git (cor) de um caminho absoluto — arquivo ou pasta agregada. `null`
+  /// = limpo / fora de repo. Recriado a cada build do shell → árvore reativa.
+  final GitFileStatus? Function(String absolutePath) gitStatusOf;
 
   /// Duplo-clique num arquivo → abre no pane.
   final ValueChanged<String> onOpenFile;
@@ -120,6 +126,7 @@ class _FileTreePanelState extends State<FileTreePanel> {
                       onOpenWith: widget.onOpenWith,
                       onCreateInFolder: widget.onCreateInFolder,
                       listChildren: widget.listChildren,
+                      gitStatusOf: widget.gitStatusOf,
                     ),
                   ),
           ),
@@ -143,6 +150,7 @@ class _DirView extends StatefulWidget {
     required this.onOpenWith,
     required this.onCreateInFolder,
     required this.listChildren,
+    required this.gitStatusOf,
   });
 
   final String path;
@@ -155,6 +163,7 @@ class _DirView extends StatefulWidget {
   final ValueChanged<String> onOpenWith;
   final void Function(String relativeSub, bool terminal) onCreateInFolder;
   final Future<List<FileNode>> Function(String path) listChildren;
+  final GitFileStatus? Function(String absolutePath) gitStatusOf;
 
   @override
   State<_DirView> createState() => _DirViewState();
@@ -200,6 +209,7 @@ class _DirViewState extends State<_DirView> {
               onOpenWith: widget.onOpenWith,
               onCreateInFolder: widget.onCreateInFolder,
               listChildren: widget.listChildren,
+              gitStatusOf: widget.gitStatusOf,
             )
           else
             // Arrasta o arquivo até o input (vira `@<rel>`). Clique-arraste
@@ -216,6 +226,7 @@ class _DirViewState extends State<_DirView> {
                 path: node.path,
                 rootPath: widget.rootPath,
                 selected: node.path == widget.selectedPath,
+                gitStatus: widget.gitStatusOf(node.path),
                 onTap: () => widget.onSelect(node.path),
                 onDoubleTap: () => widget.onOpenFile(node.path),
                 onOpenWith: () => widget.onOpenWith(node.path),
@@ -238,6 +249,7 @@ class _Folder extends StatefulWidget {
     required this.onOpenWith,
     required this.onCreateInFolder,
     required this.listChildren,
+    required this.gitStatusOf,
   });
 
   final FileNode node;
@@ -250,6 +262,7 @@ class _Folder extends StatefulWidget {
   final ValueChanged<String> onOpenWith;
   final void Function(String relativeSub, bool terminal) onCreateInFolder;
   final Future<List<FileNode>> Function(String path) listChildren;
+  final GitFileStatus? Function(String absolutePath) gitStatusOf;
 
   @override
   State<_Folder> createState() => _FolderState();
@@ -271,6 +284,7 @@ class _FolderState extends State<_Folder> {
           path: widget.node.path,
           rootPath: widget.rootPath,
           selected: widget.node.path == widget.selectedPath,
+          gitStatus: widget.gitStatusOf(widget.node.path),
           onCreateInFolder: widget.onCreateInFolder,
           // "Abrir no explorador do SO" (Finder/Explorer/Nautilus) — abre a
           // pasta no gerenciador de arquivos padrão.
@@ -293,6 +307,7 @@ class _FolderState extends State<_Folder> {
             onOpenWith: widget.onOpenWith,
             onCreateInFolder: widget.onCreateInFolder,
             listChildren: widget.listChildren,
+            gitStatusOf: widget.gitStatusOf,
           ),
       ],
     );
@@ -306,6 +321,7 @@ class _Row extends StatefulWidget {
     required this.name,
     required this.path,
     required this.rootPath,
+    this.gitStatus,
     this.expanded = false,
     this.selected = false,
     this.onTap,
@@ -319,6 +335,10 @@ class _Row extends StatefulWidget {
   final String name;
   final String path;
   final String rootPath;
+
+  /// Status git desta linha (cor). `null` = limpo / fora de repo.
+  final GitFileStatus? gitStatus;
+
   final bool expanded;
   final bool selected;
   final VoidCallback? onTap;
@@ -481,7 +501,8 @@ class _RowState extends State<_Row> {
                   overflow: TextOverflow.ellipsis,
                   style: context.typo.body.copyWith(
                     fontSize: 13,
-                    color: widget.selected ? colors.text : colors.text2,
+                    color: _gitColor(colors, widget.gitStatus) ??
+                        (widget.selected ? colors.text : colors.text2),
                   ),
                 ),
               ),
@@ -490,6 +511,26 @@ class _RowState extends State<_Row> {
         ),
       ),
     );
+  }
+}
+
+/// Cor do nome conforme o status git da linha (`null` = sem tint git → a linha
+/// usa a cor neutra de seleção). Modificado reusa `warn` (âmbar, mesma da
+/// branch); os demais têm tokens próprios.
+Color? _gitColor(AppColors colors, GitFileStatus? status) {
+  switch (status) {
+    case null:
+      return null;
+    case GitFileStatus.modified:
+      return colors.warn;
+    case GitFileStatus.staged:
+      return colors.gitStaged;
+    case GitFileStatus.untracked:
+      return colors.gitUntracked;
+    case GitFileStatus.deleted:
+      return colors.gitDeleted;
+    case GitFileStatus.conflict:
+      return colors.gitConflict;
   }
 }
 

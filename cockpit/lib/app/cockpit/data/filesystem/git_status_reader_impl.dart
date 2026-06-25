@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:cockpit/app/cockpit/domain/contracts/git_status_reader.dart';
+import 'package:cockpit/app/cockpit/domain/entities/git_file_status.dart';
 import 'package:cockpit/app/cockpit/domain/entities/git_info.dart';
 
 /// Lê o estado git rodando o binário `git`. Como o app macOS **não herda o PATH
@@ -55,23 +56,92 @@ class GitStatusReaderImpl implements GitStatusReader {
             : 'HEAD';
       }
 
-      // Arquivos sujos (modificados + staged + untracked).
+      // Status por arquivo (`-z` = entradas separadas por NUL, paths crus sem
+      // aspas/escape). Mapa path→status; renames consomem o path antigo.
       final statusRes = await Process.run(git, [
         '-C',
         path,
         'status',
-        '--porcelain',
+        '--porcelain=v1',
+        '-z',
       ]);
-      final dirty = statusRes.exitCode == 0
-          ? (statusRes.stdout as String)
-                .split('\n')
-                .where((l) => l.trim().isNotEmpty)
-                .length
-          : 0;
+      final files = statusRes.exitCode == 0
+          ? _parsePorcelainZ(statusRes.stdout as String)
+          : const <String, GitFileStatus>{};
 
-      return GitInfo(branch: branch, dirtyCount: dirty);
+      // Ahead/behind vs upstream (sem fetch — reflete o último estado conhecido).
+      // `--count A...B` com `@{upstream}...HEAD` devolve "<behind>\t<ahead>";
+      // exit != 0 quando não há upstream configurado → fica 0/0.
+      var ahead = 0;
+      var behind = 0;
+      final abRes = await Process.run(git, [
+        '-C',
+        path,
+        'rev-list',
+        '--left-right',
+        '--count',
+        '@{upstream}...HEAD',
+      ]);
+      if (abRes.exitCode == 0) {
+        final parts = (abRes.stdout as String).trim().split(RegExp(r'\s+'));
+        if (parts.length == 2) {
+          behind = int.tryParse(parts[0]) ?? 0;
+          ahead = int.tryParse(parts[1]) ?? 0;
+        }
+      }
+
+      return GitInfo(
+        branch: branch,
+        ahead: ahead,
+        behind: behind,
+        files: files,
+      );
     } catch (_) {
       return null; // git ausente / pasta inacessível
     }
+  }
+
+  /// Parseia o output de `git status --porcelain=v1 -z`. Cada entrada é
+  /// `XY <path>` terminada por NUL; renames/copies (`R`/`C` no index) têm o
+  /// path de origem como uma entrada NUL extra, que ignoramos.
+  static Map<String, GitFileStatus> _parsePorcelainZ(String raw) {
+    final out = <String, GitFileStatus>{};
+    final tokens = raw.split('\u0000');
+    for (var i = 0; i < tokens.length; i++) {
+      final entry = tokens[i];
+      if (entry.length < 4) continue; // "XY p" mínimo; '' final do split
+      final x = entry[0];
+      final y = entry[1];
+      final pathPart = entry.substring(3); // pula "XY "
+      // Rename/copy no index → o próximo token (NUL) é o path de origem; pula.
+      if (x == 'R' || x == 'C') i++;
+      final status = _classify(x, y);
+      if (status != null) out[pathPart] = status;
+    }
+    return out;
+  }
+
+  /// Mapeia os dois chars de status do porcelain pro nosso enum. A mudança no
+  /// working tree (`Y`) tem prioridade sobre o index (`X`) na cor exibida,
+  /// exceto conflito/deleção. Retorna `null` para `!!` (ignored) e estados que
+  /// não nos interessam colorir.
+  static GitFileStatus? _classify(String x, String y) {
+    // Untracked.
+    if (x == '?' && y == '?') return GitFileStatus.untracked;
+    // Ignored (só aparece com --ignored; defensivo).
+    if (x == '!' && y == '!') return null;
+    // Conflito: algum lado 'U', ou DD/AA (ambos add/delete).
+    if (x == 'U' || y == 'U' || (x == 'D' && y == 'D') || (x == 'A' && y == 'A')) {
+      return GitFileStatus.conflict;
+    }
+    // Deleção (index ou working tree).
+    if (x == 'D' || y == 'D') return GitFileStatus.deleted;
+    // Mudança no working tree (não staged) → modificado.
+    if (y == 'M' || y == 'T' || y == 'R' || y == 'C') return GitFileStatus.modified;
+    // Mudança só no index → staged (inclui add 'A').
+    if (x == 'M' || x == 'T' || x == 'R' || x == 'C' || x == 'A') {
+      return GitFileStatus.staged;
+    }
+    return null;
   }
 }
