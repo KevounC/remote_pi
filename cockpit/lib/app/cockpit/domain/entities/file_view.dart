@@ -18,10 +18,18 @@ final class FileViewText extends FileView {
   final String? language;
 }
 
-/// Imagem (PNG/JPEG/SVG/…) — só o caminho; o widget carrega.
+/// Imagem raster (PNG/JPEG/…) — só o caminho; o widget carrega.
 final class FileViewImage extends FileView {
   const FileViewImage(this.path);
   final String path;
+}
+
+/// SVG — texto (XML) **e** imagem ao mesmo tempo: editável na fonte e
+/// renderizável no preview. Carrega [text] (fonte) e [path] (origem do render).
+final class FileViewSvg extends FileView {
+  const FileViewSvg(this.path, this.text);
+  final String path;
+  final String text;
 }
 
 /// Áudio (mp3/wav/flac/…) — só o caminho; o player (media_kit) carrega. Plano 46.

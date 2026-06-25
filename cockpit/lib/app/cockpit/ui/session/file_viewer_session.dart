@@ -28,4 +28,20 @@ class FileViewerSession extends PaneItem {
   /// Conteúdo atual. **Mutável**: a VM reatribui ao detectar mudança no disco
   /// (file watcher — plan/42 follow-up), e o `notifyListeners` reconstrói a aba.
   FileView view;
+
+  /// `true` quando o editor tem alterações não gravadas. Dirige o indicador da
+  /// aba (bolinha no lugar do X) e o dialog de "fechar sem salvar". O `FileViewer`
+  /// atualiza via [setDirty]; a aba escuta esta sessão (ChangeNotifier).
+  bool dirty = false;
+
+  void setDirty(bool value) {
+    if (value == dirty) return;
+    dirty = value;
+    notifyListeners();
+  }
+
+  /// Grava o buffer atual do editor em disco. Registrado pelo `FileViewer`
+  /// enquanto montado (e limpo ao desmontar); `null` quando não há editor ativo.
+  /// Usado pelo "Salvar e fechar". Retorna `true` no sucesso.
+  Future<bool> Function()? saveDraft;
 }

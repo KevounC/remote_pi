@@ -23,7 +23,6 @@ class FileReaderImpl implements FileReader {
     'gif',
     'webp',
     'bmp',
-    'svg',
     'ico',
   };
   static const Set<String> _video = {
@@ -72,7 +71,19 @@ class FileReaderImpl implements FileReader {
     }
 
     if (_markdown.contains(ext)) return FileViewMarkdown(text);
+    // SVG é texto (XML) que também renderiza — fonte editável + preview.
+    if (ext == 'svg') return FileViewSvg(path, text);
     return FileViewText(text, language: ext.isEmpty ? null : ext);
+  }
+
+  @override
+  Future<bool> write(String path, String content) async {
+    try {
+      await File(path).writeAsString(content);
+      return true;
+    } on FileSystemException {
+      return false;
+    }
   }
 
   @override

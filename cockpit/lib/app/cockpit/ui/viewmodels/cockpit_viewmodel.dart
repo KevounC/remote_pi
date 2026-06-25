@@ -250,6 +250,23 @@ class CockpitViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Grava o conteúdo editado de uma aba de viewer em disco e reclassifica o
+  /// `view` (markdown/texto/linguagem) com o conteúdo salvo. Retorna `true` no
+  /// sucesso. Sem trava: escrita concorrente do agente é last-write-wins (MVP).
+  Future<bool> saveFile(String sessionId, String content) async {
+    final s = _sessions[sessionId];
+    if (s is! FileViewerSession) return false;
+    final ok = await _fileReader.write(s.path, content);
+    if (!ok) return false;
+    final fresh = await _fileReader.read(s.path);
+    final cur = _sessions[sessionId];
+    if (cur is FileViewerSession && fresh is! FileViewUnsupported) {
+      cur.view = fresh;
+      notifyListeners();
+    }
+    return true;
+  }
+
   /// Árvore do projeto (para renderizar cada folha do `IndexedStack`).
   PaneNode? tree(String projectId) => _trees[projectId];
 

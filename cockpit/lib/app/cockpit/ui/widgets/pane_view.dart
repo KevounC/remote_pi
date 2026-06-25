@@ -489,6 +489,29 @@ class _TabState extends State<_Tab> {
     if (!_focus.hasFocus && _editing) _commitEdit();
   }
 
+  /// Fecha a aba pedindo confirmação se for um arquivo com edição não salva:
+  /// descartar, cancelar ou salvar-e-fechar. Demais abas fecham direto.
+  Future<void> _requestClose() async {
+    final s = widget.item;
+    if (s is! FileViewerSession || !s.dirty) {
+      widget.onClose();
+      return;
+    }
+    final choice = await showCloseDirtyDialog(context, fileName: s.title);
+    if (!mounted) return;
+    switch (choice) {
+      case CloseDirtyChoice.cancel:
+        return;
+      case CloseDirtyChoice.dontSave:
+        widget.onClose();
+      case CloseDirtyChoice.save:
+        // Salva o buffer atual; só fecha se gravou (erro de IO mantém aberto).
+        final ok = await s.saveDraft?.call() ?? false;
+        if (!mounted) return;
+        if (ok) widget.onClose();
+    }
+  }
+
   Future<void> _showTabMenu(BuildContext menuCtx) async {
     final s = widget.item;
     if (s == null) return;
@@ -529,7 +552,7 @@ class _TabState extends State<_Tab> {
       case 'history':
         widget.onHistory();
       case 'close':
-        widget.onClose();
+        _requestClose();
     }
   }
 
@@ -545,6 +568,7 @@ class _TabState extends State<_Tab> {
         final agent = s is AgentSession ? s : null;
         final isEmpty = agent?.status == AgentStatus.empty;
         final streaming = agent?.isStreaming ?? false;
+        final dirty = s is FileViewerSession && s.dirty;
 
         final icon = _tabIcon(s);
 
@@ -635,7 +659,7 @@ class _TabState extends State<_Tab> {
                 ),
                 const SizedBox(width: 7),
               ],
-              _TabClose(onTap: widget.onClose),
+              _TabClose(onTap: _requestClose, dirty: dirty),
             ],
           ),
         );
@@ -737,20 +761,45 @@ class _TabDropSlotState extends State<_TabDropSlot> {
   }
 }
 
-class _TabClose extends StatelessWidget {
-  const _TabClose({required this.onTap});
+class _TabClose extends StatefulWidget {
+  const _TabClose({required this.onTap, this.dirty = false});
   final VoidCallback onTap;
+
+  /// Arquivo com edição não salva: mostra uma bolinha no lugar do X (o X
+  /// reaparece ao passar o mouse, deixando o fechar acessível).
+  final bool dirty;
+
+  @override
+  State<_TabClose> createState() => _TabCloseState();
+}
+
+class _TabCloseState extends State<_TabClose> {
+  bool _hover = false;
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+    // Sujo e sem hover → bolinha; do contrário → X.
+    final showDot = widget.dirty && !_hover;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
       child: HoverTap(
         borderRadius: BorderRadius.circular(4),
-        onTap: onTap,
+        onTap: widget.onTap,
         child: Padding(
           padding: const EdgeInsets.all(3),
-          child: Icon(Icons.close, size: 12, color: context.colors.text3),
+          child: showDot
+              ? Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: colors.accent,
+                    shape: BoxShape.circle,
+                  ),
+                )
+              : Icon(Icons.close, size: 12, color: colors.text3),
         ),
       ),
     );
@@ -955,7 +1004,12 @@ class _PaneBodyState extends State<_PaneBody> {
 
     // Viewer de arquivo (read-only): markdown / texto / imagem.
     if (item is FileViewerSession) {
-      return FileViewer(view: item.view, active: widget.active);
+      return FileViewer(
+        session: item,
+        active: widget.active,
+        onSave: (content) =>
+            context.read<CockpitViewModel>().saveFile(item.id, content),
+      );
     }
 
     // Terminal: só o TerminalView (ele se atualiza sozinho pelo Terminal model).

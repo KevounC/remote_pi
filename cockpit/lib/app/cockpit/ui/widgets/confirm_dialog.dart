@@ -43,6 +43,56 @@ Future<void> showInfoDialog(
   );
 }
 
+/// Escolha do usuário ao fechar uma aba com alterações não salvas.
+enum CloseDirtyChoice { cancel, dontSave, save }
+
+/// Dialog ao fechar um arquivo editado e não salvo: descartar, cancelar ou
+/// salvar e fechar. `null` (dispensar fora) é tratado como [CloseDirtyChoice.cancel].
+Future<CloseDirtyChoice> showCloseDirtyDialog(
+  BuildContext context, {
+  required String fileName,
+}) async {
+  final result = await showDialog<CloseDirtyChoice>(
+    context: context,
+    barrierColor: _barrier,
+    builder: (context) {
+      final colors = context.colors;
+      return AlertDialog(
+        title: Text(
+          'Unsaved changes',
+          style: context.typo.title.copyWith(fontSize: 15, color: colors.text),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Text(
+            '“$fileName” has unsaved changes. Save them before closing?',
+            style: context.typo.body.copyWith(
+              fontSize: 13.5,
+              color: colors.text2,
+            ),
+          ),
+        ),
+        actions: [
+          DestructiveButton(
+            onPressed: () =>
+                Navigator.of(context).pop(CloseDirtyChoice.dontSave),
+            child: const Text('Don\'t save'),
+          ),
+          OutlineButton(
+            onPressed: () => Navigator.of(context).pop(CloseDirtyChoice.cancel),
+            child: const Text('Cancel'),
+          ),
+          PrimaryButton(
+            onPressed: () => Navigator.of(context).pop(CloseDirtyChoice.save),
+            child: const Text('Save & close'),
+          ),
+        ],
+      );
+    },
+  );
+  return result ?? CloseDirtyChoice.cancel;
+}
+
 /// Dialog de confirmação genérico (tema do cockpit). Devolve `true` se confirmar.
 Future<bool> showConfirmDialog(
   BuildContext context, {
