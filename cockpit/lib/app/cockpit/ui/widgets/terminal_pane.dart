@@ -1,14 +1,15 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
+import 'package:flutter/services.dart' show HardwareKeyboard, KeyEvent;
 import 'package:flutter/widgets.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:xterm/xterm.dart';
-// O auto-scroll durante a seleção precisa converter pixel→célula e ler a altura
-// da linha/viewport — APIs que vivem só no RenderTerminal, que o barrel público
-// do xterm não exporta. O import direto do `src/` é intencional e isolado aqui.
-// ignore: implementation_imports
-import 'package:xterm/src/ui/render.dart';
 
-/// Envólucro do [TerminalView] do xterm que adiciona **auto-scroll durante a
+import 'cockpit_terminal.dart';
+import 'cockpit_terminal_render.dart';
+import 'terminal_link.dart';
+
+/// Envólucro do [CockpitTerminal] que adiciona **auto-scroll durante a
 /// seleção por arraste**: quando o mouse passa da borda superior/inferior do
 /// terminal enquanto seleciona, a viewport rola na direção e a seleção
 /// acompanha (como num editor/terminal nativo).
@@ -44,7 +45,7 @@ class TerminalPane extends StatefulWidget {
 
 class _TerminalPaneState extends State<TerminalPane>
     with SingleTickerProviderStateMixin {
-  final _viewKey = GlobalKey<TerminalViewState>();
+  final _viewKey = GlobalKey<CockpitTerminalState>();
   final _scroll = ScrollController();
   late final _SelectionGuardController _controller;
   late final Ticker _ticker;
@@ -67,15 +68,26 @@ class _TerminalPaneState extends State<TerminalPane>
   CellAnchor? _anchor; // início fixo da seleção (acompanha o buffer)
   bool _selecting = false;
 
+  // --- Abrir URL com Cmd (hover → mãozinha + realce; Cmd+clique → abre) ---
+  final _linkDetector = TerminalLinkDetector();
+  MouseCursor _cursor = SystemMouseCursors.text;
+  TerminalLink? _hoverLink; // link sob o ponteiro (só quando Cmd está segurado)
+  TerminalHighlight? _linkHighlight; // realce do link (removível)
+  Offset? _lastHoverGlobal; // pra reavaliar quando o Cmd muda sem mover o mouse
+
   @override
   void initState() {
     super.initState();
     _controller = _SelectionGuardController();
     _ticker = createTicker(_onTick);
+    // Cmd pressionado/solto sem mover o mouse também atualiza o realce/cursor.
+    HardwareKeyboard.instance.addHandler(_onKey);
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
+    _linkHighlight?.dispose();
     _ticker.dispose();
     _anchor?.dispose();
     _scroll.dispose();
@@ -83,12 +95,66 @@ class _TerminalPaneState extends State<TerminalPane>
     super.dispose();
   }
 
-  RenderTerminal? get _render => _viewKey.currentState?.renderTerminal;
+  bool _onKey(KeyEvent _) {
+    _evaluateHover(_lastHoverGlobal); // reavalia com a última posição conhecida
+    return false; // não consome — só observa o estado do Cmd
+  }
+
+  CockpitTerminalRender? get _render => _viewKey.currentState?.renderTerminal;
+
+  bool get _isCmd => HardwareKeyboard.instance.isMetaPressed;
+
+  /// Reavalia o link sob [global] (coords globais). Só detecta com Cmd segurado:
+  /// sem Cmd, o terminal opera normal (seleção / clique vai pro app).
+  void _evaluateHover(Offset? global) {
+    final r = _render;
+    if (r == null || global == null) {
+      _setHoverLink(null);
+      return;
+    }
+    final link = _isCmd
+        ? _linkDetector.linkAt(widget.terminal, r.getCellOffset(r.globalToLocal(global)))
+        : null;
+    _setHoverLink(link);
+  }
+
+  void _setHoverLink(TerminalLink? link) {
+    final same = link?.url == _hoverLink?.url &&
+        link?.row == _hoverLink?.row &&
+        link?.startCol == _hoverLink?.startCol;
+    if (same) return;
+
+    _linkHighlight?.dispose();
+    _linkHighlight = null;
+    _hoverLink = link;
+
+    if (link != null) {
+      final b = widget.terminal.buffer;
+      _linkHighlight = _controller.highlight(
+        p1: b.createAnchorFromOffset(CellOffset(link.startCol, link.row)),
+        p2: b.createAnchorFromOffset(CellOffset(link.endCol, link.row)),
+        color: widget.theme.selection,
+      );
+    }
+    setState(() {
+      _cursor = link != null ? SystemMouseCursors.click : SystemMouseCursors.text;
+    });
+  }
+
+  void _openLink(String url) {
+    final raw = url.startsWith('www.') ? 'https://$url' : url;
+    final uri = Uri.tryParse(raw);
+    if (uri != null && uri.hasScheme) {
+      launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
 
   void _onPointerDown(PointerDownEvent e) {
     // Toque não seleciona por arraste no desktop; só mouse/trackpad com botão.
     if (e.kind == PointerDeviceKind.touch) return;
     if ((e.buttons & kPrimaryButton) == 0) return;
+    // Com Cmd, o clique é pra abrir link — não inicia seleção.
+    if (_isCmd) return;
     final r = _render;
     if (r == null) return;
     _downLocal = r.globalToLocal(e.position);
@@ -112,11 +178,28 @@ class _TerminalPaneState extends State<TerminalPane>
     _syncAutoScroll(r);
   }
 
-  void _onPointerUp(PointerUpEvent e) => _finishSelecting();
+  void _onPointerUp(PointerUpEvent e) {
+    // Cmd+clique (sem arraste) sobre um link → abre no navegador.
+    if (_isCmd && !_selecting && _hoverLink != null) {
+      _openLink(_hoverLink!.url);
+    }
+    _finishSelecting();
+  }
+
+  void _onPointerSignal(PointerSignalEvent e) {
+    if (e is! PointerScrollEvent) return;
+    // Na tela alternativa (claude/vim) "rolar" = a app **repinta** as células; a
+    // seleção fica ancorada em posições fixas e não tem como acompanhar — vira
+    // realce sobre texto trocado. Limpamos pra não ficar mentindo. No buffer
+    // normal (scrollback) a seleção acompanha o scroll, então não mexemos.
+    if (widget.terminal.buffer.isAltBuffer && _controller.selection != null) {
+      _controller.clearSelection();
+    }
+  }
 
   void _onPointerCancel(PointerCancelEvent e) => _finishSelecting();
 
-  void _beginSelecting(RenderTerminal r, Offset down) {
+  void _beginSelecting(CockpitTerminalRender r, Offset down) {
     _anchor?.dispose();
     _anchor = widget.terminal.buffer.createAnchorFromOffset(
       r.getCellOffset(down),
@@ -130,7 +213,7 @@ class _TerminalPaneState extends State<TerminalPane>
   /// Estende a seleção da âncora fixa até o ponteiro, **clampando** o Y dentro
   /// da viewport: assim, com o ponteiro além da borda, o extremo acompanha a
   /// linha visível mais próxima — que avança no buffer conforme a viewport rola.
-  void _extendSelection(RenderTerminal r) {
+  void _extendSelection(CockpitTerminalRender r) {
     final anchor = _anchor;
     final p = _pointer;
     if (anchor == null || p == null || !anchor.attached) return;
@@ -150,7 +233,7 @@ class _TerminalPaneState extends State<TerminalPane>
     );
   }
 
-  void _syncAutoScroll(RenderTerminal r) {
+  void _syncAutoScroll(CockpitTerminalRender r) {
     if (_overshoot(r) == 0) {
       if (_ticker.isActive) _ticker.stop();
     } else if (!_ticker.isActive) {
@@ -160,7 +243,7 @@ class _TerminalPaneState extends State<TerminalPane>
 
   /// Quanto o ponteiro passou da zona de borda. `< 0` = acima (rola pra cima),
   /// `> 0` = abaixo (rola pra baixo), `0` = dentro (sem auto-scroll).
-  double _overshoot(RenderTerminal r) {
+  double _overshoot(CockpitTerminalRender r) {
     final p = _pointer;
     if (p == null) return 0;
     final h = r.size.height;
@@ -210,21 +293,36 @@ class _TerminalPaneState extends State<TerminalPane>
 
   @override
   Widget build(BuildContext context) {
-    return Listener(
-      onPointerDown: _onPointerDown,
-      onPointerMove: _onPointerMove,
-      onPointerUp: _onPointerUp,
-      onPointerCancel: _onPointerCancel,
-      child: TerminalView(
-        widget.terminal,
-        key: _viewKey,
-        controller: _controller,
-        scrollController: _scroll,
-        focusNode: widget.focusNode,
-        hardwareKeyboardOnly: widget.hardwareKeyboardOnly,
-        onKeyEvent: (_, event) => widget.onKeyEvent(event),
-        theme: widget.theme,
-        textStyle: widget.textStyle,
+    return MouseRegion(
+      cursor: _cursor,
+      onHover: (e) {
+        _lastHoverGlobal = e.position;
+        _evaluateHover(e.position);
+      },
+      onExit: (_) {
+        _lastHoverGlobal = null;
+        _setHoverLink(null);
+      },
+      child: Listener(
+        onPointerDown: _onPointerDown,
+        onPointerMove: _onPointerMove,
+        onPointerUp: _onPointerUp,
+        onPointerCancel: _onPointerCancel,
+        onPointerSignal: _onPointerSignal,
+        // O cursor é decidido pelo MouseRegion acima (mãozinha sobre link com
+        // Cmd, senão I-beam); o CockpitTerminal defere o dele pra cá.
+        child: CockpitTerminal(
+          widget.terminal,
+          key: _viewKey,
+          controller: _controller,
+          scrollController: _scroll,
+          focusNode: widget.focusNode,
+          hardwareKeyboardOnly: widget.hardwareKeyboardOnly,
+          onKeyEvent: (_, event) => widget.onKeyEvent(event),
+          theme: widget.theme,
+          textStyle: widget.textStyle,
+          mouseCursor: MouseCursor.defer,
+        ),
       ),
     );
   }
