@@ -9,6 +9,7 @@ class FileViewerSession extends PaneItem {
     required this.projectId,
     required this.path,
     required this.view,
+    this.isPreview = false,
   });
 
   @override
@@ -47,6 +48,9 @@ class FileViewerSession extends PaneItem {
   void setDirty(bool value) {
     if (value == dirty) return;
     dirty = value;
+    if (value && isPreview) {
+      isPreview = false;
+    }
     notifyListeners();
   }
 
@@ -54,4 +58,15 @@ class FileViewerSession extends PaneItem {
   /// enquanto montado (e limpo ao desmontar); `null` quando não há editor ativo.
   /// Usado pelo "Salvar e fechar". Retorna `true` no sucesso.
   Future<bool> Function()? saveDraft;
+
+  /// `true` se esta é uma aba de preview (VSCode-style). Preview é sobrescrito
+  /// ao clicar em outro arquivo; duplo-clique transforma em aba normal.
+  bool isPreview;
+
+  /// Transforma esta aba de preview em aba normal.
+  void pin() {
+    if (!isPreview) return;
+    isPreview = false;
+    notifyListeners();
+  }
 }

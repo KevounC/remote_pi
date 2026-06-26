@@ -136,6 +136,10 @@ class CockpitViewModel extends ChangeNotifier {
   int _fileTreeRevision = 0;
   int get fileTreeRevision => _fileTreeRevision;
 
+  /// Caminho do arquivo atualmente selecionado no FileTreePanel (para highlight).
+  String? _selectedFileInTree;
+  String? get selectedFileInTree => _selectedFileInTree;
+
   bool _railVisible = true;
   bool _treeVisible = true;
   bool _ready = false;
@@ -235,8 +239,13 @@ class CockpitViewModel extends ChangeNotifier {
 
   /// Abre um arquivo num viewer. Sem [inPane], usa a pane focada (duplo-clique
   /// na árvore); com [inPane], abre naquela pane e a foca (arrastar arquivo →
-  /// pane). Binário/vídeo/grande demais → não abre. Reusa a aba se já aberta.
-  Future<void> openFile(String path, {String? inPane}) async {
+  /// pane). Binário/vídeo/grande demais → não abre.
+  ///
+  /// Se [isPreview] for `true` (padrão), usa o comportamento VSCode:
+  /// - Se já existe um preview aberto na pane, substitui o conteúdo
+  /// - Se a aba ativa é um preview, substitui em vez de criar nova aba
+  /// - Duplo-clique deve passar `isPreview: false` para criar aba normal
+  Future<void> openFile(String path, {String? inPane, bool isPreview = true}) async {
     final projectId = _selectedProjectId;
     final tree = _activeTree;
     final paneId = inPane ?? (projectId == null ? null : _focused[projectId]);
@@ -246,38 +255,86 @@ class CockpitViewModel extends ChangeNotifier {
     // Soltar um arquivo numa pane específica também a foca.
     if (inPane != null) _focused[projectId] = inPane;
 
-    // Já aberto na pane? só seleciona.
+    // Se isPreview, tenta reutilizar a aba de preview existente ou substituir a ativa.
+    // Se não é preview, cria uma aba normal (comportamento original).
+    FileViewerSession? previewCandidate;
     for (final tabId in leaf.tabs) {
       final s = _sessions[tabId];
-      if (s is FileViewerSession && s.path == path) {
-        _trees[projectId] = updateLeaf(
-          tree,
-          paneId,
-          (p) => p.copyWith(active: tabId),
-        );
-        notifyListeners();
-        return;
+      if (s is FileViewerSession) {
+        // Se já aberto, só seleciona (mas transforma preview em normal se não é preview).
+        if (s.path == path) {
+          if (!isPreview && s.isPreview) s.pin();
+          _trees[projectId] = updateLeaf(
+            tree,
+            paneId,
+            (p) => p.copyWith(active: tabId),
+          );
+          notifyListeners();
+          return;
+        }
+        // Guarda o primeiro preview encontrado para possível reutilização.
+        if (isPreview && s.isPreview && previewCandidate == null) {
+          previewCandidate = s;
+        }
       }
     }
 
     final view = await _fileReader.read(path);
     if (view is FileViewUnsupported) return; // binário/vídeo: não abre
 
+    // Se é preview e temos um candidato, reutiliza (substitui conteúdo).
+    if (isPreview && previewCandidate != null) {
+      previewCandidate.path = path;
+      previewCandidate.view = view;
+      previewCandidate.dirty = false;
+      previewCandidate.notifyListeners(); // Força rebuild do FileViewer
+      _trees[projectId] = updateLeaf(
+        tree,
+        paneId,
+        (p) => p.copyWith(active: previewCandidate!.id),
+      );
+      notifyListeners();
+      return;
+    }
+
+    // Cria nova aba (preview ou normal).
     final viewer = FileViewerSession(
       id: _nid('v'),
       projectId: projectId,
       path: path,
       view: view,
+      isPreview: isPreview,
     );
     _sessions[viewer.id] = viewer;
     _watchFileViewer(viewer);
 
     // Se a pane só tem o placeholder vazio, substitui; senão adiciona aba.
+    // Se é preview e a aba ativa é um FileViewer, substitui em vez de adicionar.
     final current = _trees[projectId] ?? tree;
     final lf = findLeaf(current, paneId);
+    final activeTabId = lf?.active;
+    final activeTab = activeTabId != null ? _sessions[activeTabId] : null;
     final only = lf?.tabs.length == 1 ? _sessions[lf!.tabs.first] : null;
-    if (only is AgentSession && only.status == AgentStatus.empty) {
-      final emptyId = lf!.tabs.first;
+
+    if (isPreview && activeTab is FileViewerSession && !activeTab.isPreview) {
+      // Preview substituiria aba normal → adiciona ao lado.
+      _trees[projectId] = updateLeaf(
+        current,
+        paneId,
+        (p) => p.copyWith(tabs: [...p.tabs, viewer.id], active: viewer.id),
+      );
+    } else if (isPreview && activeTab is FileViewerSession && activeTab.isPreview) {
+      // Preview substituir outro preview → substitui a aba ativa.
+      final oldId = activeTabId;
+      _trees[projectId] = updateLeaf(
+        current,
+        paneId,
+        (p) => p.copyWith(tabs: [...p.tabs.where((t) => t != oldId), viewer.id], active: viewer.id),
+      );
+      _disposeSession(oldId!);
+    } else if (lf != null && only is AgentSession && only.status == AgentStatus.empty) {
+      // Placeholder vazio → substitui.
+      final emptyId = lf.tabs.first;
       _trees[projectId] = updateLeaf(
         current,
         paneId,
@@ -285,12 +342,19 @@ class CockpitViewModel extends ChangeNotifier {
       );
       _disposeSession(emptyId);
     } else {
+      // Adiciona nova aba.
       _trees[projectId] = updateLeaf(
         current,
         paneId,
         (p) => p.copyWith(tabs: [...p.tabs, viewer.id], active: viewer.id),
       );
     }
+    notifyListeners();
+  }
+
+  /// Seleciona um arquivo no FileTreePanel (atualiza o highlight).
+  void selectFileInTree(String path) {
+    _selectedFileInTree = path;
     notifyListeners();
   }
 

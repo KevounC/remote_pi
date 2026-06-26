@@ -406,9 +406,12 @@ class _CockpitPageState extends State<CockpitPage> {
                             width: _treeWidth,
                             rootPath: vm.selectedProject?.path ?? '',
                             revision: vm.fileTreeRevision,
+                            selectedPath: vm.selectedFileInTree,
                             listChildren: vm.listChildren,
                             gitStatusOf: vm.gitStatusForPath,
-                            onOpenFile: vm.openFile,
+                            onOpenFile: (path) => vm.openFile(path, isPreview: false),
+                            onTapFile: vm.openFile, // clique único = preview
+                            onSelectFile: vm.selectFileInTree, // atualiza highlight
                             onOpenWith: vm.openWithDefaultApp,
                             onCreateInFolder: (sub, terminal) =>
                                 vm.newTabIn(sub, terminal: terminal),

@@ -438,24 +438,30 @@ class _TabState extends State<_Tab> {
   }
 
   /// Tap na aba: **seleciona na hora** e detecta duplo-clique manualmente pra
-  /// renomear — sem `onDoubleTap`. Um `DoubleTapGestureRecognizer` seguraria a
-  /// arena de gestos por `kDoubleTapTimeout` (~300ms) antes de cada `onTapUp`,
-  /// atrasando a seleção. Por isso a aba de agente (única com renomear) demorava
-  /// ~meio segundo pra trocar, enquanto a de terminal (sem duplo-clique) trocava
-  /// na hora.
+  /// renomear (agentes) ou fixar (preview). Um `DoubleTapGestureRecognizer`
+  /// seguraria a arena de gestos por `kDoubleTapTimeout` (~300ms) antes de cada
+  /// `onTapUp`, atrasando a seleção.
   void _handleTap() {
     final s = widget.item;
     final agent = s is AgentSession ? s : null;
+    final viewer = s is FileViewerSession ? s : null;
     final canRename = agent != null && agent.status != AgentStatus.empty;
+    final canPin = viewer != null && viewer.isPreview;
     final now = DateTime.now();
     final last = _lastTapAt;
     _lastTapAt = now;
-    if (canRename &&
-        last != null &&
-        now.difference(last) < const Duration(milliseconds: 300)) {
+
+    // Duplo-clique: renomear agente OU fixar preview.
+    if (last != null && now.difference(last) < const Duration(milliseconds: 300)) {
       _lastTapAt = null; // consumiu o segundo clique
-      _startEditing();
-      return;
+      if (canPin) {
+        viewer.pin();
+        return;
+      }
+      if (canRename) {
+        _startEditing();
+        return;
+      }
     }
     widget.onSelect();
   }
@@ -517,11 +523,19 @@ class _TabState extends State<_Tab> {
     if (s == null) return;
     final agent = s is AgentSession ? s : null;
     final isEmpty = agent?.status == AgentStatus.empty;
+    final viewer = s is FileViewerSession ? s : null;
+    final isPreview = viewer?.isPreview ?? false;
 
     final value = await showAppMenu<String>(
       menuCtx,
       minWidth: 150,
       items: [
+        if (viewer != null && isPreview)
+          const AppMenuItem(
+            value: 'pin',
+            label: 'Pin tab',
+            icon: Icons.push_pin_outlined,
+          ),
         if (agent != null && !isEmpty) ...[
           const AppMenuItem(
             value: 'rename',
@@ -545,6 +559,8 @@ class _TabState extends State<_Tab> {
     );
     if (!mounted) return;
     switch (value) {
+      case 'pin':
+        if (viewer != null) viewer.pin();
       case 'rename':
         _startEditing();
       case 'relay':
@@ -573,6 +589,8 @@ class _TabState extends State<_Tab> {
         final icon = _tabIcon(s);
 
         // Título: texto normal ou campo inline ao renomear.
+        // Preview tabs usam itálico (estilo VSCode).
+        final isPreview = s is FileViewerSession && s.isPreview;
         final titleWidget = _editing && agent != null
             ? CallbackShortcuts(
                 bindings: {
@@ -603,6 +621,7 @@ class _TabState extends State<_Tab> {
                   color: isFocusedActive || widget.active
                       ? colors.text
                       : colors.text3,
+                  fontStyle: isPreview ? FontStyle.italic : FontStyle.normal,
                 ),
               );
 
