@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:cockpit/app/cockpit/domain/entities/install_result.dart';
 import 'package:cockpit/app/cockpit/domain/entities/setup_check.dart';
 import 'package:cockpit/app/cockpit/ui/viewmodels/setup_viewmodel.dart';
+import 'package:cockpit/app/cockpit/ui/widgets/macos_notification_instructions_dialog.dart';
 import 'package:cockpit/app/core/ui/themes/themes.dart';
 import 'package:cockpit/app/core/ui/widgets/hover_tap.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -152,7 +155,15 @@ class _OnboardingViewState extends State<OnboardingView>
                   onRecheck: vm.recheckNotifications,
                   action: _StepAction(
                     label: 'Test',
-                    onTap: vm.requestNotifications,
+                    onTap: () async {
+                      await vm.requestNotifications();
+                      if (Platform.isMacOS &&
+                          vm.notifications == CheckStatus.missing) {
+                        if (context.mounted) {
+                          MacosNotificationInstructionsDialog.show(context);
+                        }
+                      }
+                    },
                   ),
                 ),
                 const SizedBox(height: 22),
@@ -203,7 +214,12 @@ class _StepCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final showAction = action != null && status == CheckStatus.missing;
+    // Exibe a ação quando:
+    // - missing: precisa instalar/conceder
+    // - checking: pode pular a espera e já pedir ação diretamente
+    final showAction =
+        action != null &&
+        (status == CheckStatus.missing || status == CheckStatus.checking);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),

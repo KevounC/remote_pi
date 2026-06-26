@@ -22,6 +22,7 @@ class SystemPermissionsImpl implements SystemPermissions {
   Future<CheckStatus> notificationStatus() async {
     if (!Platform.isMacOS) return CheckStatus.notApplicable;
     try {
+      await _ensureInitialized();
       final options = await _macNotif?.checkPermissions();
       return (options?.isEnabled ?? false)
           ? CheckStatus.ok
@@ -35,6 +36,7 @@ class SystemPermissionsImpl implements SystemPermissions {
   Future<CheckStatus> requestNotifications() async {
     if (!Platform.isMacOS) return CheckStatus.notApplicable;
     try {
+      await _ensureInitialized();
       final granted =
           await _macNotif?.requestPermissions(
             alert: true,

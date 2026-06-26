@@ -27,10 +27,7 @@ class SetupViewModel extends ChangeNotifier {
 
   /// Todas as checagens satisfeitas → habilita "Criar Workspace".
   bool get canCreate =>
-      pi.satisfied &&
-      extension.satisfied &&
-      supervisor.satisfied &&
-      notifications.satisfied;
+      pi.satisfied && extension.satisfied && supervisor.satisfied;
 
   /// Roda as 5 ao montar a tela.
   Future<void> recheckAll() async {

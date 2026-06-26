@@ -280,16 +280,14 @@ void main() {
       expect(vm.canCreate, isTrue);
     });
 
-    test('requestNotifications muda missing → ok e libera o gate', () async {
+    test('requestNotifications muda missing → ok', () async {
       final perms = _FakePerms(notif: CheckStatus.missing);
       final vm = SetupViewModel(_FakeEnv(), perms, _FakeInstaller());
       await vm.recheckAll();
       expect(vm.notifications, CheckStatus.missing);
-      expect(vm.canCreate, isFalse);
       await vm.requestNotifications();
       expect(perms.requested, 1);
       expect(vm.notifications, CheckStatus.ok);
-      expect(vm.canCreate, isTrue);
     });
   });
 }
