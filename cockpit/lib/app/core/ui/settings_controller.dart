@@ -51,6 +51,18 @@ class SettingsController extends ChangeNotifier {
   void setLastOpenApp(String id) =>
       _apply(_settings.copyWith(lastOpenAppId: id));
 
+  /// Define (ou limpa, se vazio) o comando do language server de [languageId].
+  void setLspCommand(String languageId, String? command) {
+    final next = Map<String, String>.of(_settings.lspCommands);
+    final trimmed = command?.trim();
+    if (trimmed == null || trimmed.isEmpty) {
+      next.remove(languageId);
+    } else {
+      next[languageId] = trimmed;
+    }
+    _apply(_settings.copyWith(lspCommands: next));
+  }
+
   void _apply(AppSettings next) {
     _settings = next;
     notifyListeners();

@@ -19,6 +19,7 @@ class AppSettings {
     this.syntaxTheme = SyntaxThemeId.one,
     this.pinUserMessage = true,
     this.lastOpenAppId,
+    this.lspCommands = const <String, String>{},
   });
 
   final AppThemeMode themeMode;
@@ -48,6 +49,11 @@ class AppSettings {
   /// ID do último app usado para "Abrir" (ex: `'cursor'`, `'vscode'`, `'finder'`).
   final String? lastOpenAppId;
 
+  /// Override do comando do language server (LSP) por `languageId` (ex.:
+  /// `'dart' → 'dart language-server'`). Vazio/ausente = usa o default do
+  /// catálogo. Editado na seção "Language" das Configurações.
+  final Map<String, String> lspCommands;
+
   AppSettings copyWith({
     AppThemeMode? themeMode,
     String? interfaceFont,
@@ -61,6 +67,7 @@ class AppSettings {
     SyntaxThemeId? syntaxTheme,
     bool? pinUserMessage,
     String? lastOpenAppId,
+    Map<String, String>? lspCommands,
   }) {
     return AppSettings(
       themeMode: themeMode ?? this.themeMode,
@@ -76,6 +83,7 @@ class AppSettings {
       syntaxTheme: syntaxTheme ?? this.syntaxTheme,
       pinUserMessage: pinUserMessage ?? this.pinUserMessage,
       lastOpenAppId: lastOpenAppId ?? this.lastOpenAppId,
+      lspCommands: lspCommands ?? this.lspCommands,
     );
   }
 
@@ -89,6 +97,7 @@ class AppSettings {
     'syntaxTheme': syntaxTheme.name,
     'pinUserMessage': pinUserMessage,
     if (lastOpenAppId != null) 'lastOpenAppId': lastOpenAppId,
+    if (lspCommands.isNotEmpty) 'lspCommands': lspCommands,
   };
 
   factory AppSettings.fromJson(Map<dynamic, dynamic> json) {
@@ -115,8 +124,18 @@ class AppSettings {
       ),
       pinUserMessage: json['pinUserMessage'] as bool? ?? true,
       lastOpenAppId: str(json['lastOpenAppId']),
+      lspCommands: _strMap(json['lspCommands']),
     );
   }
+}
+
+Map<String, String> _strMap(Object? raw) {
+  if (raw is! Map) return const <String, String>{};
+  final out = <String, String>{};
+  raw.forEach((k, v) {
+    if (k is String && v is String && v.trim().isNotEmpty) out[k] = v;
+  });
+  return out;
 }
 
 T _enumByName<T extends Enum>(List<T> values, Object? raw, T fallback) {

@@ -1,13 +1,17 @@
+import 'package:cockpit/app/core/domain/entities/lsp_diagnostic.dart';
 import 'package:cockpit/app/core/ui/themes/themes.dart';
 import 'package:cockpit/app/core/ui/widgets/code_editing_controller.dart';
 import 'package:flutter/material.dart'
     show
+        Icon,
+        Icons,
         Scrollbar,
         ScrollbarOrientation,
         TextField,
         InputDecoration,
         InputBorder,
-        TextInputType;
+        TextInputType,
+        Tooltip;
 import 'package:flutter/widgets.dart';
 
 /// Área **editável** de código com gutter de número de linha — a contraparte
@@ -45,10 +49,19 @@ class _CodeEditorState extends State<CodeEditor> {
   }
 
   int _lineCount = 1;
+  List<LspDiagnostic> _lastDiag = const <LspDiagnostic>[];
 
   void _onChanged() {
     final n = '\n'.allMatches(widget.controller.text).length + 1;
-    if (n != _lineCount && mounted) setState(() => _lineCount = n);
+    final diag = widget.controller.diagnostics;
+    // Rebuild do gutter quando o nº de linhas OU os diagnostics mudam (o campo
+    // de texto repinta sozinho via buildTextSpan; o gutter depende de setState).
+    if ((n != _lineCount || !identical(diag, _lastDiag)) && mounted) {
+      setState(() {
+        _lineCount = n;
+        _lastDiag = diag;
+      });
+    }
   }
 
   @override
@@ -58,6 +71,47 @@ class _CodeEditorState extends State<CodeEditor> {
     _horizontal.dispose();
     super.dispose();
   }
+
+  /// Largura fixa reservada pro slot do ícone de severity — **sempre** presente
+  /// (mesmo sem diagnostic) pra que a coluna do gutter não mude de largura e
+  /// empurre o código quando um erro aparece/some.
+  static const double _iconSlot = 16;
+
+  /// Uma linha do gutter: um slot fixo (ícone de severity quando há diagnostic,
+  /// senão vazio) + o número. O ícone (12px) cabe na altura da linha de texto,
+  /// mantendo o alinhamento 1:1 com o código.
+  Widget _gutterLine(int oneBased, TextStyle numStyle) {
+    final severity = widget.controller.severityForLine(oneBased - 1);
+    final Widget slot;
+    if (severity == null) {
+      slot = const SizedBox(width: _iconSlot);
+    } else {
+      final messages = widget.controller.messagesForLine(oneBased - 1);
+      slot = SizedBox(
+        width: _iconSlot,
+        child: Tooltip(
+          message: messages.join('\n'),
+          child: Icon(
+            _severityIcon(severity),
+            size: 12,
+            color: SyntaxColors.diagnosticColor(severity),
+          ),
+        ),
+      );
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [slot, Text('$oneBased', style: numStyle)],
+    );
+  }
+
+  IconData _severityIcon(LspSeverity severity) => switch (severity) {
+    LspSeverity.error => Icons.error,
+    LspSeverity.warning => Icons.warning_amber_rounded,
+    LspSeverity.info => Icons.info_outline,
+    LspSeverity.hint => Icons.lightbulb_outline,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -100,7 +154,7 @@ class _CodeEditorState extends State<CodeEditor> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         for (var i = 1; i <= lineCount; i++)
-                          Text('$i', style: numStyle),
+                          _gutterLine(i, numStyle),
                       ],
                     ),
                   ),

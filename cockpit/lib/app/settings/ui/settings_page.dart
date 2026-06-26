@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:cockpit/app/settings/domain/cron_schedule.dart';
+import 'package:cockpit/app/core/data/lsp/lsp_command.dart';
+import 'package:cockpit/app/core/data/lsp/lsp_launchers.dart';
 import 'package:cockpit/app/core/domain/entities/app_settings.dart';
 import 'package:cockpit/app/settings/domain/entities/cron_job.dart';
 import 'package:cockpit/app/settings/domain/entities/daemon_info.dart';
@@ -30,7 +32,7 @@ class SettingsPage extends StatefulWidget {
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
-enum _Category { appearance, connectivity, daemons, scheduling }
+enum _Category { appearance, languages, connectivity, daemons, scheduling }
 
 class _SettingsPageState extends State<SettingsPage> {
   _Category _category = _Category.appearance;
@@ -54,6 +56,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 Expanded(
                   child: switch (_category) {
                     _Category.appearance => const _AppearancePanel(),
+                    _Category.languages => const _LanguagesPanel(),
                     _Category.connectivity => const _ConnectivityPanel(),
                     _Category.daemons => const _DaemonsPanel(),
                     _Category.scheduling => const _AgendamentosPanel(),
@@ -124,6 +127,12 @@ class _CategoryNav extends StatelessWidget {
             label: 'Appearance',
             selected: selected == _Category.appearance,
             onTap: () => onSelect(_Category.appearance),
+          ),
+          _NavItem(
+            icon: Icons.code,
+            label: 'Language',
+            selected: selected == _Category.languages,
+            onTap: () => onSelect(_Category.languages),
           ),
           _NavItem(
             icon: Icons.wifi_tethering,
@@ -690,6 +699,265 @@ class _SizeStepper extends StatelessWidget {
         width: 30,
         height: 32,
         child: Icon(icon, size: 15, color: context.colors.text2),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Language (LSP)
+// ---------------------------------------------------------------------------
+
+/// Configura o comando do language server (LSP) de cada linguagem. Vem
+/// pré-preenchido com o default do catálogo; o usuário pode sobrescrever (ex.:
+/// caminho custom do binário). Um indicador mostra se o executável está no PATH
+/// — comunica por que uma linguagem mostra erros e outra não, sem prometer
+/// mágica (Cockpit não instala servidores; só usa o que está na máquina).
+class _LanguagesPanel extends StatelessWidget {
+  const _LanguagesPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.watch<SettingsController>();
+    final overrides = ctrl.settings.lspCommands;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(28, 24, 28, 40),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _Section(
+            label: 'LANGUAGE SERVERS',
+            child: _Card(
+              children: [
+                for (final def in kLanguageDefs)
+                  _LanguageRow(
+                    key: ValueKey(def.id),
+                    def: def,
+                    overrideCommand: overrides[def.id],
+                    onChanged: (value) => ctrl.setLspCommand(def.id, value),
+                  ),
+              ],
+            ),
+          ),
+          Text(
+            'Erros e formatação usam o language server da linguagem. O Cockpit '
+            'não instala servidores — ele usa o que já está na sua máquina. '
+            '● responde · ○ não encontrado ou comando inválido (instale o '
+            'servidor ou ajuste o comando).',
+            style: context.typo.label.copyWith(color: context.colors.text3),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Linha de uma linguagem: nome + status (●/○) + campo do comando. A detecção no
+/// PATH roda ao montar e a cada edição (com o primeiro token do comando).
+class _LanguageRow extends StatefulWidget {
+  const _LanguageRow({
+    super.key,
+    required this.def,
+    required this.overrideCommand,
+    required this.onChanged,
+  });
+
+  final LanguageDef def;
+  final String? overrideCommand;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  State<_LanguageRow> createState() => _LanguageRowState();
+}
+
+class _LanguageRowState extends State<_LanguageRow> {
+  late final TextEditingController _ctrl;
+  bool? _available; // null = checando
+  bool _expanded = false;
+
+  String get _default => <String>[
+    widget.def.defaultExecutable,
+    ...widget.def.defaultArgs,
+  ].join(' ').trim();
+
+  bool _dirty = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.overrideCommand ?? _default);
+    _ctrl.addListener(_onTextChanged);
+    _detect();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.removeListener(_onTextChanged);
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  /// Estado salvo atual (o que está persistido), pra comparar com o buffer.
+  String get _saved => widget.overrideCommand ?? _default;
+
+  void _onTextChanged() {
+    final dirty = _ctrl.text.trim() != _saved.trim();
+    if (dirty != _dirty) setState(() => _dirty = dirty);
+  }
+
+  /// Sonda o comando salvo: spawna e verifica se fica vivo como um LSP de
+  /// verdade (valida os argumentos, não só o binário). Usa o comando salvo
+  /// (`_saved`), não o buffer não-salvo — o status reflete o que está ativo.
+  Future<void> _detect() async {
+    setState(() => _available = null); // checando
+    final ok = await probeLspCommand(_saved);
+    if (mounted) setState(() => _available = ok);
+  }
+
+  /// Salva o comando (persiste + reinicia o LSP daquela linguagem via o listener
+  /// do shell). Igual ao default → limpa o override.
+  void _save() {
+    final value = _ctrl.text.trim();
+    widget.onChanged(value.isEmpty || value == _default ? null : value);
+    setState(() => _dirty = false);
+    _detect();
+  }
+
+  /// Volta ao comando padrão do catálogo e salva (limpa o override).
+  void _reset() {
+    _ctrl.text = _default;
+    widget.onChanged(null);
+    setState(() => _dirty = false);
+    _detect();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Cabeçalho clicável: chevron + nome + extensões + status.
+        HoverTap(
+          onTap: () => setState(() => _expanded = !_expanded),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Icon(
+                _expanded ? Icons.expand_more : Icons.chevron_right,
+                size: 18,
+                color: colors.text3,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                widget.def.label,
+                style: context.typo.body.copyWith(
+                  fontSize: 13.5,
+                  color: colors.text,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '.${widget.def.extensions.join(' · .')}',
+                style: context.typo.label.copyWith(color: colors.text4),
+              ),
+              const Spacer(),
+              _StatusDot(available: _available),
+            ],
+          ),
+        ),
+        // Corpo expandido: rótulo + campo do comando (largura cheia). Espaço pra
+        // crescer com mais opções por linguagem no futuro.
+        if (_expanded)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(40, 0, 14, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Language server command',
+                  style: context.typo.label.copyWith(color: colors.text3),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _ctrl,
+                  onSubmitted: (_) => _save(),
+                  style: context.typo.mono.copyWith(
+                    fontSize: 12.5,
+                    color: colors.text,
+                  ),
+                  placeholder: Text(_default),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    HoverTap(
+                      borderRadius: BorderRadius.circular(7),
+                      onTap: _reset,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 7,
+                      ),
+                      child: Text(
+                        'Reset to default',
+                        style: context.typo.body.copyWith(
+                          fontSize: 12.5,
+                          color: colors.text2,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    HoverTap(
+                      color: _dirty ? colors.accent : colors.panel3,
+                      borderRadius: BorderRadius.circular(7),
+                      onTap: _dirty ? _save : () {},
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 7,
+                      ),
+                      child: Text(
+                        'Save & restart',
+                        style: context.typo.body.copyWith(
+                          fontSize: 12.5,
+                          color: _dirty ? colors.accentText : colors.text4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Bolinha de status do executável: verde (encontrado), cinza vazado (ausente),
+/// cinza claro (checando).
+class _StatusDot extends StatelessWidget {
+  const _StatusDot({required this.available});
+  final bool? available;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final (Color color, String tip) = switch (available) {
+      true => (const Color(0xFF22C55E), 'Server responds'),
+      false => (colors.text4, 'Server not found or command invalid'),
+      null => (colors.border, 'Checking…'),
+    };
+    return Tooltip(
+      tooltip: (context) => TooltipContainer(child: Text(tip)),
+      child: Container(
+        width: 9,
+        height: 9,
+        decoration: BoxDecoration(
+          color: available == false ? Colors.transparent : color,
+          shape: BoxShape.circle,
+          border: available == false ? Border.all(color: color) : null,
+        ),
       ),
     );
   }
