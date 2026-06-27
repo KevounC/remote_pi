@@ -18,6 +18,8 @@ import 'package:cockpit/app/cockpit/data/setup/environment_installer_impl.dart';
 import 'package:cockpit/app/cockpit/data/setup/environment_probe_impl.dart';
 import 'package:cockpit/app/cockpit/data/setup/system_permissions_impl.dart';
 import 'package:cockpit/app/cockpit/data/terminal/pty_terminal_gateway_factory.dart';
+import 'package:cockpit/app/cockpit/data/update/auto_updater_self_updater.dart';
+import 'package:cockpit/app/cockpit/data/update/noop_self_updater.dart';
 import 'package:cockpit/app/cockpit/data/update/update_checker_impl.dart';
 import 'package:cockpit/app/cockpit/data/update/url_opener_impl.dart';
 import 'package:cockpit/app/cockpit/domain/contracts/app_launcher.dart';
@@ -33,6 +35,7 @@ import 'package:cockpit/app/cockpit/domain/contracts/git_status_reader.dart';
 import 'package:cockpit/app/cockpit/domain/contracts/notifier.dart';
 import 'package:cockpit/app/cockpit/domain/contracts/project_repository.dart';
 import 'package:cockpit/app/cockpit/domain/contracts/rpc_gateway_factory.dart';
+import 'package:cockpit/app/cockpit/domain/contracts/self_updater.dart';
 import 'package:cockpit/app/cockpit/domain/contracts/session_history.dart';
 import 'package:cockpit/app/cockpit/domain/contracts/system_permissions.dart';
 import 'package:cockpit/app/cockpit/domain/contracts/terminal_gateway_factory.dart';
@@ -117,6 +120,10 @@ Future<Module> buildCockpitModule() async {
         ..addInstance<UpdateChecker>(const UpdateCheckerImpl())
         ..addInstance<UrlOpener>(const UrlOpenerImpl())
         ..addInstance<UpdateTarget>(_updateTarget(appVersion))
+        // Self-update nativo (plano 47): Sparkle/WinSparkle quando há appcast
+        // pra plataforma (macOS/Windows); Noop no Linux → o card cai no caminho
+        // de notify + download manual (UpdateChecker).
+        ..addInstance<SelfUpdater>(_buildSelfUpdater(_updateTarget(appVersion)))
         ..route(
           '/',
           // ViewModels page-scoped via tear-off `.new` → o auto_injector resolve
@@ -132,8 +139,13 @@ Future<Module> buildCockpitModule() async {
   );
 }
 
+/// Base do rp-s3 onde moram `latest.json` (notify) e os appcasts (self-update).
+const String _kDownloadsBase =
+    'https://rp-s3.jacobmoura.work/downloads/cockpit';
+
 /// [UpdateTarget] da máquina atual: versão do app + plataforma/formato/arch do
-/// manifest. macOS → dmg/universal; Windows → exe/x64; Linux → deb/(arm64|x64).
+/// manifest + URL do appcast de self-update (macOS/Windows; `null` no Linux).
+/// macOS → dmg/universal; Windows → exe/x64; Linux → deb/(arm64|x64).
 UpdateTarget _updateTarget(String version) {
   if (Platform.isMacOS) {
     return UpdateTarget(
@@ -141,6 +153,7 @@ UpdateTarget _updateTarget(String version) {
       platform: 'macos',
       format: 'dmg',
       arch: 'universal',
+      selfUpdateFeedUrl: '$_kDownloadsBase/appcast-macos.xml',
     );
   }
   if (Platform.isWindows) {
@@ -149,6 +162,7 @@ UpdateTarget _updateTarget(String version) {
       platform: 'windows',
       format: 'exe',
       arch: 'x64',
+      selfUpdateFeedUrl: '$_kDownloadsBase/appcast-windows.xml',
     );
   }
   final arch = Platform.version.toLowerCase().contains('arm') ? 'arm64' : 'x64';
@@ -158,4 +172,13 @@ UpdateTarget _updateTarget(String version) {
     format: 'deb',
     arch: arch,
   );
+}
+
+/// Constrói o [SelfUpdater] da plataforma: [AutoUpdaterSelfUpdater] quando há
+/// appcast (macOS/Windows), [NoopSelfUpdater] no Linux (sem self-update nativo →
+/// o `UpdateViewModel` usa o caminho de notify + download manual).
+SelfUpdater _buildSelfUpdater(UpdateTarget target) {
+  final feed = target.selfUpdateFeedUrl;
+  if (feed == null) return const NoopSelfUpdater();
+  return AutoUpdaterSelfUpdater(feedUrl: feed);
 }

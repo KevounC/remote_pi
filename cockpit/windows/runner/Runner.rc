@@ -108,6 +108,19 @@ END
 #endif    // English (United States) resources
 /////////////////////////////////////////////////////////////////////////////
 
+/////////////////////////////////////////////////////////////////////////////
+//
+// Plano 47 — chave pública EdDSA do self-update (WinSparkle).
+//
+// O plugin auto_updater_windows NÃO chama win_sparkle_set_eddsa_public_key(),
+// então a chave precisa ser embarcada como recurso "EdDSAPub" do tipo "EDDSA".
+// É a MESMA chave ed25519 do Sparkle (macOS) — uma chave só serve aos dois
+// (verificado: sign_update e PyNaCl produzem assinatura idêntica). A privada
+// vive no iCloud + secret SPARKLE_PRIVATE_KEY. VALIDAR no Windows real.
+//
+EdDSAPub EDDSA {"WoJTWryr48pWiAnDPqqt/Iu9f6gAsU7A1zBb5mBLruI="}
+/////////////////////////////////////////////////////////////////////////////
+
 
 
 #ifndef APSTUDIO_INVOKED

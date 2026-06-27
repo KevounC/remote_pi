@@ -30,5 +30,20 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Plano 47 — self-update via Sparkle (pacote auto_updater). Chave pública
+	     EdDSA (a privada vive no iCloud + secret SPARKLE_PRIVATE_KEY). O feed
+	     (appcast-macos.xml) é setado em runtime via setFeedURL (delegate do
+	     plugin), então NÃO há SUFeedURL aqui — o Sparkle 2 lança exceção se
+	     houver delegate de feed E SUFeedURL juntos. Auto-check + auto-update
+	     silencioso (decisões B/C): baixa em background e instala no próximo
+	     quit; o nosso card reflete o estado. -->
+	<key>SUPublicEDKey</key>
+	<string>WoJTWryr48pWiAnDPqqt/Iu9f6gAsU7A1zBb5mBLruI=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>

@@ -4,6 +4,20 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 As versões seguem o `version:` do `pubspec.yaml` (SSOT). O campo `notes` do
 `latest.json` (VPS) deriva deste arquivo.
 
+## [Unreleased]
+
+### Added
+- **Self-update (plano 47):** Cockpit agora se atualiza sozinho no macOS e no
+  Windows via Sparkle/WinSparkle (pacote `auto_updater`): checa e baixa em
+  background, mostra "restart to install" no card do rail e troca o binário ao
+  reiniciar. **Linux** segue no aviso + download manual (`latest.json`). O CI
+  passa a publicar `appcast-macos.xml` e `appcast-windows.xml` (assinados EdDSA)
+  ao lado do `latest.json`.
+
+> Nota de release: o Sparkle compara o **build number** (`CFBundleVersion`, o
+> `+n`) — incremente o `+n` no `pubspec.yaml` a cada release ou o macOS não
+> detecta a versão nova.
+
 ## [1.1.0] — 2026-06-12
 
 ### Changed

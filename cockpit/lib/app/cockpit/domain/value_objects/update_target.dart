@@ -9,6 +9,7 @@ class UpdateTarget {
     required this.platform,
     required this.format,
     required this.arch,
+    this.selfUpdateFeedUrl,
   });
 
   /// Versão do app rodando (de `package_info`).
@@ -18,4 +19,9 @@ class UpdateTarget {
   final String platform;
   final String format;
   final String arch;
+
+  /// Plano 47 — URL do appcast do self-update nativo (Sparkle/WinSparkle):
+  /// `appcast-macos.xml` no macOS, `appcast-windows.xml` no Windows. `null` no
+  /// Linux (sem self-update → cai no caminho de notify + download manual).
+  final String? selfUpdateFeedUrl;
 }

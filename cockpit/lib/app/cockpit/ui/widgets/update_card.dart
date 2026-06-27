@@ -5,18 +5,24 @@ import 'package:flutter_modular/flutter_modular.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 /// Mini update card at the bottom of the rail — above the machine name. Only
-/// renders when the [UpdateViewModel] has a new, non-dismissed version.
-/// Clicking downloads the artifact; the X dismisses it (persisted per version).
+/// renders when the [UpdateViewModel] has a pending update.
+///
+/// - **macOS/Windows (self-update):** shows download progress, then "restart to
+///   install"; tapping installs the downloaded update and relaunches.
+/// - **Linux (notify):** "click to download"; tapping opens the artifact URL.
+///
+/// The X dismisses it (persisted per version on Linux; session-only on
+/// self-update, where the next downloaded version re-surfaces the card).
 class UpdateCard extends StatelessWidget {
   const UpdateCard({super.key});
 
   @override
   Widget build(BuildContext context) {
     final vm = context.watch<UpdateViewModel>();
-    final info = vm.available;
-    if (info == null) return const SizedBox.shrink();
+    if (!vm.hasUpdate) return const SizedBox.shrink();
 
     final colors = context.colors;
+    final ready = vm.isReadyToInstall;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
       child: HoverTap(
@@ -24,11 +30,15 @@ class UpdateCard extends StatelessWidget {
         hoverColor: colors.panel3,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: colors.accent.withValues(alpha: 0.5)),
-        onTap: () => context.read<UpdateViewModel>().download(),
+        onTap: () => context.read<UpdateViewModel>().primaryAction(),
         padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
         child: Row(
           children: [
-            Icon(Icons.system_update_alt, size: 15, color: colors.accentText),
+            Icon(
+              ready ? Icons.restart_alt : Icons.system_update_alt,
+              size: 15,
+              color: colors.accentText,
+            ),
             const SizedBox(width: 9),
             Expanded(
               child: Column(
@@ -36,7 +46,7 @@ class UpdateCard extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'Update available',
+                    vm.cardTitle,
                     overflow: TextOverflow.ellipsis,
                     style: context.typo.label.copyWith(
                       color: colors.text,
@@ -45,7 +55,7 @@ class UpdateCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 1),
                   Text(
-                    'v${info.version} — click to download',
+                    vm.cardSubtitle,
                     overflow: TextOverflow.ellipsis,
                     style: context.typo.label.copyWith(color: colors.text3),
                   ),

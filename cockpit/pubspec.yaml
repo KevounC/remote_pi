@@ -122,6 +122,12 @@ dependencies:
   package_info_plus: ^8.0.0
   url_launcher: ^6.3.0
 
+  # Plano 47 — self-update nativo: Sparkle (macOS) + WinSparkle (Windows) via o
+  # plugin federado auto_updater. No Linux é no-op (NoopSelfUpdater) e o caminho
+  # de notify+download manual (UpdateChecker/UpdateCard) assume. O macOS embarca
+  # o Sparkle.framework via CocoaPods; o Windows vendoriza a WinSparkle.dll.
+  auto_updater: ^1.0.0
+
 dependency_overrides:
   # Fork do xterm com render procedural de Block Elements (U+2580–259F) e Box
   # Drawing (U+2500–257F): o xterm 4.0 pinta esses glifos com a fonte (no

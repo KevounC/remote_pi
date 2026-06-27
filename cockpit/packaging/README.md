@@ -78,7 +78,7 @@ codesign --force --timestamp \
 
 # 5. Notariza (App Store Connect API key) e aguarda.
 xcrun notarytool submit "$DMG" \
-  --key /Users/jacob/Documents/CockpitApp/AuthKey_3Y2J8MA3M4.p8 \
+  --key "/Users/jacob/Library/Mobile Documents/com~apple~CloudDocs/Flutterando/RemotePi/CockpitApp/AuthKey_3Y2J8MA3M4.p8" \
   --key-id 3Y2J8MA3M4 \
   --issuer a76c76e6-a413-449e-926c-f2c30d5645c4 \
   --wait
@@ -122,9 +122,74 @@ de CI** (passo 3): rodar `ldd` no bundle gerado pra confirmar/expandir as deps, 
 validar instalação em containers `ubuntu:24.04` (deb) e `fedora:40` (rpm) — não
 foi possível neste Mac (sem build Linux; Docker presente mas parado).
 
+## Self-update (plano 47 — Sparkle/WinSparkle)
+
+macOS e Windows se auto-atualizam via o pacote `auto_updater` (Sparkle/WinSparkle);
+Linux segue no notify+download manual. O app lê um **appcast** (a URL é cravada
+em runtime via `setFeedURL`) e baixa o artefato de update assinado **EdDSA**.
+
+### Artefatos de update (≠ instalador de primeira vez)
+
+| Plataforma | Primeira instalação | Update (appcast) |
+|---|---|---|
+| macOS | `.dmg` notarizado | **`Cockpit-<v>-macos.zip`** = `ditto` do `.app` notarizado+**stapled** |
+| Windows | `.exe` Inno | o **mesmo `.exe`** rodado silencioso (`sparkle:installerArguments`) |
+| Linux | `.deb`/`.rpm` | — |
+
+### Chave EdDSA (uma só pros dois)
+
+Sparkle e WinSparkle usam **ed25519**, que é determinístico — a mesma chave serve
+aos dois (verificado: `sign_update` do Sparkle e PyNaCl geram assinatura idêntica).
+Por isso há **um par** de chaves, não dois.
+
+- **Pública** (commitada): `WoJTWryr48pWiAnDPqqt/Iu9f6gAsU7A1zBb5mBLruI=`
+  - macOS: `SUPublicEDKey` em `macos/Runner/Info.plist`.
+  - Windows: recurso `EdDSAPub EDDSA {...}` em `windows/runner/Runner.rc`.
+- **Privada** (NUNCA commitar): backup em
+  `…/CloudDocs/Flutterando/RemotePi/CockpitApp/sparkle_ed25519_private_key.txt`
+  (iCloud, junto dos certs Apple) **e** no secret do GitHub `SPARKLE_PRIVATE_KEY`.
+  Gerada via Sparkle na conta de keychain `remote-pi-cockpit`.
+
+Regenerar / rotacionar (⚠️ trocar a chave **trava a base instalada**: os apps
+antigos só confiam na pública embutida neles — só faça se a privada vazar, e
+saiba que os usuários atuais terão que reinstalar manualmente):
+
+```bash
+cd cockpit
+# (re)gera; imprime a SUPublicEDKey; privada vai pro Keychain (conta dedicada)
+./macos/Pods/Sparkle/bin/generate_keys --account remote-pi-cockpit
+# exporta a privada pro iCloud (pede "Allow" no Keychain)
+./macos/Pods/Sparkle/bin/generate_keys --account remote-pi-cockpit -x \
+  "/Users/jacob/Library/Mobile Documents/com~apple~CloudDocs/Flutterando/RemotePi/CockpitApp/sparkle_ed25519_private_key.txt"
+# atualizar: SUPublicEDKey (Info.plist), EdDSAPub (Runner.rc) e o secret SPARKLE_PRIVATE_KEY
+```
+
+### Assinatura + appcasts (no CI, job `publish`)
+
+Tudo num lugar só, em ubuntu, com **uma** chave e **sem** ferramenta nativa: o
+job assina `Cockpit-<v>-macos.zip` e o `.exe` com PyNaCl (a `SPARKLE_PRIVATE_KEY`)
+e gera `appcast-macos.xml` + `appcast-windows.xml`. macOS usa
+`sparkle:version` = **build number** (`+n`); Windows usa a versão marketing.
+
+### Publicação (gate manual)
+
+Junto do `latest.json`, suba `appcast-macos.xml` e `appcast-windows.xml` pro rp-s3
+(`/Users/flutterando/cockpit/data/`). Até subir, ninguém se auto-atualiza. As feed
+URLs são `https://rp-s3.jacobmoura.work/downloads/cockpit/appcast-{macos,windows}.xml`.
+
+### Pendências (não testáveis neste Mac)
+
+- Adicionar o secret `SPARKLE_PRIVATE_KEY` no repo (conteúdo do arquivo do iCloud).
+- Validar no **Windows real**: recurso `EdDSAPub`, install silencioso sem UAC,
+  relaunch (Restart Manager) sem duplo-launch.
+- Validar o **codesign do Sparkle** na notarização (framework + Autoupdate +
+  Updater.app + XPCServices — confirmados presentes no bundle; `--deep` deve cobrir).
+- E2E real: subir um appcast apontando pra v(N+1) e ver um cockpit v(N) se atualizar.
+
 ## Próximos passos (plano 43)
 
-- Passo 3: `.github/workflows/cockpit-release.yml` (trigger `cockpit-v*`).
+- Passo 3: `.github/workflows/cockpit-release.yml` (trigger `cockpit-v*`). **Feito**
+  (+ self-update do plano 47: `.app.zip` + appcasts assinados).
 - Passo 4: layout/`latest.json` na VPS.
 - Passo 5: página de downloads no `site/`.
 - Passo 6: runbook de release (bump `version:` → tag → CI → smoke test).

@@ -141,7 +141,7 @@ Estas decisões foram **propositalmente adiadas**. Quando alguém quiser fechar,
 | **App mobile: distribuição DUPLA** | iOS = **App Store**; Android = **Play Store** (AAB) **+ APK direto** (`RemotePi.apk` em GitHub Release `app-v*`, ofertado na `/download` do site). A frase "não precisamos subir pras lojas" significava não *depender* delas — as lojas continuam canais. Artefatos store-ready verificados em `1.1.0+5` (IPA assinado Apple Distribution + AAB assinado release), build manual via agente do App; o CI cobre só o APK direto |
 | **Cockpit (desktop): fora de lojas** | DMG notarizado (macOS) + EXE sem assinatura (Windows, SmartScreen documentado) + deb/rpm (Linux x64+arm64) via GitHub Release `cockpit-v*` |
 | **Hospedagem de binários** | Assets de GitHub Releases (tags prefixadas por produto; monorepo ok como puro storage). VPS **sem SSH** → `rp-s3` serve só os `latest.json` por produto; usuário posiciona o manifest manualmente = **gate de publicação** |
-| **Updates** | Sem auto-update. Site (`/download`) + card in-app dispensável (Cockpit e app Android) lendo o `latest.json`; card pode aparecer pra install de loja (sem detecção de origem) |
+| **Updates** | ~~Sem auto-update.~~ **(revisto 2026-06-27 — plano 47)**: Cockpit **macOS/Windows** ganham **self-update** via Sparkle/WinSparkle (pacote `auto_updater`): baixa em background, card "reiniciar p/ instalar", troca + relança. **Linux mantém notify manual.** Gate de publicação manual no rp-s3 **continua** (agora cobre também os `appcast-{macos,windows}.xml`). Site (`/download`) + card in-app dispensável (Cockpit e app Android) seguem lendo o `latest.json` como fallback / caminho do Linux+Android; card pode aparecer pra install de loja (sem detecção de origem) |
 
 ---
 
