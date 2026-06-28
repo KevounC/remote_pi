@@ -1,7 +1,7 @@
 ---
 id: story-api-reference-pi-extension-typescript-stack
 kind: story
-stage: review
+stage: done
 tags: [pi-extension, research, docs]
 parent: feature-agent-reference-surface
 depends_on: [story-research-platform-agent-reference-patterns]
@@ -41,6 +41,7 @@ Create a platform-style stack reference for `pi-extension/`, where most high-ris
 - Sources consulted: `pi-extension/CLAUDE.md`, `pi-extension/package.json`, `pi-extension/src/index.ts`, `pi-extension/src/actions/handlers.ts`, `pi-extension/src/transport/relay_client.ts`, `pi-extension/src/pairing/storage.ts`, `pi-extension/src/protocol/{types,codec}.ts`, `pi-extension/src/session/broker_remote.ts`, `pi-extension/src/daemon/rpc_child.ts`, `pi-extension/src/extension.test.ts` search hits, and installed Pi docs under `/home/agent/.local/lib/node_modules/@earendil-works/pi-coding-agent/docs/` for lifecycle/session APIs.
 - ARD-shaped validation pass added `.research/attestation/*` files for the load-bearing sources and citation anchors in the skill reference.
 - Adversarial review pass `fe83eb9f-1cdf-487` found one process blocker and two major content issues. Fixes applied: added attestations/citations, corrected the `codec.ts` validation-boundary wording, documented daemon-mode `session_new` exit/restart behavior, added `approve_tool`, and pinned cross-PC anti-spoof checklist language to `BrokerRemote.handleIncoming`.
+- Final review pass `c4a1ca92-1809-4bc` approved with no blockers, important findings, or nits. The reviewer verified citation handles resolve, prior findings are fixed, and `AGENTS.md` links the reference.
 
 ## Acceptance
 
