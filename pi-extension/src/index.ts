@@ -333,6 +333,11 @@ function _notify(msg: string, type: "info" | "warning" | "error" = "info", ctx?:
   }
 }
 
+function _forgetStaleMessageApi(api: AgentMessageApi): void {
+  if (api === _messageApi) _messageApi = null;
+  if (api === _pi) _pi = null;
+}
+
 function _sendPiMessage(
   message: Parameters<ExtensionAPI["sendMessage"]>[0],
   options?: Parameters<ExtensionAPI["sendMessage"]>[1],
@@ -343,14 +348,20 @@ function _sendPiMessage(
   for (const api of candidates) {
     if (!api || typeof api.sendMessage !== "function") continue;
     try {
-      api.sendMessage(message, options);
+      const delivered = api.sendMessage(message, options);
+      if (_isPromiseLike(delivered)) {
+        delivered.catch((err: unknown) => {
+          const detail = err instanceof Error ? err.message : String(err);
+          if (_isStaleContextError(err)) _forgetStaleMessageApi(api);
+          console.error(`[remote-pi] ${label}: Pi rejected message: ${detail}`);
+        });
+      }
       return true;
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       lastDetail = detail;
       if (_isStaleContextError(err)) {
-        if (api === _messageApi) _messageApi = null;
-        if (api === _pi) _pi = null;
+        _forgetStaleMessageApi(api);
         continue;
       }
       console.error(`[remote-pi] ${label}: Pi rejected message: ${detail}`);
@@ -1073,6 +1084,10 @@ function _attachOwner(
 //     channel yet → attach + route the inner (reconnect path)
 //   • Anything else (unknown peer + non-pair) → emit `error: unknown_peer`
 
+function _isCurrentStartedRelay(relay: RelayClient): boolean {
+  return !_disposed && _state === "started" && relay === _relay;
+}
+
 function _installAutoListener(relay: RelayClient): () => void {
   const onMsg = async (line: string) => {
     let outer: { peer?: string; ct?: string };
@@ -1109,6 +1124,7 @@ function _installAutoListener(relay: RelayClient): () => void {
     // sends a non-pair message → attach + route through the new channel.
     // See pairing.md §Reconexão.
     const known = await _findKnownPeer(appPeerId);
+    if (!_isCurrentStartedRelay(relay)) return;
     if (known) {
       const channel = _attachOwner(relay, appPeerId, known.name);
       // The PlainPeerChannel listener for this owner won't have seen the
@@ -1196,9 +1212,12 @@ async function _handlePairRequest(
     });
     _refreshPairingsCache();
   } catch (err) {
-    sendError("internal_error", `Failed to persist peer: ${String(err)}`);
+    if (_isCurrentStartedRelay(relay)) {
+      sendError("internal_error", `Failed to persist peer: ${String(err)}`);
+    }
     return;
   }
+  if (!_isCurrentStartedRelay(relay)) return;
 
   const cwd = _currentCwd();
   // Prefer the user-configured agent_name (with broker suffix when on the
@@ -1254,8 +1273,15 @@ let _lastCtx: Pick<ExtensionContext, "ui" | "abort" | "cwd"> | null = null;
 let _lastEventCtx: Pick<ExtensionContext, "compact" | "abort" | "ui"> | null = null;
 const _noopCtx = { ui: { notify: () => undefined }, abort: () => undefined };
 
-type AgentMessageApi = Pick<ExtensionAPI, "sendMessage" | "sendUserMessage">;
+type AgentMessageApi = {
+  sendMessage: (...args: Parameters<ExtensionAPI["sendMessage"]>) => void | Promise<void>;
+  sendUserMessage: (...args: Parameters<ExtensionAPI["sendUserMessage"]>) => void | Promise<void>;
+};
 let _messageApi: AgentMessageApi | null = null;
+
+function _isPromiseLike(value: unknown): value is PromiseLike<void> {
+  return !!value && (typeof value === "object" || typeof value === "function") && typeof (value as { then?: unknown }).then === "function";
+}
 
 function _isAgentMessageApi(value: unknown): value is AgentMessageApi {
   if (!value || typeof value !== "object") return false;
@@ -1958,7 +1984,7 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
       );
       return;
     }
-    ctx.ui.notify(`[remote-pi] relay connect failed: ${String(err)}`, "error");
+    _notify(`[remote-pi] relay connect failed: ${String(err)}`, "error", ctx);
     return;
   }
 
@@ -2883,21 +2909,22 @@ function _deployAgentNetworkSkill(): void {
 }
 
 /**
- * Inject text into the agent as a user message, waking a turn. The Pi SDK's
- * `ExtensionAPI.sendUserMessage` is fire-and-forget (returns `void`) and
- * "always triggers a turn" — the SDK runtime owns any *async* turn failure
- * (no model/API key, expired auth, provider error), which surfaces in the
- * agent's own output, not back to us. Two gaps this helper closes, both of
+ * Inject text into the agent as a user message, waking a turn. The base
+ * `ExtensionAPI.sendUserMessage` is synchronous, while replacement-session
+ * contexts can return a Promise; this helper handles both and treats a rejected
+ * handoff as a failed delivery. The SDK runtime still owns any later turn
+ * failure (no model/API key, expired auth, provider error), which surfaces in
+ * the agent's own output, not back to us. Two gaps this helper closes, both of
  * which previously failed silently:
  *
  *   1. `_pi` not bound yet (activation race / mesh joined before the session
  *      attached): the old code did `if (!_pi) return`, dropping the message
  *      with no trace. We log it (the daemon forwards child stderr to its log
  *      with a cwd prefix, so it's visible in `journalctl`).
- *   2. A *synchronous* throw from `sendUserMessage` (e.g. malformed content):
- *      the old fire-and-forget call let it propagate out of the `onMessage`
- *      callback, which could wedge the read loop and blackout every later
- *      message. We catch + surface it instead.
+ *   2. A synchronous throw or Promise rejection from `sendUserMessage` (e.g.
+ *      malformed content or a stale replacement context): the old fire-and-
+ *      forget call could either propagate out of the `onMessage` callback or
+ *      create a false success echo. We catch + surface it instead.
  *
  * NOTE: this does NOT make a wake that fails *inside* the SDK observable —
  * that requires a fix in the Pi runtime (no extension-level error event
@@ -2910,28 +2937,27 @@ type WakeAgentResult =
   | { ok: true }
   | { ok: false; detail: string };
 
-function _wakeAgent(
+async function _wakeAgent(
   content: Parameters<ExtensionAPI["sendUserMessage"]>[0],
   label: string,
   steeringBehavior?: SendUserMessageOptions["deliverAs"],
-): WakeAgentResult {
+): Promise<WakeAgentResult> {
   const candidates = Array.from(new Set<AgentMessageApi | null>([_messageApi, _pi]));
   let lastDetail = "agent session not bound yet";
   for (const api of candidates) {
     if (!api || typeof api.sendUserMessage !== "function") continue;
     try {
       if (steeringBehavior) {
-        api.sendUserMessage(content, { deliverAs: steeringBehavior });
+        await api.sendUserMessage(content, { deliverAs: steeringBehavior });
       } else {
-        api.sendUserMessage(content);
+        await api.sendUserMessage(content);
       }
       return { ok: true };
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       lastDetail = detail;
       if (_isStaleContextError(err)) {
-        if (api === _messageApi) _messageApi = null;
-        if (api === _pi) _pi = null;
+        _forgetStaleMessageApi(api);
         continue;
       }
       console.error(`[remote-pi] ${label}: agent rejected incoming message: ${detail}`);
@@ -3129,7 +3155,7 @@ async function _cmdJoin(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<void
     // again from `_cmdStart`).
     _attachBridgeIfReady();
   } catch (err) {
-    ctx.ui.notify(`[remote-pi] join failed: ${String(err)}`, "error");
+    _notify(`[remote-pi] join failed: ${String(err)}`, "error", ctx);
   }
 }
 
@@ -3246,31 +3272,42 @@ export function _routeClientMessageFrom(
       // Use a normal app-originated user message when idle so the local Pi TUI
       // renders it like a typed prompt. Only ask Pi for steering semantics when
       // the app requested steer or our room_meta says the agent is working.
-      const wake = _wakeAgent(
-        content,
-        msg.images && msg.images.length > 0
-          ? `app user_message id=${msg.id} (+${msg.images.length} image)`
-          : `app user_message id=${msg.id}`,
-        shouldSteer ? "steer" : undefined,
-      );
-      if (!wake.ok) {
+      void (async () => {
+        const wake = await _wakeAgent(
+          content,
+          msg.images && msg.images.length > 0
+            ? `app user_message id=${msg.id} (+${msg.images.length} image)`
+            : `app user_message id=${msg.id}`,
+          shouldSteer ? "steer" : undefined,
+        );
+        if (!wake.ok) {
+          if (seededTurnId) _currentTurnId = previousTurnId;
+          sender.send({
+            type: "error",
+            code: "internal_error",
+            in_reply_to: msg.id,
+            message: `Agent rejected incoming message: ${wake.detail}`,
+          });
+          return;
+        }
+        const echo: ServerMessage = {
+          type: "user_message",
+          id: msg.id,
+          text: msg.text,
+          ...(msg.images && msg.images.length > 0 ? { images: msg.images } : {}),
+          ...(shouldSteer ? { streaming_behavior: "steer" as const } : {}),
+        };
+        _broadcastToActive(echo);
+      })().catch((err: unknown) => {
+        const detail = err instanceof Error ? err.message : String(err);
         if (seededTurnId) _currentTurnId = previousTurnId;
         sender.send({
           type: "error",
           code: "internal_error",
           in_reply_to: msg.id,
-          message: `Agent rejected incoming message: ${wake.detail}`,
+          message: `Agent rejected incoming message: ${detail}`,
         });
-        break;
-      }
-      const echo: ServerMessage = {
-        type: "user_message",
-        id: msg.id,
-        text: msg.text,
-        ...(msg.images && msg.images.length > 0 ? { images: msg.images } : {}),
-        ...(shouldSteer ? { streaming_behavior: "steer" as const } : {}),
-      };
-      _broadcastToActive(echo);
+      });
       break;
     }
     case "approve_tool":

@@ -1217,8 +1217,8 @@ describe("multi-channel broadcast (W2D)", () => {
       sendMessage: vi.fn(() => { throw new Error(staleMessage); }),
     });
 
-    const freshSendUserMessage = vi.fn();
-    const freshSendMessage = vi.fn();
+    const freshSendUserMessage = vi.fn(async () => undefined);
+    const freshSendMessage = vi.fn(async () => undefined);
     const ctx = {
       ...makeMockCtx("/tmp/remote-pi-session-new-fresh-message-api"),
       newSession: vi.fn(async (opts?: { withSession?: (freshCtx: unknown) => Promise<void> }) => {
@@ -1264,6 +1264,66 @@ describe("multi-channel broadcast (W2D)", () => {
       id: "msg-after-new",
       text: "hello after new",
     });
+  });
+
+  test("app prompt waits for async fresh message API rejection before echoing", async () => {
+    await _pairForTest("ownerA__1234567890");
+
+    const staleMessage = "This extension ctx is stale after session replacement or reload.";
+    const staleSendUserMessage = vi.fn(() => { throw new Error(staleMessage); });
+    _setPiForTest({
+      sendUserMessage: staleSendUserMessage,
+      sendMessage: vi.fn(() => { throw new Error(staleMessage); }),
+    });
+
+    const freshSendUserMessage = vi.fn(async () => { throw new Error("fresh async rejected"); });
+    const ctx = {
+      ...makeMockCtx("/tmp/remote-pi-session-new-async-message-api-reject"),
+      newSession: vi.fn(async (opts?: { withSession?: (freshCtx: unknown) => Promise<void> }) => {
+        await opts?.withSession?.({
+          ...makeMockCtx("/tmp/remote-pi-session-new-async-message-api-reject"),
+          newSession: vi.fn(),
+          sendUserMessage: freshSendUserMessage,
+          sendMessage: vi.fn(async () => undefined),
+        });
+        return { cancelled: false };
+      }),
+    };
+    const status = captureHandler("remote-pi status");
+    await status("", ctx);
+
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "ownerA__1234567890",
+      ct: Buffer.from(JSON.stringify({
+        type: "session_new",
+        id: "new-fresh-api-reject",
+      })).toString("base64"),
+    }));
+    await new Promise<void>((r) => setImmediate(r));
+
+    const sendsBefore = relayRef.current!.send.mock.calls.length;
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "ownerA__1234567890",
+      ct: Buffer.from(JSON.stringify({
+        type: "user_message",
+        id: "msg-after-new-reject",
+        text: "hello after rejected new",
+      })).toString("base64"),
+    }));
+    await new Promise<void>((r) => setImmediate(r));
+
+    expect(staleSendUserMessage).not.toHaveBeenCalled();
+    expect(freshSendUserMessage).toHaveBeenCalledWith("hello after rejected new");
+    const sent = relayRef.current!.send.mock.calls.slice(sendsBefore)
+      .map((c) => c[0] as string).map(decodeSentCt);
+    expect(sent.some((d) => d.inner.type === "user_message" && d.inner.id === "msg-after-new-reject")).toBe(false);
+    const error = sent.find((d) => d.inner.type === "error");
+    expect(error?.inner).toMatchObject({
+      type: "error",
+      in_reply_to: "msg-after-new-reject",
+      code: "internal_error",
+    });
+    expect((error?.inner as { message?: string } | undefined)?.message).toContain("fresh async rejected");
   });
 
   test("plan/43: steering sendUserMessage throw returns correlated error and no echo", async () => {
@@ -2866,6 +2926,74 @@ describe("session_shutdown teardown", () => {
 
     expect(relay.close).toHaveBeenCalled();  // ghost WS closed → room available
     expect(_getState()).toBe("idle");         // never transitioned to "started"
+  });
+
+  test("known-peer reconnect resolving after session_shutdown does not attach a ghost owner", async () => {
+    captureHandler("remote-pi");
+    await _connectForTest(makeMockCtx());
+    expect(_getState()).toBe("started");
+    const relay = relayRef.current!;
+    _knownPeers.push({ name: "Phone", remote_epk: "owner-race-known", paired_at: new Date().toISOString() });
+
+    const storage = await import("./pairing/storage.js");
+    let releaseList!: () => void;
+    vi.mocked(storage.listPeers).mockImplementationOnce(() =>
+      new Promise<StoredPeer[]>((resolve) => { releaseList = () => resolve([..._knownPeers]); }),
+    );
+
+    relay.emit("message", JSON.stringify({
+      peer: "owner-race-known",
+      ct: Buffer.from(JSON.stringify({
+        type: "user_message",
+        id: "msg-known-after-shutdown",
+        text: "late hello",
+      })).toString("base64"),
+    }));
+    await vi.waitFor(() => expect(storage.listPeers).toHaveBeenCalled());
+
+    const shutdown = captureEventHandler("session_shutdown");
+    await shutdown({ type: "session_shutdown", reason: "resume" });
+    releaseList();
+    await new Promise<void>((r) => setImmediate(r));
+
+    expect(_hasActivePeerForTest("owner-race-known")).toBe(false);
+    const sent = relay.send.mock.calls.map((c) => c[0] as string).map(decodeSentCt);
+    expect(sent.some((d) => d.inner.type === "user_message" && d.inner.id === "msg-known-after-shutdown")).toBe(false);
+  });
+
+  test("pair_request resolving after session_shutdown does not attach or reply from the stale relay", async () => {
+    captureHandler("remote-pi");
+    await _connectForTest(makeMockCtx());
+    expect(_getState()).toBe("started");
+    const relay = relayRef.current!;
+
+    const storage = await import("./pairing/storage.js");
+    let releaseAdd!: () => void;
+    vi.mocked(storage.addPeer).mockImplementationOnce(async (p: StoredPeer) => {
+      await new Promise<void>((resolve) => { releaseAdd = resolve; });
+      _addedPeers.push(p);
+      _knownPeers.push(p);
+    });
+
+    relay.emit("message", JSON.stringify({
+      peer: "owner-race-pair",
+      ct: Buffer.from(JSON.stringify({
+        type: "pair_request",
+        id: "pair-after-shutdown",
+        token: "test-token",
+        device_name: "Phone",
+      })).toString("base64"),
+    }));
+    await vi.waitFor(() => expect(storage.addPeer).toHaveBeenCalled());
+
+    const shutdown = captureEventHandler("session_shutdown");
+    await shutdown({ type: "session_shutdown", reason: "resume" });
+    releaseAdd();
+    await new Promise<void>((r) => setImmediate(r));
+
+    expect(_hasActivePeerForTest("owner-race-pair")).toBe(false);
+    const sent = relay.send.mock.calls.map((c) => c[0] as string).map(decodeSentCt);
+    expect(sent.some((d) => d.inner.type === "pair_ok" && d.inner.in_reply_to === "pair-after-shutdown")).toBe(false);
   });
 
   test("after a clean reset, connect works again (flag is per-instance, not sticky)", async () => {
