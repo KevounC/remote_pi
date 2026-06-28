@@ -1,7 +1,7 @@
 ---
 id: feature-agent-reference-surface
 kind: feature
-stage: drafting
+stage: done
 tags: [workflow, research, docs]
 parent: epic-remote-session-resilience-refactor
 depends_on: []
@@ -42,13 +42,13 @@ Prefer an agent-neutral location if practical (for example `.agents/skills/<topi
 
 ## Current status
 
-- Completed: `story-research-platform-agent-reference-patterns`, `story-api-reference-pi-extension-typescript-stack`, and `story-api-reference-flutter-mobile-stack`.
-- Available skills: `.agents/skills/pi-extension-typescript/SKILL.md`, `.agents/skills/flutter-mobile/SKILL.md`, and sibling cross-cutting `.agents/skills/mobile-remote-coding/SKILL.md`.
-- Remaining open/deferrable references: relay, cockpit, and site.
+- Completed: `story-research-platform-agent-reference-patterns`, `story-api-reference-pi-extension-typescript-stack`, `story-api-reference-flutter-mobile-stack`, `story-api-reference-rust-relay-stack`, `story-api-reference-flutter-desktop-cockpit-stack`, and `story-api-reference-next-site-stack`.
+- Available skills: `.agents/skills/pi-extension-typescript/SKILL.md`, `.agents/skills/flutter-mobile/SKILL.md`, `.agents/skills/rust-relay/SKILL.md`, `.agents/skills/flutter-desktop-cockpit/SKILL.md`, `.agents/skills/next-site/SKILL.md`, and sibling cross-cutting `.agents/skills/mobile-remote-coding/SKILL.md`.
+- Remaining open/deferrable references: none in the first wave.
 
-## Draft acceptance
+## Acceptance
 
-- The chosen reference-file location and naming convention are documented in this repo.
-- Each actively edited stack has a current API/reference skill or explicit rationale for deferral.
-- `AGENTS.md` tells future agents to load the relevant reference before implementation/review.
-- The reference surface includes both language/library APIs and Remote Pi-specific lifecycle/protocol gotchas.
+- [x] The chosen reference-file location and naming convention are documented in this repo.
+- [x] Each actively edited stack has a current API/reference skill or explicit rationale for deferral.
+- [x] `AGENTS.md` tells future agents to load the relevant reference before implementation/review.
+- [x] The reference surface includes both language/library APIs and Remote Pi-specific lifecycle/protocol gotchas.

@@ -3,6 +3,8 @@
 Servidor WebSocket **stateless** que pareia conexões por `peer_id` e roteia
 ciphertext entre app e pi-extension. **Nunca decifra payload.**
 
+Before editing or reviewing relay code, read the agent-neutral Rust relay reference at `../.agents/skills/rust-relay/SKILL.md`.
+
 ## Stack
 
 - Rust 1.94+ (edição 2024)

@@ -2,6 +2,8 @@
 
 Você está na **raiz** do monorepo Remote Pi. Esta pasta é exclusivamente para **planejamento**.
 
+Antes de planejar, implementar ou revisar, leia também `AGENTS.md` e as regras agent-neutral em `.agents/rules/`. Elas são a superfície canônica compartilhada entre Claude, Pi, Codex e outros agentes; este arquivo mantém a persona/orquestração Claude/cmux.
+
 ## O que fazer aqui
 
 - Ler e escrever em `plan/NN-<slug>.md` (ex: `plan/03-protocol.md`)

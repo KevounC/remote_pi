@@ -1,17 +1,18 @@
 ---
 id: story-api-reference-flutter-desktop-cockpit-stack
 kind: story
-stage: drafting
+stage: done
 tags: [cockpit, research, docs]
 parent: feature-agent-reference-surface
 depends_on: [story-research-platform-agent-reference-patterns]
+research_refs: [flutter-desktop-cockpit-skill-base]
 research_dials:
   scope_authority: mixed
   verification_rigor: floor
   intent: flutter-desktop-api-reference
   output_kind: skill-reference-or-deferral
 created: 2026-06-27
-updated: 2026-06-27
+updated: 2026-06-28
 ---
 
 # API reference for Flutter desktop cockpit stack
@@ -35,8 +36,17 @@ Create a platform-style stack reference for `cockpit/` so desktop work does not 
 - PTY/process and file-picker surfaces cross OS boundaries and need platform-specific smoke checks.
 - Agent-output rendering and terminal surfaces need defensive handling for large logs, ANSI output, and long-running tasks.
 
+## Implementation notes
+
+- Added `.agents/skills/flutter-desktop-cockpit/SKILL.md` as the cockpit stack reference.
+- Added source-grounded synthesis at `.research/analysis/briefs/flutter-desktop-cockpit-skill-base.md`.
+- Added attestations for local cockpit guidance, local package pins/overrides, module/bootstrap shape, terminal/file surfaces, Flutter desktop support, `flutter_modular`, `shadcn_flutter`, Hive, PTY/xterm, and native package docs.
+- Linked the reference from root `AGENTS.md` and `cockpit/CLAUDE.md`.
+- Checked current package/API churn: `shadcn_flutter` and `flutter_modular` are current at local pins; several native packages have newer pub.dev releases than the lockfile; `xterm`, `kyroon_pty`, and `gpt_markdown` are git overrides and must follow local refs.
+- Citation lint passed with zero broken citations for the synthesis and skill; warnings were limited to version-number/comparative heuristic flags and substrate-confidence deprecation notices.
+
 ## Acceptance
 
-- A cockpit reference skill/doc exists or this item records a deferral rationale if cockpit stays out of the near-term refactor.
-- Current package APIs are checked for pre-1.0 churn (`shadcn_flutter`, terminal/PTY packages).
-- Guidance is linked from root or cockpit-specific agent instructions.
+- [x] A cockpit reference skill/doc exists or this item records a deferral rationale if cockpit stays out of the near-term refactor.
+- [x] Current package APIs are checked for pre-1.0 churn (`shadcn_flutter`, terminal/PTY packages).
+- [x] Guidance is linked from root or cockpit-specific agent instructions.

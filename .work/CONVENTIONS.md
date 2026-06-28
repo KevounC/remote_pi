@@ -3,6 +3,8 @@
 This `.work/` tier tracks private-fork work that is specific to `KevounC/remote_pi`.
 Use it for bugs, follow-up slices, and product/ops ideas that belong with the fork's code rather than in the SNC root queue.
 
+Before advancing work items, read `AGENTS.md` and `.agents/rules/*.md`. The rule surface is agent-neutral; `.work/` is the queue, not the place to preserve lasting design/routing policy.
+
 ## Layout
 
 - `backlog/` — parked bugs and ideas, flat files.
@@ -50,6 +52,8 @@ research_dials:
 ```
 
 The operator-confirmed dials are part of scoping. If a research item lacks them, pause before dispatching research and confirm/register dials instead of silently proceeding.
+
+When picking up any active item tagged `research` or containing `research_dials`, load and follow the `research-orchestrator` skill before authoring research outputs. Do not produce research-backed docs, skills, briefs, or references ad hoc; the item's `research_dials` are the commissioning registration and must be surfaced/confirmed according to the orchestrator workflow.
 
 ## Tags
 

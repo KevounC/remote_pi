@@ -1,5 +1,7 @@
 # Remote Pi — Cockpit (Flutter Desktop)
 
+Antes de editar ou revisar `cockpit/`, leia a referência de stack em [`../.agents/skills/flutter-desktop-cockpit/SKILL.md`](../.agents/skills/flutter-desktop-cockpit/SKILL.md).
+
 Cliente **desktop** (macOS first) do Remote Pi. GUI multi-pane sobre o motor do
 Pi: projetos à esquerda, agentes no centro, árvore de arquivos à direita. Cada
 agente é um `pi --mode rpc` que o app spawna e dirige **localmente** — sem relay,

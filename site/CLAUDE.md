@@ -1,5 +1,7 @@
 # Remote Pi — Site (NextJS)
 
+Antes de editar ou revisar `site/`, leia a referência de stack em [`../.agents/skills/next-site/SKILL.md`](../.agents/skills/next-site/SKILL.md).
+
 Landing page institucional do Remote Pi. Apresenta projeto, links pro GitHub,
 documentação do MVP. **Apenas apresentação — não tem lógica de produto.**
 
