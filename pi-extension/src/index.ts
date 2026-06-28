@@ -338,15 +338,27 @@ function _sendPiMessage(
   options?: Parameters<ExtensionAPI["sendMessage"]>[1],
   label = "sendMessage",
 ): boolean {
-  if (!_pi) return false;
-  try {
-    _pi.sendMessage(message, options);
-    return true;
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error(`[remote-pi] ${label}: Pi rejected message: ${detail}`);
-    return false;
+  const candidates = Array.from(new Set<AgentMessageApi | null>([_messageApi, _pi]));
+  let lastDetail = "agent session not bound yet";
+  for (const api of candidates) {
+    if (!api || typeof api.sendMessage !== "function") continue;
+    try {
+      api.sendMessage(message, options);
+      return true;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      lastDetail = detail;
+      if (_isStaleContextError(err)) {
+        if (api === _messageApi) _messageApi = null;
+        if (api === _pi) _pi = null;
+        continue;
+      }
+      console.error(`[remote-pi] ${label}: Pi rejected message: ${detail}`);
+      return false;
+    }
   }
+  console.error(`[remote-pi] ${label}: Pi rejected message: ${lastDetail}`);
+  return false;
 }
 
 /** Refreshes the Pi TUI footer slots from current module state. Safe no-op when ctx lacks ui or is stale. */
@@ -470,6 +482,7 @@ export function _getCurrentTurnIdForTest(): string | null {
  *  content handed to `sendUserMessage` (plan/30 multimodal ingest). */
 export function _setPiForTest(pi: unknown): void {
   _pi = pi as typeof _pi;
+  _messageApi = _isAgentMessageApi(pi) ? pi : null;
 }
 
 /**
@@ -1241,8 +1254,18 @@ let _lastCtx: Pick<ExtensionContext, "ui" | "abort" | "cwd"> | null = null;
 let _lastEventCtx: Pick<ExtensionContext, "compact" | "abort" | "ui"> | null = null;
 const _noopCtx = { ui: { notify: () => undefined }, abort: () => undefined };
 
+type AgentMessageApi = Pick<ExtensionAPI, "sendMessage" | "sendUserMessage">;
+let _messageApi: AgentMessageApi | null = null;
+
+function _isAgentMessageApi(value: unknown): value is AgentMessageApi {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<AgentMessageApi>;
+  return typeof candidate.sendMessage === "function" && typeof candidate.sendUserMessage === "function";
+}
+
 const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   _pi = pi;
+  _messageApi = pi;
 
   // Plano 19: ensure ~/.pi/remote/{sessions,skills}/ exist and deploy the
   // agent-network skill on first load. resources_discover lets Pi find it.
@@ -1503,6 +1526,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     // fall through to no-op helpers instead of touching stale ctx.ui/abort.
     _lastCtx = null;
     _lastEventCtx = null;
+    _messageApi = null;
     if (_meshNode) {
       try { await _meshNode.close(); } catch { /* best-effort */ }
       _meshNode = null;
@@ -2891,24 +2915,33 @@ function _wakeAgent(
   label: string,
   steeringBehavior?: SendUserMessageOptions["deliverAs"],
 ): WakeAgentResult {
-  if (!_pi) {
-    const detail = "agent session not bound yet";
-    console.error(`[remote-pi] ${label}: ${detail} — message dropped`);
-    return { ok: false, detail };
-  }
-  try {
-    if (steeringBehavior) {
-      _pi.sendUserMessage(content, { deliverAs: steeringBehavior });
-    } else {
-      _pi.sendUserMessage(content);
+  const candidates = Array.from(new Set<AgentMessageApi | null>([_messageApi, _pi]));
+  let lastDetail = "agent session not bound yet";
+  for (const api of candidates) {
+    if (!api || typeof api.sendUserMessage !== "function") continue;
+    try {
+      if (steeringBehavior) {
+        api.sendUserMessage(content, { deliverAs: steeringBehavior });
+      } else {
+        api.sendUserMessage(content);
+      }
+      return { ok: true };
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      lastDetail = detail;
+      if (_isStaleContextError(err)) {
+        if (api === _messageApi) _messageApi = null;
+        if (api === _pi) _pi = null;
+        continue;
+      }
+      console.error(`[remote-pi] ${label}: agent rejected incoming message: ${detail}`);
+      _notify(`[remote-pi] failed to process incoming message: ${detail}`, "error");
+      return { ok: false, detail };
     }
-    return { ok: true };
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error(`[remote-pi] ${label}: agent rejected incoming message: ${detail}`);
-    _notify(`[remote-pi] failed to process incoming message: ${detail}`, "error");
-    return { ok: false, detail };
   }
+  console.error(`[remote-pi] ${label}: agent rejected incoming message: ${lastDetail}`);
+  _notify(`[remote-pi] failed to process incoming message: ${lastDetail}`, "error");
+  return { ok: false, detail: lastDetail };
 }
 
 /**
@@ -3290,6 +3323,7 @@ export function _routeClientMessageFrom(
           // runtime object also carries ui/abort/cwd, so storing it in the
           // narrowly-typed _lastCtx slot is sound (mirrors the read-site casts).
           _lastCtx = freshCtx as unknown as typeof _lastCtx;
+          if (_isAgentMessageApi(freshCtx)) _messageApi = freshCtx;
         },
       ).then((created) => {
         // Pi-side reset is durable only here: handleSessionNew swaps the SDK

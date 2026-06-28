@@ -1207,6 +1207,65 @@ describe("multi-channel broadcast (W2D)", () => {
     });
   });
 
+  test("app session_new recaptures fresh message API for the next app prompt", async () => {
+    await _pairForTest("ownerA__1234567890");
+
+    const staleMessage = "This extension ctx is stale after session replacement or reload.";
+    const staleSendUserMessage = vi.fn(() => { throw new Error(staleMessage); });
+    _setPiForTest({
+      sendUserMessage: staleSendUserMessage,
+      sendMessage: vi.fn(() => { throw new Error(staleMessage); }),
+    });
+
+    const freshSendUserMessage = vi.fn();
+    const freshSendMessage = vi.fn();
+    const ctx = {
+      ...makeMockCtx("/tmp/remote-pi-session-new-fresh-message-api"),
+      newSession: vi.fn(async (opts?: { withSession?: (freshCtx: unknown) => Promise<void> }) => {
+        await opts?.withSession?.({
+          ...makeMockCtx("/tmp/remote-pi-session-new-fresh-message-api"),
+          newSession: vi.fn(),
+          sendUserMessage: freshSendUserMessage,
+          sendMessage: freshSendMessage,
+        });
+        return { cancelled: false };
+      }),
+    };
+    const status = captureHandler("remote-pi status");
+    await status("", ctx);
+
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "ownerA__1234567890",
+      ct: Buffer.from(JSON.stringify({
+        type: "session_new",
+        id: "new-fresh-api",
+      })).toString("base64"),
+    }));
+    await new Promise<void>((r) => setImmediate(r));
+
+    const sendsBefore = relayRef.current!.send.mock.calls.length;
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "ownerA__1234567890",
+      ct: Buffer.from(JSON.stringify({
+        type: "user_message",
+        id: "msg-after-new",
+        text: "hello after new",
+      })).toString("base64"),
+    }));
+    await new Promise<void>((r) => setImmediate(r));
+
+    expect(staleSendUserMessage).not.toHaveBeenCalled();
+    expect(freshSendUserMessage).toHaveBeenCalledWith("hello after new");
+    const sent = relayRef.current!.send.mock.calls.slice(sendsBefore)
+      .map((c) => c[0] as string).map(decodeSentCt);
+    const echo = sent.find((d) => d.inner.type === "user_message");
+    expect(echo?.inner).toMatchObject({
+      type: "user_message",
+      id: "msg-after-new",
+      text: "hello after new",
+    });
+  });
+
   test("plan/43: steering sendUserMessage throw returns correlated error and no echo", async () => {
     await _pairForTest("ownerA__1234567890");
     const onInput = captureEventHandler("input");
