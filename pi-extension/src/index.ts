@@ -276,12 +276,82 @@ function _attachBridgeIfReady(): void {
     .catch(() => { /* best-effort — UDS mesh works regardless */ });
 }
 
-/** Refreshes the Pi TUI footer slots from current module state. Safe no-op when ctx lacks ui. */
-function _refreshFooter(ctx?: { ui?: { setStatus?: unknown; setTitle?: unknown } } | null): void {
-  const target = ctx ?? _lastCtx;
-  const ui = target?.ui as (
-    { setStatus?: (k: string, v: string | undefined) => void; setTitle?: (t: string) => void } | undefined
-  );
+type RemotePiUi = {
+  setStatus?: (k: string, v: string | undefined) => void;
+  setTitle?: (t: string) => void;
+  notify?: (msg: string, type?: "info" | "warning" | "error") => void;
+};
+
+type RemotePiUiContext = { ui?: RemotePiUi } | null | undefined;
+
+/**
+ * Safely resolve a ctx.ui reference. Pi intentionally throws when an extension
+ * touches a context captured before session replacement/reload; relay callbacks
+ * can outlive that context (idle app resumes, known-peer reconnect, late
+ * notifications). Treat stale ctxs as absent and clear our captured slots so
+ * later callbacks fall through to the freshest session_start ctx or no-op.
+ */
+function _isStaleContextError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("stale after session replacement or reload");
+}
+
+function _safeUi(ctx?: RemotePiUiContext): RemotePiUi | undefined {
+  if (!ctx) return undefined;
+  try {
+    return ctx.ui;
+  } catch (err) {
+    if (_isStaleContextError(err)) {
+      if (ctx === _lastCtx) _lastCtx = null;
+      if (ctx === _lastEventCtx) _lastEventCtx = null;
+    }
+    return undefined;
+  }
+}
+
+function _currentUi(preferred?: RemotePiUiContext): RemotePiUi | undefined {
+  return _safeUi(preferred) ?? _safeUi(_lastEventCtx) ?? _safeUi(_lastCtx);
+}
+
+function _currentCwd(): string {
+  if (!_lastCtx) return process.cwd();
+  try {
+    return "cwd" in _lastCtx ? _lastCtx.cwd : process.cwd();
+  } catch {
+    _lastCtx = null;
+    return process.cwd();
+  }
+}
+
+function _notify(msg: string, type: "info" | "warning" | "error" = "info", ctx?: RemotePiUiContext): void {
+  const ui = _currentUi(ctx);
+  if (typeof ui?.notify !== "function") return;
+  try {
+    ui.notify(msg, type);
+  } catch {
+    // Best-effort notification path: stale UI must never crash relay callbacks.
+  }
+}
+
+function _sendPiMessage(
+  message: Parameters<ExtensionAPI["sendMessage"]>[0],
+  options?: Parameters<ExtensionAPI["sendMessage"]>[1],
+  label = "sendMessage",
+): boolean {
+  if (!_pi) return false;
+  try {
+    _pi.sendMessage(message, options);
+    return true;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(`[remote-pi] ${label}: Pi rejected message: ${detail}`);
+    return false;
+  }
+}
+
+/** Refreshes the Pi TUI footer slots from current module state. Safe no-op when ctx lacks ui or is stale. */
+function _refreshFooter(ctx?: RemotePiUiContext): void {
+  const ui = _currentUi(ctx);
   if (!ui || typeof ui.setStatus !== "function" || typeof ui.setTitle !== "function") return;
   const state: FooterState = {
     session: _sessionName ?? undefined,
@@ -768,7 +838,7 @@ function _emitRelayState(force = false): void {
   const status = _relayStatus();
   if (!force && status === _lastRelayStatus) return;
   _lastRelayStatus = status;
-  _pi?.sendMessage({
+  _sendPiMessage({
     customType: "remote-pi:relay-state",
     content: `Relay ${status}`,
     details: {
@@ -778,7 +848,7 @@ function _emitRelayState(force = false): void {
       ...(_myRoomId ? { room: _myRoomId } : {}),
     },
     display: false,
-  });
+  }, undefined, "relay-state");
 }
 
 /** Minimal ctx for relay start/stop driven by a control message (no command
@@ -882,19 +952,19 @@ async function _renameAgent(newName: string): Promise<void> {
   try {
     assigned = await _meshNode.rename(newName);  // broker soft rejoin
   } catch (err) {
-    ctx.ui.notify(`[remote-pi] rename failed: ${String(err)}`, "error");
+    _notify(`[remote-pi] rename failed: ${String(err)}`, "error", ctx);
   }
 
   if (wasStarted && !_disposed) await _cmdStart(ctx);  // relay back up → roomIdFor(cwd, assigned)
 
-  _pi?.sendMessage({
+  _sendPiMessage({
     customType: "remote-pi:name-assigned",
     content: assigned === newName
       ? `Mesh name: ${assigned}`
       : `Mesh name reassigned: "${newName}" → "${assigned}" (collision)`,
     details: { requested: newName, assigned, changed: assigned !== newName },
     display: false,
-  });
+  }, undefined, "name-assigned");
 }
 
 /**
@@ -926,7 +996,7 @@ export function _onPeerDisconnect(appPeerId?: string): void {
   // starts cleanly.
   _currentTurnId = null;
   _refreshFooter();
-  _lastCtx?.ui.notify("[remote-pi] All app peers disconnected, listening for reconnect", "info");
+  _notify("[remote-pi] All app peers disconnected, listening for reconnect", "info");
   // Auto-listener stays up — same listener catches the reconnect on any peer.
 }
 
@@ -955,14 +1025,14 @@ function _attachOwner(
     relay,
     appPeerId,
     _myRoomId ?? undefined,
-    (msg) => _routeClientMessageFrom(channel, msg, _lastCtx ?? _noopCtx),
+    (msg) => _routeClientMessageFrom(channel, msg, _lastEventCtx ?? _lastCtx ?? _noopCtx),
     () => _onPeerDisconnect(appPeerId),
   );
 
   _attachPeerChannel(appPeerId, channel);
   _refreshFooter();
 
-  _lastCtx?.ui.notify(
+  _notify(
     `[remote-pi] Owner attached: peer=${peerShort}, name=${peerName} ` +
     `(${_activePeers.size} active)`,
     "info",
@@ -1031,7 +1101,7 @@ function _installAutoListener(relay: RelayClient): () => void {
       // The PlainPeerChannel listener for this owner won't have seen the
       // line that triggered the attach (we already consumed it); route
       // it explicitly via the new channel so the sender gets a reply.
-      _routeClientMessageFrom(channel, inner, _lastCtx ?? _noopCtx);
+      _routeClientMessageFrom(channel, inner, _lastEventCtx ?? _lastCtx ?? _noopCtx);
       return;
     }
 
@@ -1117,9 +1187,7 @@ async function _handlePairRequest(
     return;
   }
 
-  const cwd = _lastCtx && "cwd" in _lastCtx
-    ? (_lastCtx as ExtensionCommandContext).cwd
-    : process.cwd();
+  const cwd = _currentCwd();
   // Prefer the user-configured agent_name (with broker suffix when on the
   // mesh) over the legacy parent/folder path — matches what the user sees
   // in the terminal title and in /remote-pi status.
@@ -1148,12 +1216,12 @@ async function _handlePairRequest(
   // Notify local RPC clients (e.g. Cockpit) that pairing completed, so they can
   // close the QR screen and show the new device. Pure data event (display:false)
   // — still emitted to the RPC stdout via the session stream.
-  _pi?.sendMessage({
+  _sendPiMessage({
     customType: "remote-pi:paired",
     content: `Paired with ${inner.device_name}`,
     details: { name: inner.device_name, peerId: appPeerId, pairedAt },
     display: false,
-  });
+  }, undefined, "paired");
 }
 
 // ── Extension factory (default export) ───────────────────────────────────────
@@ -1170,7 +1238,7 @@ let _lastCtx: Pick<ExtensionContext, "ui" | "abort" | "cwd"> | null = null;
 // (an app Quick Action OR a `/new` typed in the Pi TUI). It carries only
 // base-ctx methods (no newSession — that's command-ctx only), so command ops
 // keep using `_lastCtx`.
-let _lastEventCtx: Pick<ExtensionContext, "compact" | "abort"> | null = null;
+let _lastEventCtx: Pick<ExtensionContext, "compact" | "abort" | "ui"> | null = null;
 const _noopCtx = { ui: { notify: () => undefined }, abort: () => undefined };
 
 const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
@@ -1430,6 +1498,11 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     // down — the race that left a mute `Backoffice` behind when the Cockpit
     // fired switch_session right after boot.
     _disposed = true;
+    // Captured contexts from the outgoing runtime are invalid after this point.
+    // Relay timers / reconnect callbacks can still fire briefly, so make them
+    // fall through to no-op helpers instead of touching stale ctx.ui/abort.
+    _lastCtx = null;
+    _lastEventCtx = null;
     if (_meshNode) {
       try { await _meshNode.close(); } catch { /* best-effort */ }
       _meshNode = null;
@@ -1926,14 +1999,14 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
         // the agent's transcript. The poller's own `log.info` keeps
         // running for daemons/CI where no TUI is attached.
         const short = ownerEpk.slice(0, 8);
-        _pi?.sendMessage({
+        _sendPiMessage({
           customType: "remote-pi:mesh-revoked",
           content:
             `🔒 Revoked by Owner ${short}…\n\n` +
             `The mobile app for this Owner removed this PC from the mesh. ` +
             `Re-pair via /remote-pi pair if this was unexpected.`,
           display: true,
-        });
+        }, undefined, "mesh-revoked");
       },
       // Plan/25 Wave D: keep the cross-PC sibling list in sync with
       // mesh_versions. The poller fires this whenever the union of Pi
@@ -2026,19 +2099,17 @@ async function _cmdPair(ctx: Pick<ExtensionContext, "ui" | "cwd">, args = ""): P
   // small mode is pure Unicode (█ ▀ ▄ space, no ANSI escapes — see
   // `lib/main.js:48-53`), so embedding the ASCII inside a sendMessage
   // content string renders correctly without raw escape bytes.
-  if (_pi) {
-    const qrAscii = renderQRAscii(qrUri);
-    _pi.sendMessage({
-      customType: "remote-pi:pair-code",
-      content:
-        `📱 Scan to pair:\n\n${qrAscii}\n` +
-        `📋 Or copy this pairing code (camera-less devices):\n\n${qrUri}`,
-      // Structured payload for RPC clients (e.g. Cockpit): render their own QR
-      // from `uri` + show the expiry, without scraping the display string.
-      details: { uri: qrUri, token, expiresAt, roomId, name: sessionName },
-      display: true,
-    });
-  }
+  const qrAscii = renderQRAscii(qrUri);
+  _sendPiMessage({
+    customType: "remote-pi:pair-code",
+    content:
+      `📱 Scan to pair:\n\n${qrAscii}\n` +
+      `📋 Or copy this pairing code (camera-less devices):\n\n${qrUri}`,
+    // Structured payload for RPC clients (e.g. Cockpit): render their own QR
+    // from `uri` + show the expiry, without scraping the display string.
+    details: { uri: qrUri, token, expiresAt, roomId, name: sessionName },
+    display: true,
+  }, undefined, "pair-code");
 
   ctx.ui.notify(
     `[remote-pi] QR ready — valid until ${new Date(expiresAt).toLocaleTimeString()}. ` +
@@ -2834,7 +2905,7 @@ function _wakeAgent(
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     console.error(`[remote-pi] ${label}: agent rejected incoming message: ${detail}`);
-    _lastCtx?.ui.notify(`[remote-pi] failed to process incoming message: ${detail}`, "error");
+    _notify(`[remote-pi] failed to process incoming message: ${detail}`, "error");
     return { ok: false, detail };
   }
 }
@@ -2876,16 +2947,12 @@ function _deliverMeshMessageToAgent(
   const footer = env.re
     ? "(This is a reply to a previous message of yours.)"
     : `(If a reply is expected, call agent_send with to="${env.from}" and re="${env.id}".)`;
-  try {
-    _pi.sendMessage(
-      { customType: "remote-pi:mesh-message", content: `${header}\n${bodyText}\n\n${footer}`, display: true },
-      { triggerTurn: true },
-    );
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error(`[remote-pi] ${label}: agent rejected incoming message: ${detail}`);
-    _lastCtx?.ui.notify(`[remote-pi] failed to process incoming message: ${detail}`, "error");
-  }
+  const ok = _sendPiMessage(
+    { customType: "remote-pi:mesh-message", content: `${header}\n${bodyText}\n\n${footer}`, display: true },
+    { triggerTurn: true },
+    label,
+  );
+  if (!ok) _notify("[remote-pi] failed to process incoming mesh message", "error");
 }
 
 /**
@@ -3010,14 +3077,14 @@ async function _cmdJoin(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<void
     // accident and causes cross-folder name ping-pong across restarts. The clean
     // name (wizard / explicit `agent_name`) already lives in config or re-derives
     // from `basename(cwd)`; the event above carries the live `#N` for the UI.
-    _pi?.sendMessage({
+    _sendPiMessage({
       customType: "remote-pi:name-assigned",
       content: assigned === requestedName
         ? `Mesh name: ${assigned}`
         : `Mesh name reassigned: "${requestedName}" → "${assigned}" (collision)`,
       details: { requested: requestedName, assigned, changed: assigned !== requestedName },
       display: false,
-    });
+    }, undefined, "name-assigned");
     ctx.ui.notify(
       `[remote-pi] Joined local mesh as "${assigned}" (${peer.currentRole()})`,
       "info",
@@ -3057,8 +3124,14 @@ function _abortCurrentTurn(
   for (const candidate of candidates) {
     if (!candidate || candidate === _noopCtx) continue;
     if (typeof candidate.abort !== "function") continue;
-    candidate.abort();
-    return true;
+    try {
+      candidate.abort();
+      return true;
+    } catch (err) {
+      if (!_isStaleContextError(err)) throw err;
+      if (candidate === _lastCtx) _lastCtx = null;
+      if (candidate === _lastEventCtx) _lastEventCtx = null;
+    }
   }
 
   return false;
@@ -3380,7 +3453,7 @@ function _enrichEditToolArgs(base: ToolArgs): ToolArgs {
 
 function _readToolFile(filePath: string): string | null {
   if (!filePath) return null;
-  const cwd = _lastCtx && "cwd" in _lastCtx ? _lastCtx.cwd : process.cwd();
+  const cwd = _currentCwd();
   const homePath = filePath.startsWith("~/") && process.env.HOME
     ? resolve(process.env.HOME, filePath.slice(2))
     : null;
