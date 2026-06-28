@@ -5,6 +5,8 @@ stage: done
 tags: [workflow, research, docs]
 parent: epic-remote-session-resilience-refactor
 depends_on: []
+release_binding: null
+gate_origin: null
 research_dials:
   scope_authority: mixed
   verification_rigor: floor

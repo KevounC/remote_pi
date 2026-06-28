@@ -5,6 +5,8 @@ stage: done
 tags: [research, docs]
 parent: feature-agent-reference-surface
 depends_on: [story-research-platform-agent-reference-patterns]
+release_binding: null
+gate_origin: null
 research_refs: [next-site-skill-base]
 research_dials:
   scope_authority: mixed

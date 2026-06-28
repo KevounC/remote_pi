@@ -1,0 +1,28 @@
+---
+id: story-fix-late-attach-turn-stream-sync
+kind: story
+stage: implementing
+tags: [pi-extension, app, bug]
+parent: epic-remote-session-resilience-refactor
+depends_on: [feature-adversarial-codebase-review]
+release_binding: null
+gate_origin: null
+created: 2026-06-28
+updated: 2026-06-28
+---
+
+# Fix late attach during active turn missing reply stream
+
+Adversarial review found that when a local/RPC/daemon turn starts while no mobile owner is attached, `_currentTurnId` can remain null. A phone attaching mid-turn can see `working:true` but miss later chunks/done because `pi-extension/src/index.ts` drops assistant deltas and `agent_done` when `_currentTurnId` is null.
+
+## Scope
+
+- Ensure an active turn has a stable reply id even if no owner was attached at turn start.
+- Ensure late-attaching owners receive either live chunks/done or an immediate authoritative `session_sync` after the turn completes.
+- Preserve normal attached-turn behavior and steering semantics.
+
+## Acceptance Criteria
+
+- [ ] Add a pi-extension regression for a local/RPC/daemon turn that starts with no owners, then an owner attaches before completion.
+- [ ] The attaching owner sees the final assistant reply without requiring a second manual reconnect/sync.
+- [ ] `working` still converges false on turn end.

@@ -5,6 +5,8 @@ stage: drafting
 tags: [pi-extension, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [story-stale-session-bound-surface-deep-audit]
+release_binding: null
+gate_origin: null
 created: 2026-06-28
 updated: 2026-06-28
 ---

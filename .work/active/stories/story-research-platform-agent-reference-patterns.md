@@ -5,6 +5,8 @@ stage: done
 tags: [research, docs, workflow]
 parent: feature-agent-reference-surface
 depends_on: []
+release_binding: null
+gate_origin: null
 research_dials:
   scope_authority: mixed
   verification_rigor: floor

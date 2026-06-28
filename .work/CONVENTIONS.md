@@ -36,10 +36,14 @@ stage: drafting|implementing|review|done
 tags: [<tag>, ...]
 parent: <id>|null
 depends_on: [<id>, ...]
+release_binding: <version>|null
+gate_origin: <gate-name>|null
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 ---
 ```
+
+For normal user-scoped items, set `release_binding: null` until `release-deploy` binds the item to a release, and set `gate_origin: null` unless the item was produced by a release gate.
 
 Research-tagged active items additionally carry an ARD-style registration block:
 
