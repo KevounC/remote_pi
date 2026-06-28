@@ -1070,7 +1070,7 @@ describe("multi-channel broadcast (W2D)", () => {
     });
   });
 
-  test("plan/30: user_message without images → no `images` key on the echo (text path unchanged)", async () => {
+  test("plan/30: idle user_message without images → normal sendUserMessage and no `images` key on echo", async () => {
     await _pairForTest("ownerA__1234567890");
     const sendUserMessage = vi.fn();
     _setPiForTest({
@@ -1085,7 +1085,9 @@ describe("multi-channel broadcast (W2D)", () => {
       })).toString("base64"),
     }));
     await new Promise<void>((r) => setImmediate(r));
-    expect(sendUserMessage).toHaveBeenCalledWith("hi", { deliverAs: "steer" });
+    // Idle app prompts must be sent as normal user messages so the local Pi
+    // TUI renders them like typed prompts; steering is reserved for active turns.
+    expect(sendUserMessage).toHaveBeenCalledWith("hi");
     const sent = relayRef.current!.send.mock.calls.slice(sendsBefore)
       .map((c) => c[0] as string).map(decodeSentCt);
     const echo = sent.find((d) => d.inner.type === "user_message");

@@ -2897,10 +2897,11 @@ function _wakeAgent(
     return { ok: false, detail };
   }
   try {
-    const options = steeringBehavior
-      ? ({ deliverAs: steeringBehavior })
-      : undefined;
-    _pi.sendUserMessage(content, options);
+    if (steeringBehavior) {
+      _pi.sendUserMessage(content, { deliverAs: steeringBehavior });
+    } else {
+      _pi.sendUserMessage(content);
+    }
     return { ok: true };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
@@ -3209,16 +3210,15 @@ export function _routeClientMessageFrom(
               { type: "text" as const, text: msg.text },
             ]
           : msg.text;
-      // Always include a streaming delivery mode for app-originated messages.
-      // The SDK ignores `deliverAs` when idle, but requires it when a turn is
-      // already running. This avoids a race where Remote Pi's mirror has not
-      // seen turn_start/currentTurnId yet but the SDK is already busy.
+      // Use a normal app-originated user message when idle so the local Pi TUI
+      // renders it like a typed prompt. Only ask Pi for steering semantics when
+      // the app requested steer or our room_meta says the agent is working.
       const wake = _wakeAgent(
         content,
         msg.images && msg.images.length > 0
           ? `app user_message id=${msg.id} (+${msg.images.length} image)`
           : `app user_message id=${msg.id}`,
-        "steer",
+        shouldSteer ? "steer" : undefined,
       );
       if (!wake.ok) {
         if (seededTurnId) _currentTurnId = previousTurnId;
