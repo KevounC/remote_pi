@@ -48,6 +48,8 @@ Start small. Current tags:
 - `relay` — Rust relay work.
 - `cockpit` — desktop cockpit work.
 - `workflow` — developer/operator workflow for the fork.
+- `research` — source-grounded discovery work whose output informs later implementation.
+- `docs` — agent/reference documentation, skills, or operator docs.
 - `bug` — observed defect or regression.
 
 ## Routing

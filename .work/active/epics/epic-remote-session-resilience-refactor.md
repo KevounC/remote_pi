@@ -1,0 +1,48 @@
+---
+id: epic-remote-session-resilience-refactor
+kind: epic
+stage: drafting
+tags: [pi-extension, app, relay, workflow]
+parent: null
+depends_on: []
+created: 2026-06-27
+updated: 2026-06-27
+---
+
+# Remote session resilience refactor
+
+Bold refactor arc for Remote Pi's mobile/workstation remote-coding experience: make session state, mesh/relay semantics, and mobile UI state robust under reconnects, multi-client use, `/new`, dropped events, and long-running agent turns.
+
+## Drivers
+
+- Mobile and workstation can attach to the same remote Pi session, but session/control semantics need to be explicit and observable.
+- A bug is already filed where mobile status can stay stuck on `Working` after the agent is idle: `.work/backlog/remote-pi-mobile-working-status-stuck.md`.
+- The Pi extension and Flutter app likely both need state-machine cleanup rather than one-off patches.
+- The full codebase should receive multi-model adversarial review before/alongside invasive changes.
+
+## Arc sketch
+
+Sequence the arc as **reference → review → design → refactor**, with only urgent narrow patches allowed to bypass the full track.
+
+1. **Stabilize the agent substrate first.** Build enough platform-style reference surface for agents to reason correctly about the stack before asking them to review or refactor it:
+   - `feature-agent-reference-surface`
+   - `feature-mobile-remote-coding-best-practices-skill`
+2. **Patch only small/high-confidence live bugs while research runs.** `story-mobile-working-status-stuck` may proceed as a narrow bugfix if reproduction is clear, but should record any architectural findings back into the epic rather than ballooning into the refactor.
+3. **Run adversarial review after the first reference pass, before the bold refactor.** Reviewers should receive the new stack references, `PROTOCOL.md`, recent stale-context history, and the mobile/mesh best-practices checklist:
+   - `feature-adversarial-codebase-review`
+4. **Deduplicate and design the state-machine refactor.** Convert accepted findings into implementation stories grouped by boundary: pi-extension authoritative session/room state, app state/rendering, relay protocol/semantics, tests/smokes.
+5. **Implement in thin vertical slices.** Prefer one observable session-state behavior per slice (`/new`, reconnect hydration, dropped turn_end, multi-client attach) with tests/smokes at each boundary.
+6. **Final cross-model review + live soak.** Re-run focused adversarial review on the refactored paths and soak via real mobile/workstation use before considering upstream PRs.
+
+## Initial decomposition
+
+- `feature-agent-reference-surface` — platform-style language/library/dev-cycle references for Remote Pi agents.
+- `feature-mobile-remote-coding-best-practices-skill` — targeted research + durable best-practices skill/checklist for mobile remote-coding mesh apps.
+- `feature-adversarial-codebase-review` — multi-model adversarial review of app, pi-extension, relay, cockpit/site where relevant.
+- `story-mobile-working-status-stuck` — reproduce and fix stale `Working` status.
+
+## Draft acceptance
+
+- Clear architecture notes for authoritative session state, working/idle state, reconnect hydration, and multi-client behavior.
+- Review findings are deduplicated and converted into scoped work items.
+- Refactor is split into app and pi-extension implementation stories with verification plans.
