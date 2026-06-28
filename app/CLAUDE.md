@@ -3,6 +3,10 @@
 Cliente mobile (iOS + Android) do Remote Pi. Pareia via QR, lista sessões do Pi,
 chat com streaming, approval cards para tool calls.
 
+Antes de editar ou revisar `app/`, leia também a referência agent-neutral
+`../.agents/skills/flutter-mobile/SKILL.md`. Para mudanças de estado/reconnect que cruzem
+app/extension/relay, leia `../.agents/skills/mobile-remote-coding/SKILL.md`.
+
 ## Stack
 
 - Flutter 3.41+ / Dart 3.11+

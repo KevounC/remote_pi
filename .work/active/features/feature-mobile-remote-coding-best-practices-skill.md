@@ -1,8 +1,8 @@
 ---
 id: feature-mobile-remote-coding-best-practices-skill
 kind: feature
-stage: drafting
-tags: [app, pi-extension, relay, workflow]
+stage: done
+tags: [app, pi-extension, relay, workflow, research, docs]
 parent: epic-remote-session-resilience-refactor
 depends_on: []
 research_dials:
@@ -11,7 +11,7 @@ research_dials:
   intent: mobile-remote-coding-practices
   output_kind: skill-reference
 created: 2026-06-27
-updated: 2026-06-27
+updated: 2026-06-28
 ---
 
 # Mobile remote-coding best-practices research + skill
@@ -31,8 +31,17 @@ Do a focused current-practice research pass before large mobile/extension refact
 - A reusable skill/checklist in the fork (location to choose during design) for future app/pi-extension changes.
 - Follow-up implementation items for any concrete architecture changes uncovered.
 
-## Draft acceptance
+## Implementation notes
 
-- Research cites current authoritative sources for Flutter/mobile lifecycle and networking behavior where training data may be stale.
-- Skill/checklist is specific to Remote Pi's relay/mesh/remote-coding architecture, not generic Flutter advice.
-- The stale `Working` bug and `/new` multi-client semantics are covered explicitly.
+- Added synthesis brief `.research/analysis/briefs/mobile-remote-coding-skill-base.md`.
+- Added reusable checklist `.agents/skills/mobile-remote-coding/SKILL.md`.
+- Added source attestations for mobile lifecycle/background networking, WebSocket behavior, Flutter app lifecycle, and Remote Pi local app transport state.
+- Linked the checklist from `AGENTS.md` and `app/CLAUDE.md`.
+- No immediate architecture follow-up item was emitted: the research confirmed the current intended direction (authoritative snapshots, idempotent commands, reconnect hydration, explicit stale/working/error states) rather than uncovering a new implementation slice beyond existing stuck-`Working` and session-resilience work.
+- Verification: attestation-handle grep passed; ARD citation lint on the synthesis brief passed with `0 broken`; read-only reviewer subagent approved with no blockers.
+
+## Acceptance
+
+- [x] Research cites current authoritative sources for Flutter/mobile lifecycle and networking behavior where training data may be stale.
+- [x] Skill/checklist is specific to Remote Pi's relay/mesh/remote-coding architecture, not generic Flutter advice.
+- [x] The stale `Working` bug and `/new` multi-client semantics are covered explicitly.

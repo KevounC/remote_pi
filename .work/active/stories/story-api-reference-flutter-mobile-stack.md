@@ -1,7 +1,7 @@
 ---
 id: story-api-reference-flutter-mobile-stack
 kind: story
-stage: drafting
+stage: done
 tags: [app, research, docs]
 parent: feature-agent-reference-surface
 depends_on: [story-research-platform-agent-reference-patterns]
@@ -11,7 +11,7 @@ research_dials:
   intent: flutter-mobile-api-reference
   output_kind: skill-reference
 created: 2026-06-27
-updated: 2026-06-27
+updated: 2026-06-28
 ---
 
 # API reference for Flutter mobile app stack
@@ -35,8 +35,16 @@ Create a platform-style stack reference for `app/`, with emphasis on mobile life
 - Mobile UI should distinguish `connected idle`, `working`, `disconnected`, and `unknown/stale`.
 - Reconnect must hydrate current server state rather than trusting cached `working: true`.
 
+## Implementation notes
+
+- Added `.agents/skills/flutter-mobile/SKILL.md` as the canonical app reference for Flutter lifecycle, Provider/ViewModels, `go_router`, WebSocket reconnect, room/session state, and async UI safety.
+- Linked the reference from `AGENTS.md` and `app/CLAUDE.md`.
+- Added ARD-style source attestations for Flutter lifecycle/context docs, Dart async-context lint guidance, Provider, `web_socket_channel`, `go_router`, Android background restrictions, Apple networking/multitasking, and local app sources.
+- Added synthesis brief `.research/analysis/briefs/mobile-remote-coding-skill-base.md` tying the app reference to the cross-cutting mobile remote-coding checklist.
+- Verification: attestation-handle grep passed; ARD citation lint on the synthesis brief passed with `0 broken`; read-only reviewer subagent approved with no blockers.
+
 ## Acceptance
 
-- A reference skill/doc exists and is linked from `AGENTS.md` or app guidance.
-- Current Flutter/mobile docs are consulted for lifecycle and background/reconnect behavior.
-- The reference is specific enough to guide the `Working` stuck bug and future mobile refactors.
+- [x] A reference skill/doc exists and is linked from `AGENTS.md` or app guidance.
+- [x] Current Flutter/mobile docs are consulted for lifecycle and background/reconnect behavior.
+- [x] The reference is specific enough to guide the `Working` stuck bug and future mobile refactors.

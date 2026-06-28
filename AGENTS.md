@@ -39,7 +39,9 @@ Remote Pi is adopting platform-style agent references so implementation/review a
 
 First-wave references are tracked in `.work/active/features/feature-agent-reference-surface.md` and children. Available references:
 
-- `.agents/skills/pi-extension-typescript/SKILL.md` — working draft for `pi-extension/` TypeScript/Pi SDK lifecycle work.
+- `.agents/skills/pi-extension-typescript/SKILL.md` — `pi-extension/` TypeScript/Pi SDK lifecycle work.
+- `.agents/skills/flutter-mobile/SKILL.md` — `app/` Flutter mobile lifecycle, provider/ViewModels, routing, WebSocket reconnect, and room/session state.
+- `.agents/skills/mobile-remote-coding/SKILL.md` — cross-cutting mobile remote-coding state-machine and reconnect checklist for app/extension/relay work.
 
 Until the rest are authored, agents should treat subproject `CLAUDE.md` files plus `PROTOCOL.md` as the minimum required context.
 

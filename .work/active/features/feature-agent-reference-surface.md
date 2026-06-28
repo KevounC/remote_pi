@@ -11,7 +11,7 @@ research_dials:
   intent: agent-reference-surface
   output_kind: reference-plan
 created: 2026-06-27
-updated: 2026-06-27
+updated: 2026-06-28
 ---
 
 # Platform-style agent reference surface
@@ -39,6 +39,12 @@ Prefer an agent-neutral location if practical (for example `.agents/skills/<topi
 - `story-api-reference-rust-relay-stack`
 - `story-api-reference-flutter-desktop-cockpit-stack`
 - `story-api-reference-next-site-stack`
+
+## Current status
+
+- Completed: `story-research-platform-agent-reference-patterns`, `story-api-reference-pi-extension-typescript-stack`, and `story-api-reference-flutter-mobile-stack`.
+- Available skills: `.agents/skills/pi-extension-typescript/SKILL.md`, `.agents/skills/flutter-mobile/SKILL.md`, and sibling cross-cutting `.agents/skills/mobile-remote-coding/SKILL.md`.
+- Remaining open/deferrable references: relay, cockpit, and site.
 
 ## Draft acceptance
 
