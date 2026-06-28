@@ -146,6 +146,7 @@ const {
   _getState,
   _onPeerDisconnect,
   routeClientMessage,
+  _routeClientMessageFrom,
   _mapAgentMessagesToEvents,
   _setMessageBufferForTest,
   _setSessionStartedAtForTest,
@@ -2926,6 +2927,35 @@ describe("session_shutdown teardown", () => {
 
     expect(relay.close).toHaveBeenCalled();  // ghost WS closed → room available
     expect(_getState()).toBe("idle");         // never transitioned to "started"
+  });
+
+  test("app user_message after session_shutdown does not call stale pi API", async () => {
+    const staleMessage = "This extension ctx is stale after session replacement or reload.";
+    const staleSendUserMessage = vi.fn(() => { throw new Error(staleMessage); });
+    _setPiForTest({
+      sendUserMessage: staleSendUserMessage,
+      sendMessage: vi.fn(() => { throw new Error(staleMessage); }),
+    });
+
+    const shutdown = captureEventHandler("session_shutdown");
+    await shutdown({ type: "session_shutdown", reason: "resume" });
+
+    const sent: unknown[] = [];
+    _routeClientMessageFrom(
+      { send: (msg: unknown) => { sent.push(msg); } } as Parameters<typeof _routeClientMessageFrom>[0],
+      { type: "user_message", id: "msg-after-shutdown", text: "late hello" },
+      { abort: vi.fn() },
+    );
+
+    expect(staleSendUserMessage).not.toHaveBeenCalled();
+    expect(sent).toEqual([
+      expect.objectContaining({
+        type: "error",
+        code: "internal_error",
+        in_reply_to: "msg-after-shutdown",
+      }),
+    ]);
+    expect(JSON.stringify(sent)).not.toContain(staleMessage);
   });
 
   test("known-peer reconnect resolving after session_shutdown does not attach a ghost owner", async () => {

@@ -338,6 +338,15 @@ function _forgetStaleMessageApi(api: AgentMessageApi): void {
   if (api === _pi) _pi = null;
 }
 
+function _sessionUnavailable(sender: PlainPeerChannel, inReplyTo: string, detail = "Pi session is replacing or not bound yet"): void {
+  sender.send({
+    type: "error",
+    code: "internal_error",
+    in_reply_to: inReplyTo,
+    message: detail,
+  });
+}
+
 function _sendPiMessage(
   message: Parameters<ExtensionAPI["sendMessage"]>[0],
   options?: Parameters<ExtensionAPI["sendMessage"]>[1],
@@ -862,6 +871,10 @@ function _emitRelayState(force = false): void {
   const status = _relayStatus();
   if (!force && status === _lastRelayStatus) return;
   _lastRelayStatus = status;
+  // During session_shutdown we intentionally clear the message API before
+  // tearing down relay state. There is no live Pi session to notify, and the
+  // replacement instance / withSession rearm will publish its own fresh state.
+  if (!_messageApi && !_pi) return;
   _sendPiMessage({
     customType: "remote-pi:relay-state",
     content: `Relay ${status}`,
@@ -1499,6 +1512,12 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // "stale after session replacement" crash when the app taps Compact after a
   // New session. Fires on startup/new/fork/reload/resume; the ctx is always
   // bound to the current session.
+  //
+  // Important: the documented session_start ctx is a base ExtensionContext; it
+  // does NOT provide sendMessage/sendUserMessage. Message delivery after a
+  // replacement is only safe through a fresh extension instance (new factory
+  // call with fresh `pi`) or through a ReplacedSessionContext passed to a
+  // withSession callback when Remote Pi itself initiated the replacement.
   pi.on("session_start", (_event, ctx) => {
     _lastEventCtx = ctx;
     // Rearm a reused-but-disposed instance. The session_shutdown teardown (below)
@@ -1553,6 +1572,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     _lastCtx = null;
     _lastEventCtx = null;
     _messageApi = null;
+    _pi = null;
     if (_meshNode) {
       try { await _meshNode.close(); } catch { /* best-effort */ }
       _meshNode = null;
@@ -3231,7 +3251,10 @@ export function _routeClientMessageFrom(
     }
     return;
   }
-  if (!_pi) return;
+  if (_disposed) {
+    _sessionUnavailable(sender, msg.id);
+    return;
+  }
   switch (msg.type) {
     case "user_message": {
       // Source-of-truth rebroadcast (plan/24 W2D fix). Echo the message
@@ -3360,7 +3383,12 @@ export function _routeClientMessageFrom(
           // runtime object also carries ui/abort/cwd, so storing it in the
           // narrowly-typed _lastCtx slot is sound (mirrors the read-site casts).
           _lastCtx = freshCtx as unknown as typeof _lastCtx;
+          _lastEventCtx = freshCtx as unknown as typeof _lastEventCtx;
           if (_isAgentMessageApi(freshCtx)) _messageApi = freshCtx;
+          if (_disposed && _messageApi) {
+            _disposed = false;
+            void _cmdRoot(freshCtx as unknown as Pick<ExtensionContext, "ui" | "cwd">);
+          }
         },
       ).then((created) => {
         // Pi-side reset is durable only here: handleSessionNew swaps the SDK
@@ -3373,6 +3401,10 @@ export function _routeClientMessageFrom(
       break;
     }
     case "model_set":
+      if (!_pi) {
+        _sessionUnavailable(sender, msg.id, "Pi model API unavailable during session replacement");
+        break;
+      }
       void handleModelSet(
         _pi,
         (_lastEventCtx ?? _lastCtx) as ActionCtx | null,
@@ -3383,6 +3415,10 @@ export function _routeClientMessageFrom(
       );
       break;
     case "thinking_set":
+      if (!_pi) {
+        _sessionUnavailable(sender, msg.id, "Pi thinking API unavailable during session replacement");
+        break;
+      }
       handleThinkingSet(_pi, sender, msg);
       break;
     case "list_models":
