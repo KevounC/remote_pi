@@ -7,6 +7,8 @@
 !.work/**
 !.agents/
 !.agents/**
+!.research/
+!.research/**
 
 # orchestration: results são efêmeros (logs de execução de cada task);
 # INSTRUCTIONS.md e contracts/ ficam versionados (contrato compartilhado).
