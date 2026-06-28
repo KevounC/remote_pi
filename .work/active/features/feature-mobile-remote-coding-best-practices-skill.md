@@ -5,6 +5,11 @@ stage: drafting
 tags: [app, pi-extension, relay, workflow]
 parent: epic-remote-session-resilience-refactor
 depends_on: []
+research_dials:
+  scope_authority: mixed
+  verification_rigor: standard
+  intent: mobile-remote-coding-practices
+  output_kind: skill-reference
 created: 2026-06-27
 updated: 2026-06-27
 ---

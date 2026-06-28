@@ -5,6 +5,11 @@ stage: drafting
 tags: [relay, research, docs]
 parent: feature-agent-reference-surface
 depends_on: [story-research-platform-agent-reference-patterns]
+research_dials:
+  scope_authority: mixed
+  verification_rigor: standard
+  intent: rust-relay-api-reference
+  output_kind: skill-reference
 created: 2026-06-27
 updated: 2026-06-27
 ---

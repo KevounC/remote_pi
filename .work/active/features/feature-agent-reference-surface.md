@@ -5,6 +5,11 @@ stage: drafting
 tags: [workflow, research, docs]
 parent: epic-remote-session-resilience-refactor
 depends_on: []
+research_dials:
+  scope_authority: mixed
+  verification_rigor: floor
+  intent: agent-reference-surface
+  output_kind: reference-plan
 created: 2026-06-27
 updated: 2026-06-27
 ---

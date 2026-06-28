@@ -39,6 +39,18 @@ updated: YYYY-MM-DD
 ---
 ```
 
+Research-tagged active items additionally carry an ARD-style registration block:
+
+```yaml
+research_dials:
+  scope_authority: pre-registered|mixed|in-engagement-judgment
+  verification_rigor: floor|standard|full
+  intent: <short free-text inventory value>
+  output_kind: <short free-text inventory value>
+```
+
+The operator-confirmed dials are part of scoping. If a research item lacks them, pause before dispatching research and confirm/register dials instead of silently proceeding.
+
 ## Tags
 
 Start small. Current tags:

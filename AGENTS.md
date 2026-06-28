@@ -33,6 +33,16 @@ Read `CLAUDE.md` at the repo root for the orchestration/planning posture, and re
 
 Root is primarily planning/orchestration. Code edits normally belong in the relevant subproject.
 
+## Agent reference surface
+
+Remote Pi is adopting platform-style agent references so implementation/review agents have current language, library, and development-cycle guidance before touching code. The pattern and template live at `docs/agent-reference-surface.md`. New canonical references should prefer `.agents/skills/<reference>/SKILL.md` so Pi/Codex/non-Claude agents can read them directly; Claude-facing files may link to those references but should not become the only source of API facts.
+
+First-wave references are tracked in `.work/active/features/feature-agent-reference-surface.md` and children. Available references:
+
+- `.agents/skills/pi-extension-typescript/SKILL.md` — working draft for `pi-extension/` TypeScript/Pi SDK lifecycle work.
+
+Until the rest are authored, agents should treat subproject `CLAUDE.md` files plus `PROTOCOL.md` as the minimum required context.
+
 ## Common commands
 
 From `pi-extension/`:
