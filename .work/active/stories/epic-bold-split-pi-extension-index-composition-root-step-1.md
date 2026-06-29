@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-composition-root-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-composition-root
 depends_on: []
@@ -68,3 +68,14 @@ Medium: type imports can accidentally create cycles if they import runtime `inde
 
 ## Rollback
 Delete the new boundary file and any type-only imports added by this step.
+
+## Implementation Notes
+Added the type-first runtime boundary under `pi-extension/src/extension/`:
+
+- `extension/types.ts` exports neutral `RelayConnectivity` so future ports do not import runtime `index.ts`.
+- `extension/ports.ts` defines `RuntimeEpoch`, `RuntimeUiPort`, `RelayTransportPort`, `OwnerMultiplexerPort`, `SdkSessionProjectionPort`, `CommandSurfacePort`, and `RemotePiRuntimePorts` using existing protocol and transport types.
+
+The new files are side-effect free and not imported by runtime code yet. Public protocol, CLI output, relay behavior, and extension registration are unchanged.
+
+Verification:
+- `corepack pnpm typecheck` from `pi-extension/` — passed.
