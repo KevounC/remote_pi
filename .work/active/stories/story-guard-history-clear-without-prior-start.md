@@ -1,7 +1,7 @@
 ---
 id: story-guard-history-clear-without-prior-start
 kind: story
-stage: review
+stage: implementing
 tags: [app, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [story-guard-stale-session-history-after-new]
@@ -44,3 +44,17 @@ Review of `story-guard-stale-session-history-after-new` found that `clearActiveS
 - `cd /home/agent/forks/remote_pi/app && /opt/flutter/bin/flutter test --concurrency=1 test/data/sync/sync_service_test.dart`
 - `cd /home/agent/forks/remote_pi/app && /opt/flutter/bin/flutter test --concurrency=1`
 - `cd /home/agent/forks/remote_pi/app && /opt/flutter/bin/flutter analyze` (existing unrelated deprecated-member warning in `lib/ui/chat/widgets/input_bar.dart:802`)
+
+## Review findings (2026-06-28 #2)
+
+**Verdict**: Request changes
+
+**Blockers**:
+- `app/lib/data/sync/sync_service.dart:619` / `app/lib/data/sync/sync_service.dart:687`: the replacement-generation token is captured from `_historyGeneration` at message receipt, so any `SessionHistory` that arrives after `clearActiveSession()` receives the current generation and is accepted while `_activeSessionStartedAt` is null. This still allows a late prior-session history to repopulate a no-index/newly-cleared session before current history arrives. The regression test does not cover that ordering: it pushes the stale history before a second `clearActiveSession()` and only proves an already-queued write is invalidated by a later clear. Add/restore coverage for `clearActiveSession(); stale SessionHistory; expect empty` and make that ordering fail closed without using a phone-clock floor.
+- `app/test/data/sync/sync_service_test.dart:825`: the known-start regression from `story-guard-stale-session-history-after-new` was weakened by removing the post-stale `expect(messages(s.epk), isEmpty)`. With the current implementation, a stale history with `sessionStartedAt: 999` after clearing a known `1000` session is accepted because `clearActiveSession()` resets `_activeSessionStartedAt` to null; the later fresh `1001` history merely overwrites it. This regresses the predecessor guarantee that stale history after New Session must not visibly repopulate the cleared box.
+
+**Important**: none
+
+**Nits**: none
+
+**Notes**: The prior phone-clock blocker is fixed in the narrow sense that `clearActiveSession()` no longer fabricates a `DateTime.now()` floor, and fresh Pi histories below the phone clock are accepted. However, the generation approach as implemented only protects against writes that were already in flight before a later clear; it does not identify late prior-session histories that arrive after the clear. Verification: `cd /home/agent/forks/remote_pi/app && /opt/flutter/bin/flutter test --concurrency=1 test/data/sync/sync_service_test.dart` passed, but the suite is missing the failing post-clear stale ordering above.
