@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-late-attach-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-turn-state-machine-late-attach
 depends_on: [epic-bold-turn-state-machine-algebraic-state]
@@ -110,3 +110,10 @@ Medium. The risk is turning a narrow latch into a broader state that accidentall
 ## Rollback
 
 Revert the added late-attach event/projection fields and tests from `turn_state.ts` / `turn_state.test.ts`. The algebraic-state reducer can remain without this extension.
+
+## Implementation notes
+- Files changed: `pi-extension/src/session/turn_state.ts`, `pi-extension/src/session/turn_state.test.ts`.
+- Tests added: reducer coverage for owner and mesh-bridge late attach in working/streaming/awaiting-tool phases, `agent_done -> Done(awaitingSync)` projecting `working:false`, `turn_end + flush_late_attach_sync` clearing targets and enabling queued drain, and `session_shutdown` clearing late targets.
+- Discrepancies from design: Kept backwards-compatible support for the existing `{ type: "peer_attached", peerId }` event while adding the requested `{ target: { kind, id } }` shape so downstream integration can migrate without a flag day. `TurnSnapshot` stores only ids/kinds, not channels or lifecycle resources.
+- Adjacent issues parked: none.
+- Verification: `corepack pnpm exec vitest run src/session/turn_state.test.ts` passed. Full `corepack pnpm typecheck` is still blocked by pre-existing missing-`session_id` TypeScript errors in `src/actions/handlers.ts` and `src/index.ts`.

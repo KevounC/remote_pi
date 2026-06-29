@@ -62,7 +62,15 @@ describe("turn state reducer", () => {
       awaitingSyncTurnId: "cli-1",
     });
 
-    const idle = reduceTurn(snapshot, { type: "turn_end" });
+    const readyToFlush = reduceTurn(snapshot, { type: "turn_end" });
+    expect(projectTurn(readyToFlush)).toMatchObject({
+      phase: "done",
+      working: false,
+      awaitingSyncTurnId: "cli-1",
+      canFlushLateAttachSync: true,
+    });
+
+    const idle = reduceTurn(readyToFlush, { type: "flush_late_attach_sync" });
     expect(projectTurn(idle)).toMatchObject({ phase: "idle", working: false, awaitingSyncTurnId: null });
   });
 
@@ -111,21 +119,33 @@ describe("turn state reducer", () => {
     const done = reduceTurn(compacting, { type: "compaction_done" });
     expect(projectTurn(done)).toMatchObject({ phase: "done", working: false, awaitingSyncTurnId: "compact-1" });
 
-    const idle = reduceTurn(done, { type: "turn_end" });
+    const readyToFlush = reduceTurn(done, { type: "turn_end" });
+    expect(projectTurn(readyToFlush)).toMatchObject({ phase: "done", working: false, canFlushLateAttachSync: true });
+
+    const idle = reduceTurn(readyToFlush, { type: "flush_late_attach_sync" });
     expect(projectTurn(idle)).toMatchObject({ phase: "idle", working: false });
   });
 
-  test("records late-attach peers only during an active turn", () => {
-    let snapshot = reduceTurn(initialTurnSnapshot(), { type: "peer_attached", peerId: "peer-idle" });
+  test("records late-attach owners only during an active turn and dedupes by kind/id", () => {
+    let snapshot = reduceTurn(initialTurnSnapshot(), { type: "peer_attached", target: { kind: "owner", id: "peer-idle" } });
     expect(projectTurn(snapshot).peersAttachedDuringTurn).toEqual([]);
 
     snapshot = reduceTurn(snapshot, { type: "user_message_accepted", turnId: "cli-1" });
-    snapshot = reduceTurn(snapshot, { type: "peer_attached", peerId: "peer-b" });
-    snapshot = reduceTurn(snapshot, { type: "peer_attached", peerId: "peer-a" });
+    snapshot = reduceTurn(snapshot, { type: "peer_attached", target: { kind: "owner", id: "peer-b" } });
+    snapshot = reduceTurn(snapshot, { type: "peer_attached", target: { kind: "owner", id: "peer-a" } });
+    snapshot = reduceTurn(snapshot, { type: "peer_attached", target: { kind: "owner", id: "peer-a" } });
     expect(projectTurn(snapshot).peersAttachedDuringTurn).toEqual(["peer-a", "peer-b"]);
 
     snapshot = reduceTurn(snapshot, { type: "agent_done" });
     expect(snapshot.state).toMatchObject({ tag: "done", collectLateAttach: true });
+    expect(projectTurn(snapshot)).toMatchObject({
+      working: false,
+      awaitingSyncTurnId: "cli-1",
+      lateAttachSyncTargets: [
+        { kind: "owner", id: "peer-a" },
+        { kind: "owner", id: "peer-b" },
+      ],
+    });
   });
 
   test("queued messages drain only when idle and survive normal turns", () => {
@@ -137,10 +157,65 @@ describe("turn state reducer", () => {
 
     snapshot = reduceTurn(snapshot, { type: "agent_done" });
     snapshot = reduceTurn(snapshot, { type: "turn_end" });
+    expect(projectTurn(snapshot)).toMatchObject({ canDrainQueuedMessage: false, canFlushLateAttachSync: true, queuedMessage: { id: "q1", text: "next" } });
+
+    snapshot = reduceTurn(snapshot, { type: "flush_late_attach_sync" });
     expect(projectTurn(snapshot)).toMatchObject({ canDrainQueuedMessage: true, queuedMessage: { id: "q1", text: "next" } });
 
     snapshot = reduceTurn(snapshot, { type: "queued_message_clear" });
     expect(projectTurn(snapshot)).toMatchObject({ canDrainQueuedMessage: false, queuedMessage: null });
+  });
+
+  test("late-attach targets are collected from working, streaming, and awaiting-tool phases", () => {
+    const cases: TurnEvent[][] = [
+      [{ type: "user_message_accepted", turnId: "cli-1" }],
+      [{ type: "user_message_accepted", turnId: "cli-1" }, { type: "agent_chunk" }],
+      [{ type: "user_message_accepted", turnId: "cli-1" }, { type: "tool_execution_start", toolCallId: "tool-1" }],
+    ];
+
+    for (const events of cases) {
+      const snapshot = reduce([
+        ...events,
+        { type: "peer_attached", target: { kind: "owner", id: "owner-1" } },
+        { type: "peer_attached", target: { kind: "mesh_bridge", id: "bridge-1" } },
+        { type: "agent_done" },
+      ]);
+
+      expect(projectTurn(snapshot)).toMatchObject({
+        working: false,
+        awaitingSyncTurnId: "cli-1",
+        lateAttachSyncTargets: [
+          { kind: "mesh_bridge", id: "bridge-1" },
+          { kind: "owner", id: "owner-1" },
+        ],
+      });
+    }
+  });
+
+  test("turn_end plus flush_late_attach_sync clears targets before queued drain", () => {
+    let snapshot = reduce([
+      { type: "queued_message_set", id: "q1", text: "next" },
+      { type: "user_message_accepted", turnId: "cli-1" },
+      { type: "peer_attached", target: { kind: "owner", id: "owner-1" } },
+      { type: "agent_done" },
+      { type: "turn_end" },
+    ]);
+
+    expect(projectTurn(snapshot)).toMatchObject({
+      phase: "done",
+      working: false,
+      canFlushLateAttachSync: true,
+      canDrainQueuedMessage: false,
+      lateAttachSyncTargets: [{ kind: "owner", id: "owner-1" }],
+    });
+
+    snapshot = reduceTurn(snapshot, { type: "flush_late_attach_sync" });
+    expect(projectTurn(snapshot)).toMatchObject({
+      phase: "idle",
+      canFlushLateAttachSync: false,
+      canDrainQueuedMessage: true,
+      lateAttachSyncTargets: [],
+    });
   });
 
   test("session shutdown clears queued ownership and stale late-attach state", () => {
@@ -151,6 +226,12 @@ describe("turn state reducer", () => {
       { type: "session_shutdown" },
     ]);
 
-    expect(projectTurn(snapshot)).toMatchObject({ phase: "error", working: false, queuedMessage: null, peersAttachedDuringTurn: [] });
+    expect(projectTurn(snapshot)).toMatchObject({
+      phase: "error",
+      working: false,
+      queuedMessage: null,
+      peersAttachedDuringTurn: [],
+      lateAttachSyncTargets: [],
+    });
   });
 });

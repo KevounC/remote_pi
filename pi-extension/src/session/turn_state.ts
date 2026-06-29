@@ -20,18 +20,25 @@ export interface QueuedMessage {
   text: string;
 }
 
+export type LateAttachKind = "owner" | "mesh_bridge";
+export interface LateAttachTarget {
+  kind: LateAttachKind;
+  id: string;
+}
+
 export type TurnState =
   | { tag: "idle" }
   | { tag: "working"; turnId: string; replyTo: string; source: TurnSource }
   | { tag: "awaiting_tool"; turnId: string; replyTo: string; toolCallId: string }
   | { tag: "streaming"; turnId: string; replyTo: string }
-  | { tag: "done"; turnId: string; awaitingSync: true; collectLateAttach: boolean }
+  | { tag: "done"; turnId: string; awaitingSync: true; collectLateAttach: boolean; flushReady: boolean }
   | { tag: "error"; turnId: string | null; reason: TurnErrorReason };
 
 export interface TurnSnapshot {
   state: TurnState;
   queuedMessage: QueuedMessage | null;
   peersAttachedDuringTurn: ReadonlySet<string>;
+  lateAttachTargets: readonly LateAttachTarget[];
 }
 
 export type TurnEvent =
@@ -43,12 +50,14 @@ export type TurnEvent =
   | { type: "tool_execution_end"; toolCallId?: string }
   | { type: "agent_done"; collectLateAttach?: boolean }
   | { type: "turn_end" }
+  | { type: "flush_late_attach_sync" }
   | { type: "provider_error"; turnId?: string | null }
   | { type: "delivery_error"; turnId?: string | null }
   | { type: "cancelled"; turnId?: string | null }
   | { type: "session_shutdown" }
   | { type: "compaction_start"; turnId: string; replyTo?: string }
   | { type: "compaction_done" }
+  | { type: "peer_attached"; target: LateAttachTarget }
   | { type: "peer_attached"; peerId: string }
   | { type: "queued_message_set"; id: string; text: string }
   | { type: "queued_message_clear" };
@@ -56,8 +65,11 @@ export type TurnEvent =
 export interface TurnProjection {
   working: boolean;
   activeTurnId: string | null;
+  replyTo: string | null;
   cancelTargetId: string | null;
   awaitingSyncTurnId: string | null;
+  lateAttachSyncTargets: readonly LateAttachTarget[];
+  canFlushLateAttachSync: boolean;
   canDrainQueuedMessage: boolean;
   phase: TurnStateTag;
   peersAttachedDuringTurn: readonly string[];
@@ -69,6 +81,7 @@ export function initialTurnSnapshot(): TurnSnapshot {
     state: { tag: "idle" },
     queuedMessage: null,
     peersAttachedDuringTurn: new Set<string>(),
+    lateAttachTargets: [],
   };
 }
 
@@ -80,10 +93,7 @@ export function reduceTurn(snapshot: TurnSnapshot, event: TurnEvent): TurnSnapsh
       return withQueued(snapshot, null);
     case "peer_attached":
       if (!isActive(snapshot.state)) return snapshot;
-      return {
-        ...snapshot,
-        peersAttachedDuringTurn: new Set([...snapshot.peersAttachedDuringTurn, event.peerId]),
-      };
+      return withLateAttachTarget(snapshot, peerAttachedTarget(event));
     case "user_message_accepted":
       return seedTurn(snapshot, event.turnId, event.replyTo ?? event.turnId, event.source ?? "app");
     case "local_input":
@@ -94,6 +104,7 @@ export function reduceTurn(snapshot: TurnSnapshot, event: TurnEvent): TurnSnapsh
         ...snapshot,
         state: { tag: "working", turnId: event.fallbackTurnId, replyTo: event.fallbackTurnId, source: "local" },
         peersAttachedDuringTurn: new Set<string>(),
+        lateAttachTargets: [],
       };
     case "agent_chunk":
       return transitionActive(snapshot, (state) => ({
@@ -128,12 +139,19 @@ export function reduceTurn(snapshot: TurnSnapshot, event: TurnEvent): TurnSnapsh
           tag: "done",
           turnId: snapshot.state.turnId,
           awaitingSync: true,
-          collectLateAttach: event.collectLateAttach ?? snapshot.peersAttachedDuringTurn.size > 0,
+          collectLateAttach: event.collectLateAttach ?? snapshot.lateAttachTargets.length > 0,
+          flushReady: false,
         },
       };
     case "turn_end":
+      if (snapshot.state.tag === "done" && snapshot.state.awaitingSync) {
+        return { ...snapshot, state: { ...snapshot.state, flushReady: true } };
+      }
       if (snapshot.state.tag === "idle") return snapshot;
-      return { ...snapshot, state: { tag: "idle" }, peersAttachedDuringTurn: new Set<string>() };
+      return idleWithQueue(snapshot);
+    case "flush_late_attach_sync":
+      if (snapshot.state.tag !== "done" || !snapshot.state.awaitingSync) return snapshot;
+      return idleWithQueue(snapshot);
     case "provider_error":
       return terminalError(snapshot, "provider_error", event.turnId);
     case "delivery_error":
@@ -145,18 +163,20 @@ export function reduceTurn(snapshot: TurnSnapshot, event: TurnEvent): TurnSnapsh
         state: { tag: "error", turnId: activeTurnId(snapshot.state), reason: "session_shutdown" },
         queuedMessage: null,
         peersAttachedDuringTurn: new Set<string>(),
+        lateAttachTargets: [],
       };
     case "compaction_start":
       return {
         ...snapshot,
         state: { tag: "working", turnId: event.turnId, replyTo: event.replyTo ?? event.turnId, source: "compaction" },
         peersAttachedDuringTurn: new Set<string>(),
+        lateAttachTargets: [],
       };
     case "compaction_done":
       if (!isActive(snapshot.state)) return snapshot;
       return {
         ...snapshot,
-        state: { tag: "done", turnId: snapshot.state.turnId, awaitingSync: true, collectLateAttach: false },
+        state: { tag: "done", turnId: snapshot.state.turnId, awaitingSync: true, collectLateAttach: false, flushReady: false },
       };
   }
 }
@@ -164,11 +184,16 @@ export function reduceTurn(snapshot: TurnSnapshot, event: TurnEvent): TurnSnapsh
 export function projectTurn(snapshot: TurnSnapshot): TurnProjection {
   const state = snapshot.state;
   const working = state.tag === "working" || state.tag === "awaiting_tool" || state.tag === "streaming";
+  const replyTo = isActive(state) ? state.replyTo : null;
+  const awaitingSyncTurnId = state.tag === "done" && state.awaitingSync ? state.turnId : null;
   return {
     working,
     activeTurnId: working ? state.turnId : null,
-    cancelTargetId: working ? state.turnId : null,
-    awaitingSyncTurnId: state.tag === "done" && state.awaitingSync ? state.turnId : null,
+    replyTo,
+    cancelTargetId: working ? replyTo : null,
+    awaitingSyncTurnId,
+    lateAttachSyncTargets: awaitingSyncTurnId === null ? [] : sortLateAttachTargets(snapshot.lateAttachTargets),
+    canFlushLateAttachSync: awaitingSyncTurnId !== null && state.tag === "done" && state.flushReady,
     canDrainQueuedMessage: snapshot.queuedMessage !== null && state.tag === "idle",
     phase: state.tag,
     peersAttachedDuringTurn: [...snapshot.peersAttachedDuringTurn].sort(),
@@ -186,6 +211,7 @@ function seedTurn(snapshot: TurnSnapshot, turnId: string, replyTo: string, sourc
     ...snapshot,
     state: { tag: "working", turnId, replyTo, source },
     peersAttachedDuringTurn: new Set<string>(),
+    lateAttachTargets: [],
   };
 }
 
@@ -212,5 +238,41 @@ function terminalError(snapshot: TurnSnapshot, reason: TurnErrorReason, turnId?:
     ...snapshot,
     state: { tag: "error", turnId: turnId ?? activeTurnId(snapshot.state), reason },
     peersAttachedDuringTurn: new Set<string>(),
+    lateAttachTargets: [],
   };
+}
+
+function idleWithQueue(snapshot: TurnSnapshot): TurnSnapshot {
+  return {
+    ...snapshot,
+    state: { tag: "idle" },
+    peersAttachedDuringTurn: new Set<string>(),
+    lateAttachTargets: [],
+  };
+}
+
+function peerAttachedTarget(event: Extract<TurnEvent, { type: "peer_attached" }>): LateAttachTarget {
+  if ("target" in event) return event.target;
+  return { kind: "owner", id: event.peerId };
+}
+
+function withLateAttachTarget(snapshot: TurnSnapshot, target: LateAttachTarget): TurnSnapshot {
+  const key = lateAttachKey(target);
+  const existing = new Map(snapshot.lateAttachTargets.map((item) => [lateAttachKey(item), item]));
+  existing.set(key, target);
+  const peersAttachedDuringTurn = new Set(snapshot.peersAttachedDuringTurn);
+  if (target.kind === "owner") peersAttachedDuringTurn.add(target.id);
+  return {
+    ...snapshot,
+    peersAttachedDuringTurn,
+    lateAttachTargets: [...existing.values()],
+  };
+}
+
+function lateAttachKey(target: LateAttachTarget): string {
+  return `${target.kind}:${target.id}`;
+}
+
+function sortLateAttachTargets(targets: readonly LateAttachTarget[]): LateAttachTarget[] {
+  return [...targets].sort((a, b) => lateAttachKey(a).localeCompare(lateAttachKey(b)));
 }
