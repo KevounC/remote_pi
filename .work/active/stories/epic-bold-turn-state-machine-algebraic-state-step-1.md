@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-algebraic-state-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-turn-state-machine-algebraic-state
 depends_on: []
@@ -91,10 +91,10 @@ The reducer owns the transition table. It must model these rules without adding 
 - Use `as const` registries and inferred unions so later generated-protocol work can migrate this table into schema metadata without changing semantics.
 
 ## Acceptance Criteria
-- [ ] `corepack pnpm test -- turn_state` (or the nearest Vitest filter) passes from `pi-extension/`.
-- [ ] `reduceTurn` tests cover normal app turn, local/RPC turn, steering, tool boundary, provider error, cancel, compaction, late attach, queued drain, and session shutdown.
-- [ ] `projectTurn(...).working` is false for `idle`, `done`, and `error`, and true only for `working`, `awaiting_tool`, and `streaming`.
-- [ ] No runtime behavior is changed yet; this story only adds the canonical algebra and tests.
+- [x] `corepack pnpm test -- turn_state` (or the nearest Vitest filter) passes from `pi-extension/`.
+- [x] `reduceTurn` tests cover normal app turn, local/RPC turn, steering, tool boundary, provider error, cancel, compaction, late attach, queued drain, and session shutdown.
+- [x] `projectTurn(...).working` is false for `idle`, `done`, and `error`, and true only for `working`, `awaiting_tool`, and `streaming`.
+- [x] No runtime behavior is changed yet; this story only adds the canonical algebra and tests.
 
 ## Risk
 Medium. The risk is choosing a state set that cannot represent existing edge cases. Keep the reducer pure and heavily tested before integration.
@@ -111,3 +111,13 @@ Verification:
 - `corepack pnpm vitest run src/session/turn_state.test.ts` — passed (11 tests).
 - `corepack pnpm typecheck` — passed.
 - `corepack pnpm test -- turn_state` was attempted first, but Vitest treated the extra argument as a broad run and hit pre-existing environment-sensitive daemon/cwd-lock/leader-election/e2e failures plus timeout; the targeted test command above isolates this story's suite.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review with direct commit/file verification (`003e9de`). Confirmed `turn_state.ts` is pure and defines the six-state algebra/reducer/projection without runtime imports, and `turn_state.test.ts` covers the specified app/local/steering/tool/error/cancel/compaction/late-attach/queued/shutdown paths. Ran `corepack pnpm typecheck` successfully and `corepack pnpm vitest run src/session/turn_state.test.ts` successfully (11 tests). A full `corepack pnpm test` attempt timed out after unrelated pre-existing daemon/cwd-lock/leader-election/e2e environment-sensitive failures; the targeted reducer suite passed. Item advanced to `done`.
