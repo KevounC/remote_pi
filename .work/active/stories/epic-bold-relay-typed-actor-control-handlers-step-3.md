@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-control-handlers-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-control-handlers
 depends_on: [epic-bold-relay-typed-actor-control-handlers-step-2]
@@ -95,3 +95,9 @@ Low. This is a contained internal deduplication. The main risk is accidentally c
 ## Rollback
 
 Inline `SubscriptionIndex` back into `presence.rs` and `rooms.rs`. Because public manager APIs remain stable, rollback does not affect actor handler code.
+
+## Implementation notes
+- Files changed: `relay/src/subscriptions.rs`, `relay/src/lib.rs`, `relay/src/presence.rs`, `relay/src/rooms.rs`.
+- Tests added: `SubscriptionIndex` unit tests for replace, empty replace, subset remove, and remove-all cleanup; existing presence/rooms manager tests now exercise the shared graph through both managers.
+- Discrepancies from design: none; public `PresenceManager` and `RoomManager` APIs remain stable and presence-specific `last_offline_ts` stays beside the shared graph.
+- Adjacent issues parked: none.

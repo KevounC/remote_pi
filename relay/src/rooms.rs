@@ -1,7 +1,8 @@
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
+
+use crate::subscriptions::SubscriptionIndex;
 
 /// Metadata about one active Pi room (sub-channel of a peer_id).
 #[derive(Debug, Clone, serde::Serialize)]
@@ -64,10 +65,7 @@ impl RoomMetaPatch {
 
 #[derive(Debug, Default)]
 struct Inner {
-    /// subscribers_of[X] = set of peer_ids that want push when X opens/closes a room.
-    subscribers_of: HashMap<String, HashSet<String>>,
-    /// subscriptions_by[Y] = set of peer_ids that Y is watching (for efficient cleanup).
-    subscriptions_by: HashMap<String, HashSet<String>>,
+    subscriptions: SubscriptionIndex,
 }
 
 /// Tracks who has subscribed to room announcements for which peer_ids.
@@ -86,57 +84,25 @@ impl RoomManager {
     /// Empty list = unsubscribe all.
     pub async fn subscribe(&self, subscriber: String, peers: Vec<String>) {
         let mut g = self.inner.lock().await;
-        if let Some(old) = g.subscriptions_by.remove(&subscriber) {
-            for peer in &old {
-                if let Some(set) = g.subscribers_of.get_mut(peer) {
-                    set.remove(&subscriber);
-                }
-            }
-        }
-        let new_set: HashSet<String> = peers.into_iter().collect();
-        for peer in &new_set {
-            g.subscribers_of
-                .entry(peer.clone())
-                .or_default()
-                .insert(subscriber.clone());
-        }
-        if !new_set.is_empty() {
-            g.subscriptions_by.insert(subscriber, new_set);
-        }
+        g.subscriptions.replace(subscriber, peers);
     }
 
     /// Removes `peers` from `subscriber`'s watched list.
     pub async fn unsubscribe(&self, subscriber: &str, peers: Vec<String>) {
         let mut g = self.inner.lock().await;
-        for peer in &peers {
-            if let Some(set) = g.subscribers_of.get_mut(peer) {
-                set.remove(subscriber);
-            }
-            if let Some(subs) = g.subscriptions_by.get_mut(subscriber) {
-                subs.remove(peer);
-            }
-        }
+        g.subscriptions.remove(subscriber, peers);
     }
 
     /// Removes all subscriptions for `subscriber` (called on disconnect to prevent leaks).
     pub async fn unsubscribe_all(&self, subscriber: &str) {
         let mut g = self.inner.lock().await;
-        if let Some(peers) = g.subscriptions_by.remove(subscriber) {
-            for peer in &peers {
-                if let Some(set) = g.subscribers_of.get_mut(peer) {
-                    set.remove(subscriber);
-                }
-            }
-        }
+        g.subscriptions.remove_all(subscriber);
     }
 
     /// Returns everyone who subscribed to room events for `peer`.
     pub async fn subscribers_of(&self, peer: &str) -> Vec<String> {
         let g = self.inner.lock().await;
-        g.subscribers_of
-            .get(peer)
-            .map(|s| s.iter().cloned().collect())
-            .unwrap_or_default()
+        g.subscriptions.subscribers_of(peer)
     }
 }
 

@@ -1,14 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
+use crate::subscriptions::SubscriptionIndex;
+
 #[derive(Debug, Default)]
 struct Inner {
-    /// subscribers_of[X] = set of peer_ids that want push when X connects/disconnects.
-    subscribers_of: HashMap<String, HashSet<String>>,
-    /// subscriptions_by[Y] = set of peer_ids that Y is watching (for efficient cleanup).
-    subscriptions_by: HashMap<String, HashSet<String>>,
+    subscriptions: SubscriptionIndex,
     /// Epoch-ms timestamp of the most recent disconnect for each peer.
     last_offline_ts: HashMap<String, i64>,
 }
@@ -34,59 +33,25 @@ impl PresenceManager {
     /// Passing an empty list is equivalent to unsubscribing from everything.
     pub async fn subscribe(&self, subscriber: String, peers: Vec<String>) {
         let mut g = self.inner.lock().await;
-        // Remove subscriber from all currently-watched sets.
-        if let Some(old) = g.subscriptions_by.remove(&subscriber) {
-            for peer in &old {
-                if let Some(set) = g.subscribers_of.get_mut(peer) {
-                    set.remove(&subscriber);
-                }
-            }
-        }
-        // Add to new sets.
-        let new_set: HashSet<String> = peers.into_iter().collect();
-        for peer in &new_set {
-            g.subscribers_of
-                .entry(peer.clone())
-                .or_default()
-                .insert(subscriber.clone());
-        }
-        if !new_set.is_empty() {
-            g.subscriptions_by.insert(subscriber, new_set);
-        }
+        g.subscriptions.replace(subscriber, peers);
     }
 
     /// Removes `peers` from `subscriber`'s watched list.
     pub async fn unsubscribe(&self, subscriber: &str, peers: Vec<String>) {
         let mut g = self.inner.lock().await;
-        for peer in &peers {
-            if let Some(set) = g.subscribers_of.get_mut(peer) {
-                set.remove(subscriber);
-            }
-            if let Some(subs) = g.subscriptions_by.get_mut(subscriber) {
-                subs.remove(peer);
-            }
-        }
+        g.subscriptions.remove(subscriber, peers);
     }
 
     /// Removes all subscriptions for `subscriber` (called on disconnect to prevent leaks).
     pub async fn unsubscribe_all(&self, subscriber: &str) {
         let mut g = self.inner.lock().await;
-        if let Some(peers) = g.subscriptions_by.remove(subscriber) {
-            for peer in &peers {
-                if let Some(set) = g.subscribers_of.get_mut(peer) {
-                    set.remove(subscriber);
-                }
-            }
-        }
+        g.subscriptions.remove_all(subscriber);
     }
 
     /// Returns everyone who subscribed to `peer`.
     pub async fn subscribers_of(&self, peer: &str) -> Vec<String> {
         let g = self.inner.lock().await;
-        g.subscribers_of
-            .get(peer)
-            .map(|s| s.iter().cloned().collect())
-            .unwrap_or_default()
+        g.subscriptions.subscribers_of(peer)
     }
 
     /// Builds a presence snapshot for `peers`. `is_online` is called while holding
