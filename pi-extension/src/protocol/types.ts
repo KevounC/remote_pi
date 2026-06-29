@@ -96,6 +96,7 @@ export type ServerMessage =
       in_reply_to: string;
       session_name: string;
       session_started_at: number;
+      session_id: string;
       room_id: string;
       /**
        * Plan/27 Wave A: identifies the host coding agent driving this

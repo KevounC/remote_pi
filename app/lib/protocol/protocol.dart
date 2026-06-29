@@ -40,6 +40,7 @@ sealed class ControlInbound {
         return RoomAnnounced(
           peer: j['peer'] as String,
           roomId: j['room_id'] as String,
+          sessionId: (j['session_id'] as String?) ?? (metaJson?['session_id'] as String?),
           name: j['name'] as String?,
           cwd: j['cwd'] as String?,
           startedAt: (j['started_at'] as num).toInt(),
@@ -65,10 +66,12 @@ sealed class ControlInbound {
         final meta = j['meta'] as Map<String, dynamic>?;
         final hasModel = meta?.containsKey('model') ?? false;
         final hasThinking = meta?.containsKey('thinking') ?? false;
+        final hasSessionId = meta?.containsKey('session_id') ?? false;
         final rawThinking = meta?['thinking'] as String?;
         return RoomMetaUpdated(
           peer: j['peer'] as String,
           roomId: j['room_id'] as String,
+          sessionId: meta?['session_id'] as String?,
           model: meta?['model'] as String?,
           thinking: rawThinking != null
               ? ThinkingLevel.fromWire(rawThinking)
@@ -79,6 +82,7 @@ sealed class ControlInbound {
           working: meta?['working'] as bool?,
           hasModel: hasModel,
           hasThinking: hasThinking,
+          hasSessionId: hasSessionId,
         );
       }(),
       _ => null,
@@ -171,6 +175,7 @@ const Object _kRoomInfoUnset = Object();
 /// Snapshot of a single Pi room (one cwd / session).
 class RoomInfo {
   final String roomId;
+  final String? sessionId;
   final String? name;
   final String? cwd;
   final int startedAt;
@@ -197,6 +202,7 @@ class RoomInfo {
   const RoomInfo({
     required this.roomId,
     required this.startedAt,
+    this.sessionId,
     this.name,
     this.cwd,
     this.model,
@@ -208,6 +214,7 @@ class RoomInfo {
     final rawThinking = j['thinking'] as String?;
     return RoomInfo(
       roomId: j['room_id'] as String,
+      sessionId: j['session_id'] as String?,
       name: j['name'] as String?,
       cwd: j['cwd'] as String?,
       startedAt: (j['started_at'] as num).toInt(),
@@ -221,6 +228,7 @@ class RoomInfo {
 
   Map<String, dynamic> toJson() => {
     'room_id': roomId,
+    if (sessionId != null) 'session_id': sessionId,
     'name': name,
     'cwd': cwd,
     'started_at': startedAt,
@@ -230,6 +238,7 @@ class RoomInfo {
   };
 
   RoomInfo copyWith({
+    Object? sessionId = _kRoomInfoUnset,
     String? name,
     String? cwd,
     int? startedAt,
@@ -238,6 +247,9 @@ class RoomInfo {
     bool? working,
   }) => RoomInfo(
     roomId: roomId,
+    sessionId: identical(sessionId, _kRoomInfoUnset)
+        ? this.sessionId
+        : sessionId as String?,
     name: name ?? this.name,
     cwd: cwd ?? this.cwd,
     startedAt: startedAt ?? this.startedAt,
@@ -252,6 +264,7 @@ class RoomInfo {
   bool operator ==(Object other) =>
       other is RoomInfo &&
       other.roomId == roomId &&
+      other.sessionId == sessionId &&
       other.name == name &&
       other.cwd == cwd &&
       other.startedAt == startedAt &&
@@ -260,13 +273,22 @@ class RoomInfo {
       other.working == working;
 
   @override
-  int get hashCode =>
-      Object.hash(roomId, name, cwd, startedAt, model, thinking, working);
+  int get hashCode => Object.hash(
+    roomId,
+    sessionId,
+    name,
+    cwd,
+    startedAt,
+    model,
+    thinking,
+    working,
+  );
 }
 
 class RoomAnnounced extends ControlInbound {
   final String peer;
   final String roomId;
+  final String? sessionId;
   final String? name;
   final String? cwd;
   final int startedAt;
@@ -287,6 +309,7 @@ class RoomAnnounced extends ControlInbound {
     required this.peer,
     required this.roomId,
     required this.startedAt,
+    this.sessionId,
     this.name,
     this.cwd,
     this.model,
@@ -319,6 +342,7 @@ class RoomsSnapshot extends ControlInbound {
 class RoomMetaUpdated extends ControlInbound {
   final String peer;
   final String roomId;
+  final String? sessionId;
   final String? model;
 
   /// Plan/28 Wave D — current thinking level, parsed from
@@ -342,6 +366,9 @@ class RoomMetaUpdated extends ControlInbound {
   /// Plan/28 Wave D — same convention for `thinking`.
   final bool hasThinking;
 
+  /// Same convention for opaque session id bootstrap metadata.
+  final bool hasSessionId;
+
   /// Plan/32 — in-flight agent turn for this room. `null` = the update
   /// did not carry `working` (preserve the cached value); non-null =
   /// set. No separate `hasWorking` flag is needed because `working` can
@@ -350,11 +377,13 @@ class RoomMetaUpdated extends ControlInbound {
   const RoomMetaUpdated({
     required this.peer,
     required this.roomId,
+    this.sessionId,
     this.model,
     this.thinking,
     this.working,
     this.hasModel = true,
     this.hasThinking = true,
+    this.hasSessionId = true,
   });
 }
 
@@ -928,6 +957,9 @@ class PairOk extends ServerMessage {
   /// an empty subtitle.
   final PiHarness? harness;
 
+  /// Opaque Pi SDK session discriminator for bootstrap attribution.
+  final String? sessionId;
+
   /// Plan/27 Wave A — hostname hint for the post-pair nickname modal.
   /// The pi-extension reports its OS hostname so the modal can
   /// pre-fill a sensible placeholder ("Mac do Jacob") instead of a
@@ -938,6 +970,7 @@ class PairOk extends ServerMessage {
     required this.sessionName,
     required this.sessionStartedAt,
     required this.roomId,
+    this.sessionId,
     this.harness,
     this.hostname,
   });
@@ -957,6 +990,7 @@ class PairOk extends ServerMessage {
       // Callers that need to distinguish "Pi said main" from "Pi
       // omitted room" should peek at the raw JSON instead.
       roomId: (j['room_id'] as String?) ?? 'main',
+      sessionId: j['session_id'] as String?,
       harness: harnessJson is Map<String, dynamic>
           ? PiHarness.fromJson(harnessJson)
           : null,

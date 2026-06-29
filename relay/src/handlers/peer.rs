@@ -182,6 +182,10 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
             .and_then(|m| m.get("cwd"))
             .and_then(|v| v.as_str())
             .map(String::from);
+        let session_id = room_meta_val
+            .and_then(|m| m.get("session_id"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let model = room_meta_val
             .and_then(|m| m.get("model"))
             .and_then(|v| v.as_str())
@@ -202,6 +206,7 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
             room_id,
             name,
             cwd,
+            session_id,
             model,
             thinking,
             working,
@@ -403,12 +408,16 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
                                     let thinking_patch = meta_obj
                                         .and_then(|m| m.get("thinking"))
                                         .map(|v| v.as_str().map(String::from));
+                                    let session_id_patch = meta_obj
+                                        .and_then(|m| m.get("session_id"))
+                                        .map(|v| v.as_str().map(String::from));
                                     let working_patch = meta_obj
                                         .and_then(|m| m.get("working"))
                                         .and_then(|v| v.as_bool());
                                     let patch = RoomMetaPatch {
                                         model: model_patch,
                                         thinking: thinking_patch,
+                                        session_id: session_id_patch,
                                         working: working_patch,
                                     };
                                     if !registry

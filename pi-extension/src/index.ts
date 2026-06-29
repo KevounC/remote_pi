@@ -65,6 +65,7 @@ import { roomIdFor } from "./rooms.js";
 import { registerAgentTools } from "./session/tools.js";
 import { formatPeerInventory } from "./session/peer_inventory.js";
 import { MeshNode } from "./session/mesh_node.js";
+import { RemoteSessionIssuer } from "./session/remote_session.js";
 import {
   handleSessionCompact,
   handleSessionNew,
@@ -166,7 +167,7 @@ let _myRoomId: string | null = null;   // this Pi's room id (derived from cwd)
 // open instead of starting null. The SDK fires `thinking_level_select`
 // on every change (initial load + user toggle), mirrored to room_meta
 // the same way model is — apps subscribe to one channel for both.
-let _myRoomMeta: { name: string; cwd: string; model?: string; thinking?: ThinkingLevel; working?: boolean } | null = null;
+let _myRoomMeta: { name: string; cwd: string; session_id?: string; model?: string; thinking?: ThinkingLevel; working?: boolean } | null = null;
 let _currentModel: string | undefined = undefined;  // last-known model name
 let _currentThinking: ThinkingLevel | undefined = undefined;  // last-known thinking level
 
@@ -406,6 +407,7 @@ function _refreshFooter(ctx?: RemotePiUiContext): void {
 // Used by session_sync to let the app detect Pi restarts (and force a full
 // replay). Cleared on _goIdle.
 let _sessionStartedAt: number | null = null;
+const _remoteSessionIssuer = new RemoteSessionIssuer();
 
 // Snapshot of agent messages, captured on every agent_end event. Used to
 // answer session_sync. Cleared on _goIdle.
@@ -486,6 +488,28 @@ export function _getMessageBufferForTest(): unknown[] {
 /** Test-only override of session started timestamp. */
 export function _setSessionStartedAtForTest(ts: number | null): void {
   _sessionStartedAt = ts;
+}
+
+export function _getRemoteSessionIdForTest(): string | null {
+  return _remoteSessionIssuer.current();
+}
+
+export function _setRemoteSessionIdForTest(id: string | null): void {
+  if (id === null) _remoteSessionIssuer.clear();
+  else _remoteSessionIssuer.capture({ sessionManager: { getSessionId: () => id } });
+}
+
+function _currentRemoteSessionId(ctx?: unknown): string {
+  return _remoteSessionIssuer.currentOrCapture(ctx ?? _lastEventCtx ?? _lastCtx ?? undefined);
+}
+
+function _captureRemoteSession(ctx: unknown): string {
+  const sessionId = _remoteSessionIssuer.capture(ctx);
+  if (_myRoomMeta) _myRoomMeta = { ..._myRoomMeta, session_id: sessionId };
+  if (_relay && _myRoomId) {
+    _relay.sendControl({ type: "room_meta_update", room_id: _myRoomId, meta: { session_id: sessionId } });
+  }
+  return sessionId;
 }
 
 /** Test-only: reset the cached model name (between tests). */
@@ -1267,6 +1291,7 @@ async function _handlePairRequest(
     in_reply_to: inner.id,
     session_name: sessionName,
     session_started_at: _sessionStartedAt ?? Date.now(),
+    session_id: _currentRemoteSessionId(_lastEventCtx ?? _lastCtx),
     // App uses this to address subsequent inner messages to the right room
     // when this Pi runs alongside others with the same epk. Defensive fallback
     // to roomIdFor(cwd, name) covers the edge case where pair_request lands
@@ -1555,6 +1580,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // withSession callback when Remote Pi itself initiated the replacement.
   pi.on("session_start", (_event, ctx) => {
     _lastEventCtx = ctx;
+    _captureRemoteSession(ctx);
     // Rearm a reused-but-disposed instance. The session_shutdown teardown (below)
     // sets _disposed=true assuming the host re-evaluates THIS module fresh for the
     // replacement session, yielding a new instance with _disposed=false. Some hosts
@@ -2014,7 +2040,8 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
     _currentThinking = _pi?.getThinkingLevel() as ThinkingLevel | undefined;
   } catch { /* defensive — never block /remote-pi start on this */ }
 
-  const roomMeta: { name: string; cwd: string; model?: string; thinking?: ThinkingLevel } = { name: sessionName, cwd };
+  const sessionId = _currentRemoteSessionId(ctx);
+  const roomMeta: { name: string; cwd: string; session_id: string; model?: string; thinking?: ThinkingLevel } = { name: sessionName, cwd, session_id: sessionId };
   const modelName = _currentModelName();
   if (modelName) roomMeta.model = modelName;
   if (_currentThinking) roomMeta.thinking = _currentThinking;
@@ -3445,6 +3472,7 @@ export function _routeClientMessageFrom(
           // narrowly-typed _lastCtx slot is sound (mirrors the read-site casts).
           _lastCtx = freshCtx as unknown as typeof _lastCtx;
           _lastEventCtx = freshCtx as unknown as typeof _lastEventCtx;
+          _captureRemoteSession(freshCtx);
           if (_isAgentMessageApi(freshCtx)) _messageApi = freshCtx;
           if (_disposed && _messageApi) {
             _disposed = false;

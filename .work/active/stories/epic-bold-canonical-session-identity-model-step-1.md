@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-identity-model-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-canonical-session-identity-model
 depends_on: []
@@ -76,3 +76,16 @@ Medium. The risky edge is incorrectly rotating on reconnect/reload and splitting
 
 ## Rollback
 Revert the identity module and the `pair_ok`/room-meta additions. Existing room-based behavior resumes; app-side validation stories must be reverted in reverse dependency order.
+
+## Implementation Notes
+
+Implemented inline by the bold-refactor implement-orchestrator because no subagent dispatcher is exposed in this delegated harness. Added `pi-extension/src/session/remote_session.ts` as the single identity issuer module, deriving `session_id` from `ctx.sessionManager.getSessionId()` when present and falling back to a local UUIDv7 helper for tests/legacy seams. `RemoteSessionIssuer` preserves the id across reconnect/stop-start reads and rotates when a fresh Pi SDK session context is captured.
+
+Wired the current `session_id` into Pi-extension `pair_ok` and `room_meta` hello/update payloads. The relay carries `session_id` as opaque room metadata without routing by it. The mobile protocol parses `session_id` from `pair_ok`, room announcements/snapshots, and room metadata updates so later attribution/hydration stories can consume it.
+
+Verification:
+- `cd pi-extension && corepack pnpm typecheck` passed.
+- `cd pi-extension && corepack pnpm exec vitest run src/session/remote_session.test.ts` passed (4 tests).
+- A broader filtered `extension.test.ts` run exercised pair/session tests but failed 3 existing mesh/relay lifecycle tests unrelated to the new identity assertions; the new targeted identity tests passed.
+- `cd relay && cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed.
+- `flutter analyze` could not run because `/opt/flutter/bin/cache` is read-only in this environment. Nearest check run: `HOME=/tmp/remote-pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/protocol/protocol.dart lib/data/transport/connection_manager.dart`, passed with no issues.

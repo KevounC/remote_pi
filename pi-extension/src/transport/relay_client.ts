@@ -30,16 +30,20 @@ interface AuthMsg { type: "auth"; sig: string }
 export interface RoomMeta {
   name: string;
   cwd: string;
+  /** Opaque Pi SDK session discriminator. Carried by relay metadata for app bootstrap; relay must not route or log by it. */
+  session_id?: string;
   /** Friendly model name (e.g. "claude-sonnet-4.5"). Optional — pi-ext sends
    *  when `ExtensionContext.model` is available; relay/app tolerate absence. */
   model?: string;
+  thinking?: string;
+  working?: boolean;
 }
 
 /** Control frame sent to relay (not routed to app peer). */
 export interface RoomMetaUpdateFrame {
   type: "room_meta_update";
   room_id: string;
-  meta: { model?: string };
+  meta: { model?: string; thinking?: string; working?: boolean; session_id?: string };
 }
 
 export interface ConnectOptions {

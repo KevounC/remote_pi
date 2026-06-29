@@ -602,6 +602,7 @@ class ConnectionManager extends Service {
       case RoomAnnounced(
         :final peer,
         :final roomId,
+        :final sessionId,
         :final name,
         :final cwd,
         :final startedAt,
@@ -625,14 +626,17 @@ class ConnectionManager extends Service {
         // relay that omits it (null) keeps the cached value instead of
         // forcing the room back to idle.
         var preservedWorking = false;
+        String? preservedSessionId;
         final existingIdx = list.indexWhere((r) => r.roomId == roomId);
         if (existingIdx >= 0) {
           preservedName = list[existingIdx].name;
+          preservedSessionId = list[existingIdx].sessionId;
           preservedThinking = list[existingIdx].thinking;
           preservedWorking = list[existingIdx].working;
         }
         final next = RoomInfo(
           roomId: roomId,
+          sessionId: sessionId ?? preservedSessionId,
           name: preservedName ?? name,
           cwd: cwd,
           startedAt: startedAt,
@@ -674,11 +678,13 @@ class ConnectionManager extends Service {
       case RoomMetaUpdated(
         :final peer,
         :final roomId,
+        :final sessionId,
         :final model,
         :final thinking,
         :final working,
         :final hasModel,
         :final hasThinking,
+        :final hasSessionId,
       ):
         final key = toStandardB64(peer);
         final list = _roomsByPeer[key];
@@ -692,6 +698,7 @@ class ConnectionManager extends Service {
         // (preserve previous value) from "field was explicitly null"
         // (overwrite with null). Without this, a thinking-only update
         // would clobber the previously cached model with null.
+        final nextSessionId = hasSessionId ? sessionId : current.sessionId;
         final nextModel = hasModel ? model : current.model;
         final nextThinking = hasThinking ? thinking : current.thinking;
         // Plan/32 — `working` is nullable-as-absent: null preserves the
@@ -699,12 +706,14 @@ class ConnectionManager extends Service {
         // non-null sets it. This is what carries the relay's
         // turn_start/turn_end broadcast to the Home dot for EVERY room.
         final nextWorking = working ?? current.working;
-        if (current.model == nextModel &&
+        if (current.sessionId == nextSessionId &&
+            current.model == nextModel &&
             current.thinking == nextThinking &&
             current.working == nextWorking) {
           break; // dedup: nothing actually changed
         }
         list[idx] = current.copyWith(
+          sessionId: nextSessionId,
           model: nextModel,
           thinking: nextThinking,
           working: nextWorking,
@@ -721,12 +730,14 @@ class ConnectionManager extends Service {
         final byId = {for (final r in existing) r.roomId: r};
         for (final r in rooms) {
           final preservedName = byId[r.roomId]?.name ?? r.name;
+          final preservedSessionId = r.sessionId ?? byId[r.roomId]?.sessionId;
           final preservedModel = r.model ?? byId[r.roomId]?.model;
           // Plan/28 Wave D — same convention as model: keep the
           // previously-known thinking when the snapshot omits it.
           final preservedThinking = r.thinking ?? byId[r.roomId]?.thinking;
           byId[r.roomId] = RoomInfo(
             roomId: r.roomId,
+            sessionId: preservedSessionId,
             name: preservedName,
             cwd: r.cwd,
             startedAt: r.startedAt,
