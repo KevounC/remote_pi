@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-workspace-document-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-workspace-document
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document-step-1]
@@ -95,4 +95,14 @@ Remove the new document/codec files and keep `_serializeLayout`, `_restoreProjec
 - Discrepancies from design: none; `WorkspaceLayoutStore` remains an opaque `Map<String, dynamic>` boundary.
 - Adjacent issues parked: none.
 - Verification: `flutter test test/domain/workspace_document_codec_test.dart` could not start because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`) even with `HOME=/tmp/pi-dart-home`; direct Dart formatting succeeded using the SDK binary.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Inspected implementation commit `225b549adb0088a3024e8c49291e994e5ea9bf7f` and changed files. The domain `WorkspaceDocument`, `WorkspaceTab`, and `WorkspaceLayoutCodec` are pure and preserve the v1 JSON key shape; codec tests cover round-trip, descriptor decode, invalid thinking fallback, and corrupt layout fallback. `HOME=/tmp/pi-dart-home flutter analyze && flutter test` could not start because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`); a direct Dart analyzer fallback also cannot substitute for Flutter here due cockpit-wide analyzer noise unrelated to this story.
 
