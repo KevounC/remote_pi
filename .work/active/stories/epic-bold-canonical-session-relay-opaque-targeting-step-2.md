@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-relay-opaque-targeting-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-canonical-session-relay-opaque-targeting
 depends_on: [epic-bold-canonical-session-relay-opaque-targeting-step-1]
@@ -70,3 +70,13 @@ Restore `forward_to_peer` and the old `pi_forward` call. This cleanly reopens fa
 - Discrepancies from design: included `to_room` on `pi_envelope_in` while switching the data-plane route so the receiver has the explicit target metadata expected by the next step; relay still treats `session_id` as opaque body data.
 - Adjacent issues parked: none.
 - Verification: `cargo fmt --check` passed; `cargo test authorized_forward_targets_only_to_room` passed; `cargo test forward_to_room_targets_one_room_not_every_room_for_peer` passed.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Inspected implementation commit `f6ed43c`; `pi_forward` now forwards via explicit `to_room`, `forward_to_peer` is removed, `pi_envelope_in` carries `to_room`, and tests prove two rooms for one peer only deliver to the addressed room while preserving the inner envelope verbatim. Relay code does not parse inner `ct`/`body.session_id`. Verification run from `relay/`: `cargo fmt --check && cargo clippy -- -D warnings && cargo test`.
