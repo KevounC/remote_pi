@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension, app, cockpit]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: []
@@ -75,10 +75,10 @@ Projection contract returns `messages`, `streaming`, and a lightweight `Transcri
 
 ## Acceptance Criteria
 
-- [ ] Event kind names and required fields are centralized on each touched surface.
-- [ ] Every event requires `sessionId`; adapters provide an explicit compatibility shim only at the boundary.
-- [ ] Projection contract returns `messages`, `streaming`, and `turn` without infrastructure imports.
-- [ ] No runtime behavior changes yet; this is side-by-side.
+- [x] Event kind names and required fields are centralized on each touched surface.
+- [x] Every event requires `sessionId`; adapters provide an explicit compatibility shim only at the boundary.
+- [x] Projection contract returns `messages`, `streaming`, and `turn` without infrastructure imports.
+- [x] No runtime behavior changes yet; this is side-by-side.
 
 ## Risk
 
@@ -99,3 +99,13 @@ Verification:
 - `cd app && HOME=/tmp/remote-pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/domain/transcript/transcript_event.dart lib/domain/transcript/transcript_projection.dart` passed.
 - `cd cockpit && HOME=/tmp/remote-pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/app/cockpit/domain/entities/transcript_event.dart` passed.
 - Full `flutter analyze` was skipped because `/opt/flutter/bin/cache` is read-only in this environment; direct Dart analyzer with a writable HOME was the nearest meaningful check.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Verified commit `302afa4`, changed files, and parent projection-derive design. Reviewer reran `cd pi-extension && corepack pnpm typecheck`, the nearest app analyzer check `HOME=/tmp/remote-pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/domain/transcript/transcript_event.dart lib/domain/transcript/transcript_projection.dart`, and the nearest cockpit analyzer check `HOME=/tmp/remote-pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/app/cockpit/domain/entities/transcript_event.dart`. Full `flutter analyze` was attempted in both `app/` and `cockpit/`, but both failed before analysis because `/opt/flutter/bin/cache` is read-only.
