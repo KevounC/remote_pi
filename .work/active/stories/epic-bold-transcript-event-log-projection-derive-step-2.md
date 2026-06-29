@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-2
 kind: story
-stage: review
+stage: implementing
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-1]
@@ -103,3 +103,16 @@ Pinned behavior:
 
 Verification attempted:
 - `flutter test test/domain/transcript/transcript_projection_test.dart` could not start because the installed Flutter tool attempted to update `/opt/flutter/bin/cache/*` and the cache is read-only in this environment (`Read-only file system`). No tests were weakened or skipped in code; this is an environment/toolchain blocker.
+
+## Review bounce (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blockers**:
+- The projection reducer code in commit `4dd14f1` looks directionally correct, but the deterministic tests do not fully prove two acceptance-critical cases. `ToolEvent.operator ==` ignores `tool`, `args`, `result`, and `error`, so the `tool request and result collapse into one projected tool row` list equality would pass even if the reducer dropped the tool name/args/result. Add explicit field assertions on the projected `ToolEvent`.
+- The duplicate replay test says it is idempotent by event id and message id, but the helper generates the same `eventId` for both `confirmed('cli_1', ...)` events. Add a case with distinct event ids and the same message/client id so message-id dedupe is actually verified.
+
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review with direct commit/file verification. Re-ran `flutter analyze && flutter test` from `app/`, and also tried the targeted `dart test test/domain/transcript/transcript_projection_test.dart`; both fail before analysis/tests start because the installed Flutter/Dart wrapper attempts to write `/opt/flutter/bin/cache/*`, which is read-only. Because this story's value is specifically proving reconcile behavior with deterministic tests, the unproven assertions above are blockers even though the reducer implementation itself appears behavior-preserving on read.
