@@ -1,7 +1,7 @@
 ---
 id: story-fix-late-attach-turn-stream-sync
 kind: story
-stage: review
+stage: done
 tags: [pi-extension, app, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review]
@@ -39,3 +39,9 @@ Verification from `pi-extension/`:
 - `corepack pnpm typecheck` — passed.
 - `corepack pnpm test -- src/extension.test.ts` — passed; Vitest executed the full 33-file suite (586 passed, 3 skipped).
 - `corepack pnpm test` — passed (33 files, 586 passed, 3 skipped).
+
+## Review (2026-06-28)
+
+Verdict: Approve
+
+Findings: None.
