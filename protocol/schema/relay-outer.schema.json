@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://remote-pi.dev/schemas/relay-outer.schema.json",
+  "title": "Remote Pi relay outer envelope",
+  "description": "Relay-owned app↔Pi outer envelope. The relay routes peer/room and keeps ct opaque.",
+  "$defs": {
+    "outerEnvelope": {
+      "type": "object",
+      "required": ["peer", "ct"],
+      "properties": {
+        "peer": { "type": "string", "minLength": 1 },
+        "room": { "type": "string", "minLength": 1, "default": "main" },
+        "ct": { "type": "string", "minLength": 1, "contentEncoding": "base64" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": {
+        "relayOpaque": ["ct"],
+        "maxDecodedBytesDefault": 4194304,
+        "compatDefaults": { "room": "main" }
+      }
+    }
+  },
+  "$ref": "#/$defs/outerEnvelope"
+}

@@ -1,13 +1,77 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://remote-pi.dev/schemas/cross-pc.schema.json",
-  "title": "Remote Pi cross-PC frames",
-  "description": "Placeholder family schema established by schema-source step 1. Pi-to-Pi forwarding frames and agent envelopes are ported in step 3.",
-  "not": {},
+  "title": "Remote Pi cross-PC forwarding frames",
+  "oneOf": [
+    { "$ref": "#/$defs/piEnvelope" },
+    { "$ref": "#/$defs/piEnvelopeIn" }
+  ],
+  "$defs": {
+    "agentEnvelope": { "$ref": "./defs/agent-envelope.schema.json#/$defs/agentEnvelope" },
+    "transportErrorReason": {
+      "enum": ["offline", "not_authorized", "bad_envelope"]
+    },
+    "transportErrorBody": {
+      "type": "object",
+      "required": ["type", "reason"],
+      "properties": {
+        "type": { "const": "transport_error" },
+        "reason": { "$ref": "#/$defs/transportErrorReason" }
+      },
+      "additionalProperties": false
+    },
+    "transportErrorEnvelope": {
+      "type": "object",
+      "required": ["from", "to", "id", "re", "body"],
+      "properties": {
+        "from": { "const": "_relay" },
+        "to": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "re": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "body": { "$ref": "#/$defs/transportErrorBody" }
+      },
+      "additionalProperties": false
+    },
+    "piEnvelope": {
+      "type": "object",
+      "required": ["type", "to_pc", "envelope"],
+      "properties": {
+        "type": { "const": "pi_envelope" },
+        "to_pc": { "type": "string", "minLength": 1 },
+        "envelope": { "$ref": "#/$defs/agentEnvelope" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "relayOpaque": ["envelope.body"] }
+    },
+    "piEnvelopeIn": {
+      "type": "object",
+      "required": ["type", "from_pc", "envelope"],
+      "properties": {
+        "type": { "const": "pi_envelope_in" },
+        "from_pc": { "type": "string", "minLength": 1 },
+        "envelope": {
+          "oneOf": [
+            { "$ref": "#/$defs/agentEnvelope" },
+            { "$ref": "#/$defs/transportErrorEnvelope" }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": {
+        "fromPcGroundTruth": true,
+        "brokerOwnsPrefixAntiSpoof": true,
+        "relayOpaque": ["envelope.body"]
+      }
+    }
+  },
   "x-remote-pi": {
     "family": "crossPc",
     "transport": "relay-jsonl",
-    "discriminator": "type",
-    "status": "placeholder"
+    "discriminator": "type"
   }
 }

@@ -1,0 +1,3 @@
+{"type":"pi_envelope","to_pc":"pi-b-pubkey","envelope":{"from":"casa:agent-1","to":"trab:agent-2","id":"018f0000-0000-7000-8000-000000000001","re":null,"body":{"type":"task","text":"ping"}}}
+{"type":"pi_envelope_in","from_pc":"pi-a-pubkey","envelope":{"from":"casa:agent-1","to":["trab:agent-2","trab:agent-3"],"id":"018f0000-0000-7000-8000-000000000002","re":"018f0000-0000-7000-8000-000000000001","body":{"type":"reply","ok":true}}}
+{"type":"pi_envelope_in","from_pc":"_relay","envelope":{"from":"_relay","to":"casa:agent-1","id":"018f0000-0000-7000-8000-000000000003","re":"018f0000-0000-7000-8000-000000000001","body":{"type":"transport_error","reason":"offline"}}}

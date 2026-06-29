@@ -1,13 +1,247 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://remote-pi.dev/schemas/relay-control.schema.json",
-  "title": "Remote Pi relay control frames",
-  "description": "Placeholder family schema established by schema-source step 1. Relay-owned auth, presence, room, and control frames are ported in step 3.",
-  "not": {},
+  "title": "Remote Pi relay auth, presence, rooms, and control frames",
+  "oneOf": [
+    { "$ref": "./relay-outer.schema.json" },
+    { "$ref": "#/$defs/hello" },
+    { "$ref": "#/$defs/auth" },
+    { "$ref": "#/$defs/challenge" },
+    { "$ref": "#/$defs/subscribePresence" },
+    { "$ref": "#/$defs/unsubscribePresence" },
+    { "$ref": "#/$defs/presenceCheck" },
+    { "$ref": "#/$defs/presence" },
+    { "$ref": "#/$defs/peerOnline" },
+    { "$ref": "#/$defs/peerOffline" },
+    { "$ref": "#/$defs/subscribeRooms" },
+    { "$ref": "#/$defs/unsubscribeRooms" },
+    { "$ref": "#/$defs/roomsCheck" },
+    { "$ref": "#/$defs/rooms" },
+    { "$ref": "#/$defs/roomAnnounced" },
+    { "$ref": "#/$defs/roomEnded" },
+    { "$ref": "#/$defs/roomMetaUpdate" }
+  ],
+  "$defs": {
+    "peerId": { "type": "string", "minLength": 1 },
+    "roomId": { "type": "string", "minLength": 1 },
+    "epochMillis": { "type": "integer", "minimum": 0 },
+    "peerList": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/peerId" },
+      "default": []
+    },
+    "roomMeta": {
+      "type": "object",
+      "required": ["room_id", "working", "started_at"],
+      "properties": {
+        "room_id": { "$ref": "#/$defs/roomId" },
+        "name": { "type": "string" },
+        "cwd": { "type": "string" },
+        "session_id": { "$ref": "./defs/common.schema.json#/$defs/sessionId" },
+        "model": { "type": "string" },
+        "thinking": { "type": "string" },
+        "working": { "type": "boolean" },
+        "started_at": { "$ref": "#/$defs/epochMillis" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": {
+        "sessionIdCarriedOnly": true,
+        "relayDoesNotRouteBy": ["session_id"]
+      }
+    },
+    "roomMetaPatch": {
+      "type": "object",
+      "properties": {
+        "model": { "oneOf": [{ "type": "string" }, { "type": "null" }] },
+        "thinking": { "oneOf": [{ "type": "string" }, { "type": "null" }] },
+        "session_id": {
+          "oneOf": [
+            { "$ref": "./defs/common.schema.json#/$defs/sessionId" },
+            { "type": "null" }
+          ]
+        },
+        "working": { "type": "boolean" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": {
+        "mergePatchSemantics": {
+          "absent": "preserve current value",
+          "nullableStrings": ["model", "thinking", "session_id"],
+          "nonNullableBooleans": ["working"]
+        }
+      }
+    },
+    "helloRoomMeta": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "cwd": { "type": "string" },
+        "model": { "type": "string" },
+        "thinking": { "type": "string" },
+        "session_id": { "$ref": "./defs/common.schema.json#/$defs/sessionId" },
+        "working": { "type": "boolean" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "initialRoomMeta": true }
+    },
+    "hello": {
+      "type": "object",
+      "required": ["type", "pubkey"],
+      "properties": {
+        "type": { "const": "hello" },
+        "pubkey": { "$ref": "#/$defs/peerId" },
+        "room_id": { "$ref": "#/$defs/roomId" },
+        "room_meta": { "$ref": "#/$defs/helloRoomMeta" }
+      },
+      "additionalProperties": false
+    },
+    "auth": {
+      "type": "object",
+      "required": ["type", "sig"],
+      "properties": {
+        "type": { "const": "auth" },
+        "sig": { "type": "string", "minLength": 1, "contentEncoding": "base64" }
+      },
+      "additionalProperties": false
+    },
+    "challenge": {
+      "type": "object",
+      "required": ["type", "nonce"],
+      "properties": {
+        "type": { "const": "challenge" },
+        "nonce": { "type": "string", "minLength": 1, "contentEncoding": "base64" }
+      },
+      "additionalProperties": false
+    },
+    "subscribePresence": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "subscribe_presence" }, "peers": { "$ref": "#/$defs/peerList" } },
+      "additionalProperties": false
+    },
+    "unsubscribePresence": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "unsubscribe_presence" }, "peers": { "$ref": "#/$defs/peerList" } },
+      "additionalProperties": false
+    },
+    "presenceCheck": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "presence_check" }, "peers": { "$ref": "#/$defs/peerList" } },
+      "additionalProperties": false
+    },
+    "presenceState": {
+      "type": "object",
+      "required": ["peer", "online"],
+      "properties": {
+        "peer": { "$ref": "#/$defs/peerId" },
+        "online": { "type": "boolean" },
+        "since_ts": { "oneOf": [{ "$ref": "#/$defs/epochMillis" }, { "type": "null" }] }
+      },
+      "additionalProperties": false
+    },
+    "presence": {
+      "type": "object",
+      "required": ["type", "states"],
+      "properties": {
+        "type": { "const": "presence" },
+        "states": { "type": "array", "items": { "$ref": "#/$defs/presenceState" } }
+      },
+      "additionalProperties": false
+    },
+    "peerOnline": {
+      "type": "object",
+      "required": ["type", "peer"],
+      "properties": { "type": { "const": "peer_online" }, "peer": { "$ref": "#/$defs/peerId" } },
+      "additionalProperties": false
+    },
+    "peerOffline": {
+      "type": "object",
+      "required": ["type", "peer", "since_ts"],
+      "properties": {
+        "type": { "const": "peer_offline" },
+        "peer": { "$ref": "#/$defs/peerId" },
+        "since_ts": { "$ref": "#/$defs/epochMillis" }
+      },
+      "additionalProperties": false
+    },
+    "subscribeRooms": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "subscribe_rooms" }, "peers": { "$ref": "#/$defs/peerList" } },
+      "additionalProperties": false
+    },
+    "unsubscribeRooms": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "unsubscribe_rooms" }, "peers": { "$ref": "#/$defs/peerList" } },
+      "additionalProperties": false
+    },
+    "roomsCheck": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "rooms_check" }, "peers": { "$ref": "#/$defs/peerList" } },
+      "additionalProperties": false
+    },
+    "rooms": {
+      "type": "object",
+      "required": ["type", "peer", "rooms"],
+      "properties": {
+        "type": { "const": "rooms" },
+        "peer": { "$ref": "#/$defs/peerId" },
+        "rooms": { "type": "array", "items": { "$ref": "#/$defs/roomMeta" } }
+      },
+      "additionalProperties": false
+    },
+    "roomAnnounced": {
+      "type": "object",
+      "required": ["type", "peer", "room_id", "working", "started_at"],
+      "properties": {
+        "type": { "const": "room_announced" },
+        "peer": { "$ref": "#/$defs/peerId" },
+        "room_id": { "$ref": "#/$defs/roomId" },
+        "name": { "type": "string" },
+        "cwd": { "type": "string" },
+        "session_id": { "$ref": "./defs/common.schema.json#/$defs/sessionId" },
+        "model": { "type": "string" },
+        "thinking": { "type": "string" },
+        "working": { "type": "boolean" },
+        "started_at": { "$ref": "#/$defs/epochMillis" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": {
+        "sessionIdCarriedOnly": true,
+        "relayDoesNotRouteBy": ["session_id"]
+      }
+    },
+    "roomEnded": {
+      "type": "object",
+      "required": ["type", "peer", "room_id", "since_ts"],
+      "properties": {
+        "type": { "const": "room_ended" },
+        "peer": { "$ref": "#/$defs/peerId" },
+        "room_id": { "$ref": "#/$defs/roomId" },
+        "since_ts": { "$ref": "#/$defs/epochMillis" }
+      },
+      "additionalProperties": false
+    },
+    "roomMetaUpdate": {
+      "type": "object",
+      "required": ["type", "meta"],
+      "properties": {
+        "type": { "const": "room_meta_update" },
+        "room_id": { "$ref": "#/$defs/roomId" },
+        "meta": { "$ref": "#/$defs/roomMetaPatch" }
+      },
+      "additionalProperties": false
+    }
+  },
   "x-remote-pi": {
     "family": "relayControl",
     "transport": "relay-jsonl",
     "discriminator": "type",
-    "status": "placeholder"
+    "relayOpaque": ["ct"]
   }
 }

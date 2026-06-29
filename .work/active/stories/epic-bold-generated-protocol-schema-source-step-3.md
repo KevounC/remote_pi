@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-schema-source-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay, pi-extension, app]
 parent: epic-bold-generated-protocol-schema-source
 depends_on: [epic-bold-generated-protocol-schema-source-step-2]
@@ -138,3 +138,11 @@ Add relay-owned schemas without making the relay parse app-pi inner messages. Mo
 ## Rollback
 
 Revert the relay/cross-PC schema and fixtures. No runtime code consumes these schemas yet, so rollback is isolated to `protocol/`.
+
+## Implementation notes
+
+- Replaced the relay/cross-PC placeholder schemas with relay-owned auth/control/outer/rooms/presence definitions plus `pi_envelope` / `pi_envelope_in` and the generic agent envelope definition.
+- Added `protocol/schema/relay-outer.schema.json` and `protocol/schema/defs/agent-envelope.schema.json`; `relay-control.schema.json` references the outer envelope while keeping `ct` opaque and documenting the 4 MiB decoded default.
+- Modeled `RoomMetaPatch` merge semantics explicitly: absent fields preserve, nullable string fields can clear with `null`, and `working` is absent-or-boolean only.
+- Added relay and cross-PC JSONL fixtures covering hello/auth/challenge, outer envelope, presence, rooms, room metadata updates, `pi_envelope`, `pi_envelope_in`, and relay transport-error envelope shape.
+- Verification: parsed every `protocol/**/*.json` and `protocol/**/*.jsonl` fixture with Python `json` successfully. Full schema validation is deferred to step 5 because the protocol package does not yet have the AJV fixture checker.

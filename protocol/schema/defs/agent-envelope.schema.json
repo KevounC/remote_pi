@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://remote-pi.dev/schemas/defs/agent-envelope.schema.json",
+  "title": "Remote Pi generic agent envelope",
+  "$defs": {
+    "agentAddress": { "type": "string", "minLength": 1 },
+    "agentRecipient": {
+      "oneOf": [
+        { "$ref": "#/$defs/agentAddress" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/agentAddress" }
+        }
+      ]
+    },
+    "agentEnvelope": {
+      "type": "object",
+      "required": ["from", "to", "id", "re", "body"],
+      "properties": {
+        "from": { "$ref": "#/$defs/agentAddress" },
+        "to": { "$ref": "#/$defs/agentRecipient" },
+        "id": { "type": "string", "minLength": 1 },
+        "re": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "body": true
+      },
+      "additionalProperties": false,
+      "x-remote-pi": {
+        "relayOpaque": ["body"],
+        "idSemantics": "uuid-v7-string"
+      }
+    }
+  }
+}
