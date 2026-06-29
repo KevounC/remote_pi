@@ -1,0 +1,11 @@
+import {
+  REACHABILITY_BACKOFF_MS,
+  REACHABILITY_HEARTBEAT,
+  reachabilityBackoffMs,
+} from "./contract.js";
+
+export { REACHABILITY_BACKOFF_MS, reachabilityBackoffMs };
+
+export const REACHABILITY_RELAY_PING_INTERVAL_MS = REACHABILITY_HEARTBEAT.relayWsPingMs;
+export const REACHABILITY_RELAY_LIVENESS_TIMEOUT_MS = REACHABILITY_HEARTBEAT.extensionLivenessTimeoutMs;
+export const REACHABILITY_RELAY_LIVENESS_CHECK_MS = REACHABILITY_HEARTBEAT.extensionLivenessCheckMs;

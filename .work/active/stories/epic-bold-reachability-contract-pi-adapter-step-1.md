@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-pi-adapter-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract-pi-adapter
 depends_on: [epic-bold-reachability-contract-state-machine]
@@ -66,3 +66,10 @@ Low. The only risk is future contract schema drift; tests make it fail fast.
 
 ## Rollback
 Remove the new module and tests; restore in-file constants in all consumers.
+
+## Implementation notes
+- Files changed: `pi-extension/src/reachability/reachability_contract.ts`, `pi-extension/src/reachability/reachability_contract.test.ts`.
+- Tests added: `pi-extension/src/reachability/reachability_contract.test.ts` validates the local backoff/liveness projection against `protocol/schema/reachability.json`.
+- Discrepancies from design: The state-machine story had already landed `src/reachability/contract.ts`; this story adds the requested `reachability_contract.ts` projection as a thin re-export/adapter instead of duplicating the contract values.
+- Adjacent issues parked: none.
+- Verification: `corepack pnpm exec vitest run src/reachability/reachability_contract.test.ts` passed. `corepack pnpm typecheck` failed on pre-existing missing `session_id` errors in `src/actions/handlers.ts` and `src/index.ts`; `corepack pnpm test -- reachability_contract` also runs unrelated tests under this Vitest setup and hit existing suite/environment failures before timing out.
