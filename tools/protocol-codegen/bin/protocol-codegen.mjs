@@ -31,8 +31,8 @@ function assertIdentifier(value, label) {
 }
 
 function assertWireName(value, label) {
-  if (typeof value !== 'string' || !/^[a-z][a-z0-9_]*$/.test(value)) {
-    throw new Error(`${label} must be a snake_case wire name, got ${JSON.stringify(value)}`);
+  if (typeof value !== 'string' || !/^[a-z][a-z0-9_:-]*$/.test(value)) {
+    throw new Error(`${label} must be a wire discriminator string, got ${JSON.stringify(value)}`);
   }
 }
 
@@ -81,6 +81,90 @@ function toJsonEntry(field) {
     `        if (${field.name} case final ${field.name}?)`,
     `          ${key}: ${field.name},`,
   ].join('\n');
+}
+
+function pascalCase(value) {
+  return String(value)
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join('');
+}
+
+function unionNameForFamily(family) {
+  switch (family) {
+    case 'appPiClient':
+      return 'ClientMessage';
+    case 'appPiServer':
+      return 'ServerMessage';
+    case 'relayControl':
+      return 'RelayControlFrame';
+    case 'crossPc':
+      return 'CrossPcFrame';
+    case 'cockpitControl':
+      return 'CockpitControlFrame';
+    default:
+      return `${pascalCase(family)}Frame`;
+  }
+}
+
+function classNameForType(type, unionName) {
+  const base = pascalCase(type);
+  const candidate = base.length > 0 ? base : 'Unknown';
+  const reserved = new Set(['Error', 'Type', 'Object', 'String', 'List', 'Map', unionName]);
+  return reserved.has(candidate) ? `${candidate}Frame` : candidate;
+}
+
+function normalizeListTypesCatalog(catalog, schemaPath) {
+  const entries = requireArray(catalog, 'list-types catalog');
+  const byFamily = new Map();
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue;
+    if (entry.discriminator === 'untagged') continue;
+    assertWireName(entry.type, 'catalog.entry.type');
+    const family = typeof entry.family === 'string' ? entry.family : 'protocol';
+    const bucket = byFamily.get(family) ?? [];
+    bucket.push(entry);
+    byFamily.set(family, bucket);
+  }
+
+  const globalClassNames = new Set();
+  const unions = [...byFamily.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([family, familyEntries]) => {
+      const unionName = unionNameForFamily(family);
+      const variants = familyEntries
+        .slice()
+        .sort((a, b) => a.type.localeCompare(b.type))
+        .map((entry) => {
+          const baseClassName = classNameForType(entry.type, unionName);
+          let className = baseClassName;
+          if (globalClassNames.has(className)) className = `${baseClassName}${pascalCase(family)}`;
+          let suffix = 2;
+          while (globalClassNames.has(className)) {
+            className = `${baseClassName}${pascalCase(family)}${suffix}`;
+            suffix += 1;
+          }
+          globalClassNames.add(className);
+          return {
+            type: entry.type,
+            className,
+            fields: [],
+            sourceSchemaRef: entry.schemaRef,
+          };
+        });
+      return { name: unionName, variants };
+    });
+
+  if (unions.length === 0) {
+    throw new Error(`${schemaPath} did not contain any typed list-types entries`);
+  }
+  return { unions };
+}
+
+function normalizeSchemaInput(schema, schemaPath) {
+  if (Array.isArray(schema)) return normalizeListTypesCatalog(schema, schemaPath);
+  return schema;
 }
 
 function validateSchema(schema) {
@@ -214,7 +298,8 @@ function main() {
     throw new Error(usage());
   }
 
-  const schema = JSON.parse(readFileSync(schemaPath, 'utf8'));
+  const rawSchema = JSON.parse(readFileSync(schemaPath, 'utf8'));
+  const schema = normalizeSchemaInput(rawSchema, schemaPath);
   validateSchema(schema);
   const output = emitDart(schema);
   mkdirSync(dirname(outPath), { recursive: true });

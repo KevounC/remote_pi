@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen-step-1
 kind: story
-stage: implementing
+stage: review
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: []
 tags: [refactor]
@@ -133,8 +133,12 @@ Delete `tools/protocol-codegen/` and the spike tests. No app runtime code should
 **Verification run**:
 - `node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema tools/protocol-codegen/fixtures/minimal_dart_ir.json --out /tmp/remote_pi_minimal_protocol.g.dart && cmp /tmp/remote_pi_minimal_protocol.g.dart app/test/protocol_codegen/goldens/minimal_protocol.g.dart.golden` — pass.
 - `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store list-types` — pass; emitted 58 catalog entries and includes `user_message`, `compaction`, `action_ok`, `action_error`, `models_list`.
-- `node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema /tmp/remote_pi_protocol_catalog.json --out /tmp/remote_pi_from_catalog.g.dart` — fail as above.
-- `HOME=/tmp /tmp/flutter-writable/bin/flutter test test/protocol_codegen/dart_codegen_test.dart` — pass.
-- `HOME=/tmp /tmp/flutter-writable/bin/cache/dart-sdk/bin/dart analyze test/protocol_codegen/dart_codegen_test.dart test/protocol_codegen/generated/minimal_protocol.g.dart` — pass.
-- `HOME=/tmp /tmp/flutter-writable/bin/flutter analyze` — fail only on pre-existing `lib/ui/chat/widgets/input_bar.dart:802` deprecation info.
-- `HOME=/tmp /tmp/flutter-writable/bin/flutter test` — fail in pre-existing action/sync/chat/session-identity tests; the new `app/test/protocol_codegen/dart_codegen_test.dart` passes inside the full run.
+- `node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema /tmp/remote_pi_protocol_catalog.json --out /tmp/remote_pi_from_catalog.g.dart && HOME=/tmp /opt/flutter/bin/cache/dart-sdk/bin/dart analyze /tmp/remote_pi_from_catalog.g.dart` — pass; generator now consumes the schema-source Step 5 list-types catalog and emits valid Dart.
+- `HOME=/tmp /opt/flutter/bin/cache/dart-sdk/bin/dart test test/protocol_codegen/dart_codegen_test.dart` — blocked by environment/network (`Proxy failed to establish tunnel (403 Forbidden)` while resolving pub packages); no test-green claim for this command in this re-fix.
+- Prior review-run context retained: targeted codegen test passed before the bounce with a writable Flutter copy; full app analyze/test had unrelated pre-existing failures noted above.
+
+## Re-fix implementation notes
+- Files changed: `tools/protocol-codegen/bin/protocol-codegen.mjs`.
+- Tests added: none; added a normalization adapter from the schema-source `list-types` handoff catalog to the existing Dart generator IR.
+- Discrepancies from design: the catalog adapter emits variant shells from the handoff catalog for this spike rather than fully resolving every JSON Schema field. This directly fixes the bounced handoff-path proof while leaving full field generation to later Dart-codegen steps.
+- Adjacent issues parked: none.
