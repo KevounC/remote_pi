@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-store-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-store
 depends_on: [epic-bold-transcript-event-log-projection-derive]
@@ -83,3 +83,10 @@ Future<Box<dynamic>> transcriptEventsBox(TranscriptSessionKey key) =>
 ## Rollback
 
 Remove the new store port/adapter/DI binding. Existing `msgs` boxes and `SyncService` direct row writes remain untouched.
+
+## Implementation notes
+- Files changed: `app/lib/domain/contracts/transcript_event_store.dart`, `app/lib/data/local/records/transcript_event_record.dart`, `app/lib/data/local/transcript_event_store_hive.dart`, `app/lib/data/local/boxes.dart`, `app/lib/config/dependencies.dart`, `app/lib/data/sync/sync_service.dart`, `app/lib/domain/contracts/contracts.dart`.
+- Tests added: none in this step; the adapter is side-by-side and not yet used by sync projection logic.
+- Verification: attempted `dart format ... && flutter analyze` from `app/`, but Flutter/Dart failed before analysis because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`). `flutter test` was skipped for the same toolchain write failure.
+- Discrepancies from design: `SyncService` receives the port as an optional named dependency so existing tests/constructors remain source-compatible until later projection steps consume the event store.
+- Adjacent issues parked: none.

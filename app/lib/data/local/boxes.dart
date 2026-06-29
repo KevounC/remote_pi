@@ -10,6 +10,7 @@
 //   VOLATILE runtime  (wiped@boot)  key = <epk>:<roomId>   → RuntimeRecord
 
 import 'package:app/data/transport/epk_encoding.dart';
+import 'package:app/domain/contracts/transcript_event_store.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 const String _kNamespace = 'rp_v2';
@@ -63,10 +64,27 @@ class LocalBoxes {
   bool isMsgsBoxOpen(String epk, String roomId) =>
       Hive.isBoxOpen(msgsBoxName(epk, roomId));
 
+  /// Per canonical transcript session event log. Lazily opened; idempotent.
+  Future<Box<dynamic>> transcriptEventsBox(TranscriptSessionKey key) =>
+      Hive.openBox<dynamic>(transcriptEventsBoxName(key));
+
+  Box<dynamic> openTranscriptEventsBox(TranscriptSessionKey key) =>
+      Hive.box<dynamic>(transcriptEventsBoxName(key));
+
+  bool isTranscriptEventsBoxOpen(TranscriptSessionKey key) =>
+      Hive.isBoxOpen(transcriptEventsBoxName(key));
+
   /// `:` and the epk's `/`+`=` would break the on-disk filename — sanitise to
   /// the url-safe, unpadded epk form (same approach as the v1 store).
   static String msgsBoxName(String epk, String roomId) =>
       'msgs_${toAppEpk(epk)}__$roomId';
 
+  static String transcriptEventsBoxName(TranscriptSessionKey key) =>
+      'transcript_events_${toAppEpk(key.peerId)}__${_safe(key.roomId)}__${_safe(key.sessionId)}';
+
   static String sessionKey(String epk, String roomId) => '$epk:$roomId';
+
+  static String _safe(String value) => value
+      .replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_')
+      .replaceAll(RegExp(r'_+'), '_');
 }

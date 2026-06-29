@@ -6,6 +6,7 @@ import 'package:app/data/actions/actions_repository.dart';
 import 'package:app/data/mesh/mesh_client.dart';
 import 'package:app/data/mesh/mesh_sync_service.dart';
 import 'package:app/data/local/boxes.dart';
+import 'package:app/data/local/transcript_event_store_hive.dart';
 import 'package:app/data/preferences/preferences.dart';
 import 'package:app/data/repositories/home_read_repository.dart';
 import 'package:app/data/repositories/session_read_repository.dart';
@@ -21,6 +22,7 @@ import 'package:app/data/update/update_checker_impl.dart';
 import 'package:app/data/update/url_launcher_opener.dart';
 import 'package:app/data/voice/speech_service.dart';
 import 'package:app/domain/contracts/dismissed_update_store.dart';
+import 'package:app/domain/contracts/transcript_event_store.dart';
 import 'package:app/domain/contracts/update_checker.dart';
 import 'package:app/domain/contracts/url_opener.dart';
 import 'package:app/pairing/owner_identity_bridge.dart';
@@ -59,6 +61,9 @@ Future<void> setupDependencies() async {
   // Plan 31 — local SSOT box facade (boxes already opened + runtime wiped in
   // bootstrap before this runs).
   _injector.addInstance<LocalBoxes>(LocalBoxes());
+  _injector.addRepository<TranscriptEventStore>(
+    () => HiveTranscriptEventStore(_injector.get<LocalBoxes>()),
+  );
 
   // Plan 23 — Owner-key sync. The store talks to the native plugin
   // (iCloud Keychain on iOS, Block Store on Android); the bridge sits
@@ -114,6 +119,7 @@ Future<void> setupDependencies() async {
     () => SyncService(
       _injector.get<ConnectionManager>(),
       _injector.get<LocalBoxes>(),
+      transcriptEventStore: _injector.get<TranscriptEventStore>(),
     ),
   );
   _injector.addRepository<SessionReadRepository>(

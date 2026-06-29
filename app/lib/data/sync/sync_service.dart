@@ -20,6 +20,7 @@ import 'package:app/data/sync/sync_events.dart';
 import 'package:app/data/sync/session_gate.dart';
 import 'package:app/data/transport/connection_manager.dart';
 import 'package:app/domain/contracts/service.dart';
+import 'package:app/domain/contracts/transcript_event_store.dart';
 import 'package:app/domain/session_state.dart';
 import 'package:app/protocol/protocol.dart';
 import 'package:app/protocol/uuid7.dart';
@@ -28,6 +29,7 @@ import 'package:flutter/foundation.dart';
 class SyncService extends Service {
   final ConnectionManager _conn;
   final LocalBoxes _boxes;
+  final TranscriptEventStore? _transcriptEventStore;
   final SessionGate _sessionGate = const SessionGate();
 
   StreamSubscription<ConnectionStatus>? _connSub;
@@ -94,8 +96,9 @@ class SyncService extends Service {
   SyncService(
     this._conn,
     this._boxes, {
+    TranscriptEventStore? transcriptEventStore,
     this.pendingSendTimeout = const Duration(seconds: 20),
-  }) {
+  }) : _transcriptEventStore = transcriptEventStore {
     _connSub = _conn.statusStream.listen(_onStatus);
     _roomsSub = _conn.roomsStream.listen((_) => _writeRuntime());
     _presenceSub = _conn.presenceStream.listen((_) => _writeRuntime());
