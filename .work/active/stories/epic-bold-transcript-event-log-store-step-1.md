@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-store-step-1
 kind: story
-stage: review
+stage: implementing
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-store
 depends_on: [epic-bold-transcript-event-log-projection-derive]
@@ -111,3 +111,11 @@ Fix by either making the store port/adapter conform to the repository lifecycle 
 - Discrepancies from design: registered `TranscriptEventStore` through `addOther` instead of making the port implement `Repository`; this preserves the store as a persistence port without imposing a fake `dispose()` lifecycle contract.
 - Adjacent issues parked: none.
 - Verification: pending full app verification in this run after the dependent app stories are integrated.
+
+## Review bounce (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blocker**: The DI registration blocker was fixed, but the story's targeted store-test acceptance criteria are still unmet. This change adds a new Hive persistence adapter and JSON codec, yet there are no focused tests for `HiveTranscriptEventStore` / `TranscriptEventRecord` / `LocalBoxes.transcriptEventsBoxName`. Add targeted tests for event-id dedupe preserving original seq/order, monotonic seq assignment, per-session box key isolation, sessionId mismatch guard, and unknown-kind fail-fast behavior.
+
+**Verification**: Inspected original implementation commit `cd7f85ed561a0c99ab4566ee75e7332d3a81a7fe`, prior review commit `73a1c11024ab60cbb9ccabf98cde3a06f7c07334`, and re-fix commit `8615cb0ab2c3bff59ceda4fa5bdc53dcb4f0a4fc`. The re-fix correctly uses `_injector.addOther<TranscriptEventStore>(...)`, so `TranscriptEventStore` no longer violates `addRepository<T extends Repository>`. Direct analyzer passed for the changed app files with `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze ...`. `HOME=/tmp/pi-dart-home flutter analyze && flutter test` could not start because `/opt/flutter/bin/cache` is read-only; `dart test` also could not run in this environment because pub network access was blocked by a `403 Forbidden` proxy response.
