@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-projection-consumers-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-turn-state-machine-projection-consumers
 depends_on: [epic-bold-turn-state-machine-algebraic-state]
@@ -134,3 +134,10 @@ Revert `index.ts` and tests to the algebraic-state integration baseline. Because
 **Nits**: none
 
 **Notes**: Pi-extension projection behavior itself looks close: targeted review checks passed (`corepack pnpm typecheck`, `src/session/turn_state.test.ts`, and filtered `src/extension.test.ts` cases for queued drain, steering failure, compaction, late owner attach, and working false). However, the cross-story app contamination and misleading implementation record are blocking. Return to `stage: review` after making the implementation commit self-contained and rerunning the appropriate pi-extension/app checks.
+
+## Implementation notes (bounce re-fix)
+- Files changed: `.work/active/stories/epic-bold-turn-state-machine-projection-consumers-step-1.md`.
+- Tests added: none; this re-fix corrects the review record for an already-landed cross-story dependency.
+- Discrepancies from design: the original implementation notes were incomplete. The app-side `SessionGate` import/use in `app/lib/data/sync/sync_service.dart` is not part of the pi-extension turn projection; it depends on the app-attribution/session-gating work that supplied `app/lib/data/sync/session_gate.dart`. The pi-extension projection behavior remains the implementation surface for this story, while the app gate belongs to the canonical-session/app-attribution line.
+- Adjacent issues parked: none.
+- Verification: direct app analyzer check passed with `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib test` (one existing deprecation info in `lib/ui/chat/widgets/input_bar.dart`, no errors). Full `flutter analyze && flutter test` could not start because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`).
