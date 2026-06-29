@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-workspace-document-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-workspace-document
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document-step-1]
@@ -88,3 +88,11 @@ final class WorkspaceLayoutCodec {
 
 ## Rollback
 Remove the new document/codec files and keep `_serializeLayout`, `_restoreProject`, and `_restoreSession` as the only layout-schema owners.
+
+## Implementation notes
+- Files changed: `cockpit/lib/app/cockpit/domain/entities/workspace_document.dart`, `cockpit/lib/app/cockpit/domain/entities/workspace_tab.dart`, `cockpit/lib/app/cockpit/domain/entities/workspace_layout_codec.dart`, `cockpit/test/domain/workspace_document_codec_test.dart`.
+- Tests added: `cockpit/test/domain/workspace_document_codec_test.dart` covers v1 round-trip, agent/terminal/viewer/empty descriptors, missing optionals, invalid `preferred_thinking` fallback, and corrupt layout fallback.
+- Discrepancies from design: none; `WorkspaceLayoutStore` remains an opaque `Map<String, dynamic>` boundary.
+- Adjacent issues parked: none.
+- Verification: `flutter test test/domain/workspace_document_codec_test.dart` could not start because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`) even with `HOME=/tmp/pi-dart-home`; direct Dart formatting succeeded using the SDK binary.
+
