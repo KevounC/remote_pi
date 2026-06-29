@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-pi-adapter-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract-pi-adapter
 depends_on: [epic-bold-reachability-contract-pi-adapter-step-1]
@@ -58,3 +58,13 @@ Reintroduce local backoff array in `index.ts` and remove projection import.
 - Discrepancies from design: none.
 - Adjacent issues parked: none.
 - Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/reachability/reachability_contract.test.ts` passed.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Implementation commit `11007b5` replaces the local reconnect backoff array in `pi-extension/src/index.ts` with `reachabilityBackoffMs(_reconnectAttempt)` while preserving increment/reset/timer control flow. Verification run from `pi-extension/`: `corepack pnpm typecheck` passed; targeted `reachability_contract.test.ts` passed. Full `corepack pnpm test` was run but is not clean in this container due pre-existing UDS/cwd-lock/leader-election environment failures and unrelated current-head `extension.test.ts` session-gate expectations; touched reachability reconnect tests in `extension.test.ts` passed.
