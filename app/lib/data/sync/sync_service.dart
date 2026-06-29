@@ -134,7 +134,7 @@ class SyncService extends Service {
     // durable session index — the previous room may still be running on
     // the Pi, and Home keeps showing it via the relay's per-room
     // `meta.working` broadcast.
-    _resetTurnState();
+    _resetTurnState(clearPendingSendTimers: true);
     _activeEpk = epk;
     _activeRoomId = room;
     await _loadIndex();
@@ -144,16 +144,18 @@ class SyncService extends Service {
   /// Clears the in-memory streaming buffer + whole-turn working flag
   /// (emitting the cleared state so listeners update) WITHOUT touching the
   /// durable session index. Used on a session switch — see [activate].
-  void _resetTurnState() {
+  void _resetTurnState({bool clearPendingSendTimers = false}) {
     _flushTimer?.cancel();
     _flushTimer = null;
     _chunkBuffer.clear();
     _chunkReplyTo = '';
-    _workingReplyTo = null;
     _setQueuedText(null);
-    // Session switch: the previous chat's in-flight sends are no longer ours
-    // to confirm — drop their backstops so a stale timer can't fire later.
-    _cancelAllSendTimers();
+    if (clearPendingSendTimers) {
+      // Session switch: the previous chat's in-flight sends are no longer ours
+      // to confirm — drop their backstops so a stale timer can't fire later.
+      _cancelAllSendTimers();
+    }
+    _workingReplyTo = null;
     if (_streaming != null) _emitStreaming(null);
     if (_working) {
       _working = false;
@@ -390,9 +392,8 @@ class SyncService extends Service {
     // Bump the expected session timestamp boundary so any stale `session_history`
     // from the previous session (including the final frames from the dying
     // instance) is rejected if it arrives after New Session locally clears state.
-    if (_activeSessionStartedAt != null) {
-      _activeSessionStartedAt = _activeSessionStartedAt! + 1;
-    }
+    _activeSessionStartedAt =
+        (_activeSessionStartedAt ?? DateTime.now().millisecondsSinceEpoch) + 1;
     // Session wiped → any optimistic sends are moot; disarm their backstops.
     _cancelAllSendTimers();
     await _enqueue(() async {
@@ -437,8 +438,10 @@ class SyncService extends Service {
     } else {
       // Any non-online edge is a reliability boundary: clear the active
       // room-local stream/working state immediately so the old room doesn't
-      // keep a stale cancel target/cursor while the relay reconnects.
-      _resetTurnState();
+      // keep a stale cancel target/cursor while the relay reconnects. Keep
+      // pending-send backstops armed so a disconnect can still become a visible
+      // failure if no echo ever arrives.
+      _resetTurnState(clearPendingSendTimers: false);
       _setWorking(false);
     }
     _writeRuntime();

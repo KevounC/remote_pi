@@ -1,7 +1,7 @@
 ---
 id: story-guard-history-clear-without-prior-start
 kind: story
-stage: implementing
+stage: review
 tags: [app, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [story-guard-stale-session-history-after-new]
@@ -17,6 +17,13 @@ Review of `story-guard-stale-session-history-after-new` found that `clearActiveS
 
 ## Acceptance Criteria
 
-- [ ] Add a deterministic test for: activate an empty/no-index session, call `clearActiveSession()`, then deliver an older pre-new `SessionHistory`; it must not repopulate the cleared box.
-- [ ] Establish an explicit replacement generation or timestamp boundary even when no prior `session_started_at` is known.
-- [ ] Preserve reconnect replay for the current session, including equal `session_started_at` histories that belong to the accepted current session.
+- [x] Add a deterministic test for: activate an empty/no-index session, call `clearActiveSession()`, then deliver an older pre-new `SessionHistory`; it must not repopulate the cleared box.
+- [x] Establish an explicit replacement generation or timestamp boundary even when no prior `session_started_at` is known.
+- [x] Preserve reconnect replay for the current session, including equal `session_started_at` histories that belong to the accepted current session.
+
+## Implementation notes
+- `clearActiveSession()` now always stamps a deterministic history floor:
+  - increments existing `_activeSessionStartedAt` when present; otherwise initializes it with a local timestamp boundary (`DateTime.now().millisecondsSinceEpoch + 1`).
+- Added regression test: `clearActiveSession establishes a history boundary even when session_started_at is not yet known` in `app/test/data/sync/sync_service_test.dart`.
+  - Covers empty/no-index activation after clear, stale older history rejection, fresh replay acceptance, and equal-timestamp replay acceptance.
+- Existing boundary/stale-history behavior for known timestamp sessions remains unchanged (`_applyHistory` still uses `<` and preserves equal timestamps).

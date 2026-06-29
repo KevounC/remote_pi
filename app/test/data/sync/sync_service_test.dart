@@ -4,6 +4,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:fake_async/fake_async.dart';
+
 import 'package:app/data/local/boxes.dart';
 import 'package:app/data/local/records/message_record.dart';
 import 'package:app/data/local/records/session_index_record.dart';
@@ -340,60 +342,123 @@ void main() {
   });
 
   test(
-    'disconnect while online clears working/streaming/cancel state for status '
-    'retrying',
+    'disconnect while online keeps pending backstops and avoids stuck bubbles',
     () async {
-      final s = await setup();
+      await FakeAsync().run((async) async {
+        const short = Duration(milliseconds: 60);
+        final ch = _FakeChannel();
+        final conn = ConnectionManager(
+          factory: (_, _) async => ch,
+          storage: _FakeStorage(),
+        );
+        final sync = SyncService(conn, LocalBoxes(), pendingSendTimeout: short);
+        final epk = 'epk_backstop_${++_counter}';
 
-      await s.sync.setQueuedMessage('draft');
-      await s.sync.sendMessage('hi');
-      await _settle();
+        final online = conn.statusStream.firstWhere(
+          (status) => status is StatusOnline,
+        );
+        conn.adopt(
+          ch,
+          PeerRecord(
+            remoteEpk: epk,
+            sessionName: 'Pi',
+            relayUrl: 'ws://localhost',
+            pairedAt: '2026-01-01T00:00:00Z',
+          ),
+        );
+        expect(await online, isA<StatusOnline>());
+        expect(sync.activeEpk, epk);
 
-      expect(
-        s.sync.queuedText,
-        'draft',
-        reason: 'queued input is in-memory state',
-      );
-      expect(
-        s.sync.isWorking,
-        isTrue,
-        reason: 'online send enters whole-turn working',
-      );
-      expect(s.sync.streaming, isNotNull, reason: 'online send seeds cursor');
-      expect(s.sync.workingReplyTo, isNotNull);
-      expect(
-        s.sync.debugPendingSendTimerCount,
-        1,
-        reason: 'send timeout timer is armed',
-      );
+        await sync.setQueuedMessage('draft');
+        await sync.sendMessage('hi');
+        expect(
+          sync.queuedText,
+          'draft',
+          reason: 'queued input is in-memory state',
+        );
+        expect(
+          sync.isWorking,
+          isTrue,
+          reason: 'online send enters whole-turn working',
+        );
+        expect(sync.streaming, isNotNull, reason: 'online send seeds cursor');
+        expect(sync.workingReplyTo, isNotNull);
+        expect(
+          sync.debugPendingSendTimerCount,
+          1,
+          reason: 'send timeout timer is armed',
+        );
+        final before = messages(epk);
+        expect(
+          before,
+          hasLength(1),
+          reason: 'optimistic pending row is written',
+        );
+        expect(before.first.pending, isTrue);
 
-      final status = s.conn.statusStream.firstWhere(
-        (status) => status is StatusRetrying,
-      );
-      await s.ch.close();
-      expect(
-        await status,
-        isA<StatusRetrying>(),
-        reason: 'channel loss triggers retrying',
-      );
-      await _settle();
+        final retrying = conn.statusStream.firstWhere(
+          (status) => status is StatusRetrying,
+        );
+        await ch.close();
+        expect(
+          await retrying,
+          isA<StatusRetrying>(),
+          reason: 'channel loss triggers retrying',
+        );
 
-      expect(s.sync.isWorking, isFalse, reason: 'status drop clears working');
-      expect(s.sync.streaming, isNull, reason: 'streaming cursor is cleared');
-      expect(
-        s.sync.workingReplyTo,
-        isNull,
-        reason: 'stale cancel target cleared',
-      );
-      expect(s.sync.queuedText, isNull, reason: 'queued text is cleared');
-      expect(
-        s.sync.debugPendingSendTimerCount,
-        0,
-        reason: 'disconnect clears pending send backstops',
-      );
+        expect(sync.isWorking, isFalse, reason: 'status drop clears working');
+        expect(sync.streaming, isNull, reason: 'streaming cursor is cleared');
+        expect(
+          sync.workingReplyTo,
+          isNull,
+          reason: 'stale cancel target cleared',
+        );
+        expect(sync.queuedText, isNull, reason: 'queued text is cleared');
+        expect(
+          sync.debugPendingSendTimerCount,
+          1,
+          reason: 'disconnect keeps pending-send backstops alive',
+        );
 
-      s.conn.dispose();
-      s.sync.dispose();
+        async.elapse(short + const Duration(milliseconds: 1));
+        async.flushMicrotasks();
+        final failed = messages(epk);
+        expect(
+          failed,
+          hasLength(1),
+          reason: 'pending row converges to visible failure',
+        );
+        expect(failed.single.role, MsgRole.assistant);
+        expect(failed.single.text, startsWith('⚠ send_timeout:'));
+        expect(sync.debugPendingSendTimerCount, 0);
+
+        final reconnect = _FakeChannel();
+        final backOnline = conn.statusStream.firstWhere(
+          (status) => status is StatusOnline,
+        );
+        conn.adopt(
+          reconnect,
+          PeerRecord(
+            remoteEpk: epk,
+            sessionName: 'Pi',
+            relayUrl: 'ws://localhost',
+            pairedAt: '2026-01-01T00:00:00Z',
+          ),
+        );
+        expect(
+          await backOnline,
+          isA<StatusOnline>(),
+          reason: 'reconnect re-establishes online',
+        );
+        expect(
+          messages(epk).single.pending,
+          isFalse,
+          reason: 'reconnect does not leave a stuck pending row',
+        );
+
+        conn.dispose();
+        sync.dispose();
+      });
     },
   );
 
@@ -686,6 +751,69 @@ void main() {
     s.conn.dispose();
     s.sync.dispose();
   });
+
+  test(
+    'clearActiveSession establishes a history boundary even when session_started_at '
+    'is not yet known',
+    () async {
+      final s = await setup();
+      expect(messages(s.epk), isEmpty);
+      expect(index(s.epk), isNull);
+
+      await s.sync.clearActiveSession();
+      await _settle();
+      expect(messages(s.epk), isEmpty);
+      expect(index(s.epk), isNull);
+
+      final boundary = DateTime.now().millisecondsSinceEpoch;
+      final currentSessionStartedAt = boundary + 10000;
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-stale-empty',
+          sessionStartedAt: boundary - 10000,
+          events: const [
+            UserInputEvt(ts: 1, id: 'stale', text: 'from old session'),
+          ],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk), isEmpty);
+
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-current',
+          sessionStartedAt: currentSessionStartedAt,
+          events: const [
+            UserInputEvt(ts: 2, id: 'fresh', text: 'from active session'),
+          ],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk).map((r) => r.id), ['fresh']);
+      expect(
+        index(s.epk)?.sessionStartedAt,
+        DateTime.fromMillisecondsSinceEpoch(currentSessionStartedAt),
+      );
+
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-current-equal',
+          sessionStartedAt: currentSessionStartedAt,
+          events: const [
+            UserInputEvt(ts: 3, id: 'equal', text: 'reconnect same boundary'),
+          ],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk).map((r) => r.id), ['equal']);
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
 
   test(
     'clearActiveSession sets a new history boundary; stale SessionHistory is '
