@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-app-attribution-hydration-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-canonical-session-app-attribution-hydration
 depends_on: [epic-bold-canonical-session-wire-discriminator]
@@ -85,3 +85,10 @@ High. The app will intentionally drop legacy session-scoped server pushes until 
 
 ## Rollback
 Revert the session-gate call and helper file. This reopens app-side cross-session contamination and should only be used after also rolling back required `session_id` on the wire.
+
+## Implementation notes
+- Files changed: `app/lib/data/sync/session_gate.dart`, `app/lib/data/sync/sync_service.dart`, `app/lib/protocol/protocol.dart`, `app/test/data/sync/session_gate_test.dart`, `app/test/data/sync/sync_service_test.dart`.
+- Tests added: direct `SessionGate` coverage for non-session controls, active-session unknown, missing discriminator, mismatch, and match; SyncService regressions for foreign/missing `session_history` and foreign/same-session chunks.
+- Discrepancies from design: concurrent turn-state-machine work had already added the `SyncService` session-gate field and helper skeleton before this commit; this story wires the helper into `_onServerMessage` and adds the concrete app gate implementation/tests. Existing tests still use direct constructors, so the test fake injects the active `sessionId` unless a test deliberately uses `pushRaw` to exercise missing/foreign discriminators.
+- Adjacent issues parked: none.
+- Verification: `dart format` ran on touched app files; `HOME=/tmp/remote-pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze ...` on touched files reported one unrelated warning from concurrent `_transcriptEventStore` work in `sync_service.dart`; `flutter analyze` and `flutter test test/data/sync/session_gate_test.dart test/data/sync/sync_service_test.dart` could not start because `/opt/flutter/bin/cache` is read-only; `dart test` could not run because pub.dev access was blocked by proxy 403.

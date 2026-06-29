@@ -15,6 +15,7 @@ use crate::AppState;
 use crate::auth::challenge::{
     HELLO_TIMEOUT_MS, challenge_line, gen_nonce, parse_hello, verify_auth,
 };
+use crate::handlers::control::{ControlFrameError, bounded_peer_list};
 use crate::protocol::outer::{OuterEnvelope, parse_line};
 use crate::reachability::RELAY_WS_PING_INTERVAL;
 use crate::rooms::{RoomMeta, RoomMetaPatch};
@@ -68,35 +69,30 @@ fn parse_bounded_control_peers(
     frame_type: &str,
     peer_short: &str,
 ) -> Option<Vec<String>> {
-    let Some(peers_value) = frame.get("peers") else {
-        return Some(Vec::new());
-    };
-    let Some(peer_array) = peers_value.as_array() else {
-        warn!(
-            peer = %peer_short,
-            frame_type = %frame_type,
-            "control frame peers field is not an array, using empty peer list"
-        );
-        return Some(Vec::new());
-    };
-
-    if peer_array.len() > MAX_CONTROL_FRAME_PEERS {
-        warn!(
-            peer = %peer_short,
-            frame_type = %frame_type,
-            requested_peers = peer_array.len(),
-            limit = MAX_CONTROL_FRAME_PEERS,
-            "control frame peer limit exceeded, dropping"
-        );
-        return None;
+    match bounded_peer_list(frame_type, frame.get("peers")) {
+        Ok(peers) => Some(peers),
+        Err(ControlFrameError::TooManyPeers {
+            requested, limit, ..
+        }) => {
+            warn!(
+                peer = %peer_short,
+                frame_type = %frame_type,
+                requested_peers = requested,
+                limit,
+                "control frame peer limit exceeded, dropping"
+            );
+            None
+        }
+        Err(err) => {
+            warn!(
+                peer = %peer_short,
+                frame_type = %frame_type,
+                err = %err,
+                "malformed control frame peer list, dropping"
+            );
+            None
+        }
     }
-
-    Some(
-        peer_array
-            .iter()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect(),
-    )
 }
 
 fn control_check_cost(peers: &[String]) -> usize {
