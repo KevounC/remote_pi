@@ -1,7 +1,7 @@
 ---
 id: story-fix-room-switch-snapshot-adoption
 kind: story
-stage: review
+stage: done
 tags: [app, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review]
@@ -39,3 +39,16 @@ Adversarial review found `_maybeAdoptLegacyRoom` can treat a legitimate same-pee
   - `same-peer switchRoom survives a RoomsSnapshot whose first room is main`
   - `legacy peer with no persisted room adopts first snapshot room once`
 - Updated `_ControllableChannel` test double to track `setActiveRoom` calls for transport-level assertions.
+
+## Review (2026-06-28)
+
+Verdict: Approve
+
+Findings: none.
+
+Notes:
+- Read the implementation discovery. The `_activeRoomExplicitlySet` guard plus persisted `PeerRecord.roomId` check is sound for the stated compatibility split: explicit user switches are protected, while legacy peers with no persisted room still adopt once and persist the discovered room.
+
+Verification:
+- Reviewed commit `ae6d5be` diff against acceptance criteria.
+- Ran `cd app && /opt/flutter/bin/flutter test --concurrency=1 test/transport/connection_manager_test.dart test/data/sync/sync_service_test.dart test/main_lifecycle_test.dart` (pass).
