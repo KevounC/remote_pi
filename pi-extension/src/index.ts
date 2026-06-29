@@ -62,6 +62,7 @@ import type {
 import { RelayClient, RoomAlreadyOpenError } from "./transport/relay_client.js";
 import { PlainPeerChannel } from "./transport/peer_channel.js";
 import { createCommandSurface } from "./extension/command_surface.js";
+import { registerRemotePiCommands, type RemotePiCommandSpec } from "./extension/command_surface/commands.js";
 import type { CommandSurfacePort, RemotePiRuntime } from "./extension/ports.js";
 import { SdkSessionProjection } from "./session/sdk_session_projection.js";
 import { roomIdFor } from "./rooms.js";
@@ -1727,86 +1728,52 @@ function _rememberCommandCtx(ctx: ExtensionCommandContext): void {
 }
 
 function _registerRemotePiCommands(pi: ExtensionAPI): void {
-  pi.registerCommand("remote-pi", {
-    description: "Connect (join local mesh + start relay), or run setup on first use",
-    getArgumentCompletions: async (prefix) => {
-      if (prefix.startsWith("revoke ") || prefix === "revoke") {
-        const shortPrefix = prefix === "revoke" ? "" : prefix.slice("revoke ".length);
-        return _shortidCompletions(shortPrefix, "revoke ");
-      }
-      return [
-        "setup", "status", "stop",
-        "pair", "devices", "revoke",
-        "set-relay",
-        "peers",
-        "create", "remove", "daemons",
-        "daemon start", "daemon stop", "daemon restart",
-        "daemon send", "daemon status",
-        "cron", "cron add", "cron list", "cron remove", "cron enable", "cron disable", "cron run", "cron log",
-        "install", "uninstall",
-      ]
-        .filter((o) => o.startsWith(prefix))
-        .map((o) => ({ value: o, label: o }));
-    },
-    handler: async (args, ctx) => {
-      _rememberCommandCtx(ctx);
-      const sub = args.trim();
-      if      (sub === "")                       { await _cmdRoot(ctx); }
-      else if (sub === "setup")                  { await _cmdSetup(ctx); }
-      else if (sub === "status")                 { _cmdStatus(ctx); }
-      else if (sub === "stop")                   { await _cmdStop(ctx); }
-      else if (sub === "pair" || sub.startsWith("pair ")) { await _cmdPair(ctx, sub.slice("pair".length).trim()); }
-      else if (sub === "devices")                { await _cmdList(ctx); }
-      else if (sub.startsWith("revoke"))         { await _cmdRevoke(sub.slice("revoke".length).trim(), ctx); }
-      else if (sub.startsWith("set-relay"))      { _cmdSetRelay(sub.slice("set-relay".length).trim(), ctx); }
-      else if (sub === "peers")                  { await _cmdPeers(ctx); }
-      else if (sub.startsWith("create"))         { await _cmdCreate(sub.slice("create".length).trim(), ctx); }
-      else if (sub.startsWith("remove"))         { await _cmdRemove(sub.slice("remove".length).trim(), ctx); }
-      else if (sub === "daemons")                { await _cmdDaemonsList(ctx); }
-      else if (sub === "daemon start" || sub.startsWith("daemon start "))     { await _cmdDaemonStart(ctx, sub.slice("daemon start".length).trim() || undefined); }
-      else if (sub === "daemon stop" || sub.startsWith("daemon stop "))       { await _cmdDaemonStop(ctx, sub.slice("daemon stop".length).trim() || undefined); }
-      else if (sub === "daemon restart" || sub.startsWith("daemon restart ")) { await _cmdDaemonRestart(ctx, sub.slice("daemon restart".length).trim() || undefined); }
-      else if (sub === "daemon status")          { await _cmdDaemonStatus(ctx); }
-      else if (sub.startsWith("daemon send"))    { await _cmdDaemonSend(sub.slice("daemon send".length).trim(), ctx); }
-      else if (sub === "cron" || sub.startsWith("cron ")) { await _cmdCron(sub.slice("cron".length).trim(), ctx); }
-      else if (sub === "install")                { _cmdInstall(ctx, { linkCli: true }); }
-      else if (sub === "uninstall")              { _cmdUninstall(ctx, { linkCli: true }); }
-      else                                       { await _cmdRoot(ctx); }
-    },
-  });
+  const runWithCtx = (
+    run: (args: string, ctx: ExtensionCommandContext) => void | Promise<void>,
+  ) => async (args: string, ctx: ExtensionCommandContext) => {
+    _rememberCommandCtx(ctx);
+    return run(args, ctx);
+  };
 
-  pi.registerCommand("remote-pi setup",    { description: "Run the setup wizard and update local config", handler: async (_, ctx) => { _rememberCommandCtx(ctx); await _cmdSetup(ctx); } });
-  pi.registerCommand("remote-pi status",   { description: "Show local mesh + relay status", handler: async (_, ctx) => { _rememberCommandCtx(ctx); _cmdStatus(ctx); } });
-  pi.registerCommand("remote-pi stop",     { description: "Stop everything (leave local mesh + disconnect relay)", handler: async (_, ctx) => { _rememberCommandCtx(ctx); await _cmdStop(ctx); } });
-  pi.registerCommand("remote-pi pair",     { description: "Show a QR code to pair a new mobile device (optional: --ttl <seconds>)", handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdPair(ctx, args.trim()); } });
-  pi.registerCommand("remote-pi devices",  { description: "List paired mobile devices", handler: async (_, ctx) => { _rememberCommandCtx(ctx); await _cmdList(ctx); } });
-  pi.registerCommand("remote-pi revoke", {
-    description: "Revoke a paired device by its shortid",
-    getArgumentCompletions: async (prefix) => _shortidCompletions(prefix),
-    handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdRevoke(args.trim(), ctx); },
-  });
-  pi.registerCommand("remote-pi set-relay", { description: "Persist a new relay URL to user config", handler: async (args, ctx) => { _rememberCommandCtx(ctx); _cmdSetRelay(args.trim(), ctx); } });
-  pi.registerCommand("remote-pi peers", {
-    description: "List local + cross-PC mesh peers, grouped by PC label",
-    handler: async (_, ctx) => { _rememberCommandCtx(ctx); await _cmdPeers(ctx); },
-  });
-  pi.registerCommand("remote-pi create", {
-    description: "Register a folder as a daemon and start it (when the supervisor is running)",
-    handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdCreate(args.trim(), ctx); },
-  });
-  pi.registerCommand("remote-pi remove", {
-    description: "Stop + unregister a daemon by id (local config is preserved)",
-    handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdRemove(args.trim(), ctx); },
-  });
-  pi.registerCommand("remote-pi daemons",        { description: "List registered daemons + state", handler: async (_, ctx) => { _rememberCommandCtx(ctx); await _cmdDaemonsList(ctx); } });
-  pi.registerCommand("remote-pi daemon start",   { description: "Start daemons: all, or one by id (`daemon start <id>`)", handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdDaemonStart(ctx, args.trim() || undefined); } });
-  pi.registerCommand("remote-pi daemon stop",    { description: "Stop daemons: all, or one by id (`daemon stop <id>`)", handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdDaemonStop(ctx, args.trim() || undefined); } });
-  pi.registerCommand("remote-pi daemon restart", { description: "Restart daemons: all, or one by id (`daemon restart <id>`)", handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdDaemonRestart(ctx, args.trim() || undefined); } });
-  pi.registerCommand("remote-pi daemon status",  { description: "Show fleet runtime status (pid, uptime, restarts)", handler: async (_, ctx) => { _rememberCommandCtx(ctx); await _cmdDaemonStatus(ctx); } });
-  pi.registerCommand("remote-pi daemon send",    { description: "Send a prompt to a daemon: `daemon send <id> \"<text>\"`", handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdDaemonSend(args.trim(), ctx); } });
-  pi.registerCommand("remote-pi cron",           { description: "Schedule recurring prompts to daemons: `cron <add|list|remove|enable|disable|run|log>`", handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdCron(args.trim(), ctx); } });
-  pi.registerCommand("remote-pi install",   { description: "Install pi-supervisord as a system service + link the remote-pi CLI (systemd/launchd/Task Scheduler; Windows prompts for admin)", handler: async (_, ctx) => { _rememberCommandCtx(ctx); _cmdInstall(ctx, { linkCli: true }); } });
-  pi.registerCommand("remote-pi uninstall", { description: "Remove the pi-supervisord system service + the CLI shims (daemons registry preserved; Windows prompts for admin)", handler: async (_, ctx) => { _rememberCommandCtx(ctx); _cmdUninstall(ctx, { linkCli: true }); } });
+  const specs: RemotePiCommandSpec[] = [
+    { suffix: "setup", description: "Run the setup wizard and update local config", run: runWithCtx(async (_args, ctx) => { await _cmdSetup(ctx); }) },
+    { suffix: "status", description: "Show local mesh + relay status", run: runWithCtx((_args, ctx) => { _cmdStatus(ctx); }) },
+    { suffix: "stop", description: "Stop everything (leave local mesh + disconnect relay)", run: runWithCtx(async (_args, ctx) => { await _cmdStop(ctx); }) },
+    { suffix: "pair", description: "Show a QR code to pair a new mobile device (optional: --ttl <seconds>)", run: runWithCtx(async (args, ctx) => { await _cmdPair(ctx, args); }) },
+    { suffix: "devices", description: "List paired mobile devices", run: runWithCtx(async (_args, ctx) => { await _cmdList(ctx); }) },
+    { suffix: "revoke", description: "Revoke a paired device by its shortid", complete: async (prefix) => _shortidCompletions(prefix), run: runWithCtx(async (args, ctx) => { await _cmdRevoke(args, ctx); }) },
+    { suffix: "set-relay", description: "Persist a new relay URL to user config", run: runWithCtx((args, ctx) => { _cmdSetRelay(args, ctx); }) },
+    { suffix: "peers", description: "List local + cross-PC mesh peers, grouped by PC label", run: runWithCtx(async (_args, ctx) => { await _cmdPeers(ctx); }) },
+    { suffix: "create", description: "Register a folder as a daemon and start it (when the supervisor is running)", run: runWithCtx(async (args, ctx) => { await _cmdCreate(args, ctx); }) },
+    { suffix: "remove", description: "Stop + unregister a daemon by id (local config is preserved)", run: runWithCtx(async (args, ctx) => { await _cmdRemove(args, ctx); }) },
+    { suffix: "daemons", description: "List registered daemons + state", run: runWithCtx(async (_args, ctx) => { await _cmdDaemonsList(ctx); }) },
+    { suffix: "daemon start", description: "Start daemons: all, or one by id (`daemon start <id>`)", run: runWithCtx(async (args, ctx) => { await _cmdDaemonStart(ctx, args || undefined); }) },
+    { suffix: "daemon stop", description: "Stop daemons: all, or one by id (`daemon stop <id>`)", run: runWithCtx(async (args, ctx) => { await _cmdDaemonStop(ctx, args || undefined); }) },
+    { suffix: "daemon restart", description: "Restart daemons: all, or one by id (`daemon restart <id>`)", run: runWithCtx(async (args, ctx) => { await _cmdDaemonRestart(ctx, args || undefined); }) },
+    { suffix: "daemon status", description: "Show fleet runtime status (pid, uptime, restarts)", run: runWithCtx(async (_args, ctx) => { await _cmdDaemonStatus(ctx); }) },
+    { suffix: "daemon send", description: "Send a prompt to a daemon: `daemon send <id> \"<text>\"`", run: runWithCtx(async (args, ctx) => { await _cmdDaemonSend(args, ctx); }) },
+    { suffix: "cron", completionValues: ["cron", "cron add", "cron list", "cron remove", "cron enable", "cron disable", "cron run", "cron log"], description: "Schedule recurring prompts to daemons: `cron <add|list|remove|enable|disable|run|log>`", run: runWithCtx(async (args, ctx) => { await _cmdCron(args, ctx); }) },
+    { suffix: "install", description: "Install pi-supervisord as a system service + link the remote-pi CLI (systemd/launchd/Task Scheduler; Windows prompts for admin)", run: runWithCtx((_args, ctx) => { _cmdInstall(ctx, { linkCli: true }); }) },
+    { suffix: "uninstall", description: "Remove the pi-supervisord system service + the CLI shims (daemons registry preserved; Windows prompts for admin)", run: runWithCtx((_args, ctx) => { _cmdUninstall(ctx, { linkCli: true }); }) },
+  ];
+
+  registerRemotePiCommands(
+    pi,
+    specs,
+    async (sub, ctx) => {
+      _rememberCommandCtx(ctx);
+      const spec = specs
+        .slice()
+        .sort((a, b) => b.suffix.length - a.suffix.length)
+        .find((candidate) => sub === candidate.suffix || sub.startsWith(`${candidate.suffix} `));
+      if (!spec) {
+        await _cmdRoot(ctx);
+        return;
+      }
+      const args = sub === spec.suffix ? "" : sub.slice(spec.suffix.length).trim();
+      await spec.run(args, ctx);
+    },
+  );
 }
 
 function _startDaemonMode(): void {

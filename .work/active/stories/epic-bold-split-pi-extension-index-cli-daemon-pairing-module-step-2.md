@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-cli-daemon-pairing-module
 depends_on: [epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-1]
@@ -81,3 +81,10 @@ export function registerRemotePiCommands(pi: ExtensionAPI, specs: readonly Remot
 
 ## Rollback
 Restore the explicit `pi.registerCommand(...)` block and delete the registry helper. Command bodies remain untouched by this step.
+
+## Implementation notes
+- Files changed: `pi-extension/src/extension/command_surface/commands.ts`, `pi-extension/src/extension/command_surface/commands.test.ts`, `pi-extension/src/index.ts`.
+- Tests added: command-surface registry unit test covering nested registration, root fallback dispatch, prefix completions, and delegated completions.
+- Discrepancies from design: the registry is introduced as a helper consumed by the existing legacy command surface; command bodies remain in `index.ts` until later extraction steps.
+- Adjacent issues parked: none.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/extension/command_surface/commands.test.ts` passed.
