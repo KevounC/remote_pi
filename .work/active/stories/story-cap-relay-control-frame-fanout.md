@@ -1,7 +1,7 @@
 ---
 id: story-cap-relay-control-frame-fanout
 kind: story
-stage: review
+stage: done
 tags: [relay, security]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review]
@@ -40,3 +40,13 @@ Verification from `relay/`:
 - `cargo fmt --check` — passed.
 - `cargo clippy -- -D warnings` — passed after concurrently modified relay mesh-auth files settled.
 - `cargo test` — passed (41 unit tests, 50 integration/doc tests); emitted one pre-existing/concurrent `dead_code` warning in `relay/src/handlers/pi_forward.rs` during lib tests.
+
+## Review (2026-06-28)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fresh-context review of commit `e953026`; correctness, tests, security/privacy, bounded fanout/rate-limit behavior, design alignment, and foundation-doc drift lenses checked. Verification evidence from implementation notes accepted; tests were not re-run.
