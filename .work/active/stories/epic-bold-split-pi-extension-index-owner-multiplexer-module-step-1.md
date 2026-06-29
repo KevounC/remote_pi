@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-owner-multiplexer-module-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-owner-multiplexer-module
 depends_on: [epic-bold-split-pi-extension-index-composition-root]
@@ -76,3 +76,10 @@ Medium. The wrong port shape could force sibling modules to depend on owner inte
 ## Rollback
 
 Delete `owner_multiplexer.ts` and remove any type-only imports or legacy adapter references added in this step. Because this is a shell step, rollback should not touch wire behavior.
+
+## Implementation notes
+- Files changed: `pi-extension/src/extension/owner_multiplexer.ts`.
+- Tests added: none (shell-only step; existing integration tests remain the behavior guard).
+- Verification: `corepack pnpm typecheck` passed from `pi-extension/`; `corepack pnpm test` was run and failed on pre-existing/environment UDS lock/listen failures (`EPERM` under `/tmp/claude/...`, cwd lock/leader-election suites), not on owner-multiplexer shell typing.
+- Discrepancies from design: composition-root `OwnerMultiplexerPort` currently exposes only `activeCount/attach/detach/broadcast/routeFrom/lateAttachTargets`, so the step-1 shell implements that landed shape and keeps richer pairing/storage dependencies out until later owner ingress steps.
+- Adjacent issues parked: none.
