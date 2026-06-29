@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-state-machine-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract-state-machine
 depends_on: [epic-bold-reachability-contract-state-machine-step-1]
@@ -102,11 +102,20 @@ export const REACHABILITY_TRANSITIONS = [
 
 ## Acceptance Criteria
 
-- [ ] `corepack pnpm test -- reachability` (or the nearest Vitest filter) passes from `pi-extension/`.
-- [ ] The TS state union is derived from `REACHABILITY_STATES`.
-- [ ] `reachabilityBackoffMs()` clamps attempts to `[1s, 2s, 5s, 10s, 30s, 30s, ...]`.
-- [ ] TS tests fail if the interim JSON contract states/backoffs/heartbeat/transitions drift.
-- [ ] No production reconnect behavior changes in this story.
+- [x] `corepack pnpm test -- reachability` (or the nearest Vitest filter) passes from `pi-extension/`.
+- [x] The TS state union is derived from `REACHABILITY_STATES`.
+- [x] `reachabilityBackoffMs()` clamps attempts to `[1s, 2s, 5s, 10s, 30s, 30s, ...]`.
+- [x] TS tests fail if the interim JSON contract states/backoffs/heartbeat/transitions drift.
+- [x] No production reconnect behavior changes in this story.
+
+## Implementation Notes
+- Added the pure TS projection module at `pi-extension/src/reachability/contract.ts` with state, display-name, backoff, heartbeat, and transition constants derived from literal registries.
+- Added `pi-extension/src/reachability/contract.test.ts`, which reads `protocol/schema/reachability.json` and fails on drift in states, display names, backoffs, heartbeat timing, or transition triples.
+- Left existing reconnect adapters untouched; `index.ts`, `mesh_node.ts`, and app transport behavior are not rewired in this story.
+
+## Verification
+- `cd pi-extension && corepack pnpm typecheck` passed.
+- `cd pi-extension && corepack pnpm vitest run src/reachability/contract.test.ts` passed.
 
 ## Risk
 
