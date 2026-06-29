@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-store-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-store
 depends_on: [epic-bold-transcript-event-log-projection-derive]
@@ -104,3 +104,10 @@ error - lib/config/dependencies.dart:64:27 - 'TranscriptEventStore' doesn't conf
 Fix by either making the store port/adapter conform to the repository lifecycle contract (including `dispose()` if registered as a repository) or registering it via the appropriate injector path for non-Repository singletons (for example `addOther`) while preserving DI access for `SyncService`.
 
 **Verification**: Implementation commit `cd7f85e` inspected. `flutter analyze && flutter test` from `app/` could not start because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`). A narrower direct analyzer command was run with `HOME=/tmp/pi-dart-home` and found the blocker above before tests could be meaningfully run. Append-only adapter semantics looked structurally correct (event-id key dedupe, monotonic `seq`, per-session box key, sessionId mismatch guard), but the app currently does not analyze with this DI registration.
+
+## Implementation notes (bounce re-fix)
+- Files changed: `app/lib/config/dependencies.dart`.
+- Tests added: none; this is a DI registration correction.
+- Discrepancies from design: registered `TranscriptEventStore` through `addOther` instead of making the port implement `Repository`; this preserves the store as a persistence port without imposing a fake `dispose()` lifecycle contract.
+- Adjacent issues parked: none.
+- Verification: pending full app verification in this run after the dependent app stories are integrated.

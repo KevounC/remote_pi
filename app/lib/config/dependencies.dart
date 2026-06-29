@@ -61,7 +61,11 @@ Future<void> setupDependencies() async {
   // Plan 31 — local SSOT box facade (boxes already opened + runtime wiped in
   // bootstrap before this runs).
   _injector.addInstance<LocalBoxes>(LocalBoxes());
-  _injector.addRepository<TranscriptEventStore>(
+  // TranscriptEventStore is a persistence port, but it intentionally does not
+  // implement the Repository lifecycle marker. Register it as an injector-owned
+  // singleton so SyncService can resolve the port without forcing a fake
+  // Repository/dispose contract onto the append-only store adapter.
+  _injector.addOther<TranscriptEventStore>(
     () => HiveTranscriptEventStore(_injector.get<LocalBoxes>()),
   );
 
