@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-sdk-session-projection-module-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-sdk-session-projection-module
 depends_on: [epic-bold-split-pi-extension-index-composition-root]
@@ -74,3 +74,13 @@ Delete `sdk_session_projection.ts` and restore the context/API binding globals a
 - Verification: `corepack pnpm typecheck` passed from `pi-extension/`; `corepack pnpm test` was run and failed on pre-existing/environment UDS lock/listen failures (`EPERM` under `/tmp/claude/...`, cwd lock/leader-election suites). Targeted extension run reached extension tests without new stale-context unhandled errors before the same UDS-gated suites timed out.
 - Discrepancies from design: the landed composition-root port is narrower than the drafted shell, so this step binds capabilities through `SdkSessionProjection` while legacy routing remains in `index.ts` until later steps.
 - Adjacent issues parked: none.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Implementation commit `dbbc80f` inspected. `SdkSessionProjection` exists under `pi-extension/src/session/`, implements the landed `SdkSessionProjectionPort` shape, uses `unknown` structural narrowing for message API binding, exposes `clearStaleContexts()` with an epoch increment, and drops a stale message API binding when Pi reports `stale after session replacement or reload`. `index.ts` binds the singleton from `bindApi`, `bindCommandContext`, `bindSessionContext`, and clears it on `session_shutdown`; deeper session-id/history ownership remains with legacy `RemoteSessionIssuer` until the next feature step. Verification: `corepack pnpm typecheck` passed. `corepack pnpm test` was attempted and failed in unrelated environment-sensitive UDS suites (`listen EPERM` / cwd-lock / leader-election under `/tmp/claude/...`); targeted extension stale/command smoke was also blocked by one UDS join test, while non-UDS command-registration and stale-shutdown checks passed.
