@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-pi-adapter-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract-pi-adapter
 depends_on: [epic-bold-reachability-contract-pi-adapter-step-1]
@@ -51,3 +51,10 @@ Medium. This is the only reconnect ladder driving live relay recovery.
 
 ## Rollback
 Reintroduce local backoff array in `index.ts` and remove projection import.
+
+## Implementation notes
+- Files changed: `pi-extension/src/index.ts`.
+- Tests added: none; consumed the projection covered by `reachability_contract.test.ts`.
+- Discrepancies from design: none.
+- Adjacent issues parked: none.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/reachability/reachability_contract.test.ts` passed.

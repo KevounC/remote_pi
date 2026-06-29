@@ -68,6 +68,7 @@ import { roomIdFor } from "./rooms.js";
 import { registerAgentTools } from "./session/tools.js";
 import { formatPeerInventory } from "./session/peer_inventory.js";
 import { MeshNode } from "./session/mesh_node.js";
+import { reachabilityBackoffMs } from "./reachability/reachability_contract.js";
 import { RemoteSessionIssuer } from "./session/remote_session.js";
 import { validateClientSession } from "./session/session_gate.js";
 import {
@@ -650,7 +651,6 @@ function _getSyncLimit(): number {
 
 // ── Relay reconnect state ─────────────────────────────────────────────────────
 // Backoffs in ms: 1s, 2s, 5s, 10s, 30s, then stays at 30s.
-const RECONNECT_BACKOFFS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let _reconnectAttempt = 0;
 
@@ -883,8 +883,7 @@ function _scheduleReconnect(): void {
   if (!_cachedEd25519 || !_relayUrl) return;  // can't reconnect without these
   if (_getState() === "idle") return;  // stopped while we were here
 
-  const idx = Math.min(_reconnectAttempt, RECONNECT_BACKOFFS_MS.length - 1);
-  const delay = RECONNECT_BACKOFFS_MS[idx]!;
+  const delay = reachabilityBackoffMs(_reconnectAttempt);
   _reconnectAttempt += 1;
 
   _reconnectTimer = setTimeout(() => {
