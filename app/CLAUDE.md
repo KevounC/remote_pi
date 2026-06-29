@@ -31,6 +31,13 @@ app/extension/relay, leia `../.agents/skills/mobile-remote-coding/SKILL.md`.
 - `dart format .` — formata
 - `flutter build ios --no-codesign` / `flutter build apk --debug` — build verificável
 
+> Para o caminho completo de build de APK no dev VM (`codebox`) — toolchain JDK 21
+> + Android SDK API 36, build `--release --split-per-abi` (~31 MB por ABI), e os
+> dois gotchas de build (`.` vs `source` em jobs dash; wipe completo de
+> `~/.gradle` em corrupção de workspace Kotlin-DSL) — veja a referência
+> agent-neutral `../.agents/skills/flutter-mobile/SKILL.md` (seção "Android APK
+> build on the dev VM").
+
 ## Arquitetura por camadas
 
 O `lib/` é organizado em camadas com responsabilidades estritas. Cada pasta

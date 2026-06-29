@@ -31,6 +31,72 @@ flutter build ios --no-codesign
 
 Do not commit `build/`, `.dart_tool/`, `ios/Pods/`, secrets, device-local files, or generated artifacts.
 
+### Android APK build on the dev VM (`codebox`)
+
+The dev VM can build Android APKs without workstation round-trips. Toolchain is
+installed and persisted; these notes are so a fresh agent does not re-derive it.
+
+**Toolchain (already installed as root, persisted in `/etc/profile.d/android.sh`):**
+
+- Flutter 3.44.4 at `/opt/flutter` (Dart 3.12.2).
+- JDK `openjdk-21-jdk-headless`. Debian 13/trixie ships no `openjdk-17`; JDK 21
+  compiles the app's pinned Java 17 target and is within AGP 8.11.1's supported
+  range. `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64`.
+- Android SDK at `/opt/android-sdk`: cmdline-tools 12.0, `platform-tools`
+  (adb), `build-tools;35.0.0`, `platforms;android-36`, CMake 3.22.1, and
+  Flutter's default NDK (auto-fetched on first build).
+- `flutter config --android-sdk /opt/android-sdk` is set.
+
+  Why **API 36**, not 35: `app/android/app/build.gradle.kts` sets
+  `compileSdk = flutter.compileSdkVersion`, and Flutter 3.44.4's
+  `FlutterExtension.kt` pins `compileSdkVersion = 36`. Install `platforms;android-36`.
+  `minSdk = 34` is a floor and needs no separate platform install.
+
+**Build commands (run from `app/`):**
+
+```bash
+# debug — fat (all ABIs, ~184 MB), debug-signed, fastest to iterate
+flutter build apk --debug
+
+# release, one APK per ABI — small. Build the one matching the device:
+#   arm64-v8a   → modern Android phones (Pixel etc.)        ~31 MB
+#   armeabi-v7a → old 32-bit ARM devices                     ~27 MB
+#   x86_64      → emulators                                  ~33 MB
+flutter build apk --release --split-per-abi
+
+# release, single fat APK (all ABIs) — ~3x the per-ABI size
+flutter build apk --release
+```
+
+Output lands in `app/build/app/outputs/flutter-apk/`. Side-load with
+`adb install <apk>` (USB debugging / ADB debugging on; uninstall any
+same-package build signed with a different key first to avoid
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
+
+**Two build-path gremlins, recorded so they are not re-debugged:**
+
+1. **`.` not `source` in background/dash jobs.** The pi `background` tool runs
+   commands under `/bin/sh` (dash on Debian), which has no `source` builtin —
+   only POSIX `.`. A background build command starting with
+   `source /etc/profile.d/android.sh` exits 127 before `flutter` runs. Use `.`
+   in any sh/dash context. Foreground bash sessions accept both.
+2. **Corrupt Gradle Kotlin-DSL workspace after a failed/disk-full build.** An
+   interrupted first build can leave `metadata.bin` unreadable under
+   `~/.gradle/caches/8.14/kotlin-dsl/accessors/<hash>/`; Gradle refuses to
+   overwrite it and reproduces `Could not read workspace metadata ...` on every
+   run. Wiping only `~/.gradle/caches` is insufficient — stale state also lives
+   in sibling `daemon/`, `native/`, `.tmp/`, and the project `app/android/.gradle`.
+   Fix: `rm -rf ~/.gradle app/android/.gradle` (the whole user + project Gradle
+   state), then rebuild.
+
+**Disk budget:** a first build needs ~5–8 GB free for Gradle + AGP + NDK + ML
+Kit/CameraX deps. If the VM is low, reclaim from the systemd journal
+(`journalctl --vacuum-size=100M`) and the apt cache (`apt-get clean`) first.
+
+**Release signing:** loads `android/key.properties` when present; falls back to
+debug keys otherwise (see `app/android/app/build.gradle.kts`). Debug builds are
+fine for private/dev side-loading.
+
 ## App architecture
 
 Remote Pi's app is the mobile iOS/Android client for pairing, session lists, streaming chat, and tool approval cards. [remote-pi-app-guidance]{1}
