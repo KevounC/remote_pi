@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://remote-pi.dev/schemas/defs/app-pi-common.schema.json",
+  "title": "Remote Pi app↔Pi shared message definitions",
+  "$defs": {
+    "messageId": { "type": "string", "minLength": 1 },
+    "sessionId": { "$ref": "./common.schema.json#/$defs/sessionId" },
+    "turnId": { "$ref": "./common.schema.json#/$defs/turnId" },
+    "streamingBehavior": { "const": "steer" },
+    "wireImage": {
+      "type": "object",
+      "required": ["data", "mime"],
+      "properties": {
+        "data": { "type": "string", "minLength": 1, "contentEncoding": "base64" },
+        "mime": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "usage": {
+      "type": "object",
+      "required": ["input_tokens", "output_tokens"],
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "pairErrorCode": {
+      "enum": ["token_expired", "token_consumed", "token_unknown", "internal_error"]
+    },
+    "knownErrorCode": {
+      "enum": [
+        "tool_approval_required",
+        "invalid_message",
+        "unsupported_type",
+        "too_large",
+        "rate_limited",
+        "timeout",
+        "internal_error",
+        "session_mismatch"
+      ]
+    },
+    "errorCode": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Open string; known codes are documented in knownErrorCode but receivers tolerate future values."
+    },
+    "approveDecision": { "enum": ["allow", "deny"] },
+    "actionName": { "enum": ["session_new", "session_compact", "model_set", "thinking_set"] },
+    "thinkingLevel": { "enum": ["off", "minimal", "low", "medium", "high", "xhigh"] },
+    "wireModel": {
+      "type": "object",
+      "required": ["id", "name", "provider", "reasoning", "context_window"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string", "minLength": 1 },
+        "reasoning": { "type": "boolean" },
+        "context_window": { "type": "integer", "minimum": 0 },
+        "vision": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
+    },
+    "sessionScopedProfile": {
+      "profileRequired": {
+        "canonical-session": ["session_id"],
+        "turn-state": ["turn_id"]
+      }
+    }
+  }
+}

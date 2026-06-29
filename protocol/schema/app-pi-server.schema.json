@@ -2,12 +2,363 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://remote-pi.dev/schemas/app-pi-server.schema.json",
   "title": "Remote Pi Pi-to-app server messages",
-  "description": "Placeholder family schema established by schema-source step 1. ServerMessage and SessionHistoryEvent variants are ported in step 2.",
-  "not": {},
+  "oneOf": [
+    { "$ref": "#/$defs/pairOk" },
+    { "$ref": "#/$defs/pairError" },
+    { "$ref": "#/$defs/userInput" },
+    { "$ref": "#/$defs/userMessage" },
+    { "$ref": "#/$defs/queuedMessageState" },
+    { "$ref": "#/$defs/agentChunk" },
+    { "$ref": "#/$defs/agentDone" },
+    { "$ref": "#/$defs/agentMessage" },
+    { "$ref": "#/$defs/compaction" },
+    { "$ref": "#/$defs/toolRequest" },
+    { "$ref": "#/$defs/toolResult" },
+    { "$ref": "#/$defs/error" },
+    { "$ref": "#/$defs/cancelled" },
+    { "$ref": "#/$defs/pong" },
+    { "$ref": "#/$defs/bye" },
+    { "$ref": "#/$defs/sessionHistory" },
+    { "$ref": "#/$defs/actionOk" },
+    { "$ref": "#/$defs/actionError" },
+    { "$ref": "#/$defs/modelsList" }
+  ],
+  "$defs": {
+    "harness": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "pairOk": {
+      "type": "object",
+      "required": ["type", "in_reply_to", "session_name", "session_started_at", "session_id", "room_id"],
+      "properties": {
+        "type": { "const": "pair_ok" },
+        "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_name": { "type": "string", "minLength": 1 },
+        "session_started_at": { "type": "integer", "minimum": 0 },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "room_id": { "type": "string", "minLength": 1 },
+        "harness": { "$ref": "#/$defs/harness" },
+        "hostname": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "pairError": {
+      "type": "object",
+      "required": ["type", "in_reply_to", "code", "message"],
+      "properties": {
+        "type": { "const": "pair_error" },
+        "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "code": { "$ref": "./defs/app-pi-common.schema.json#/$defs/pairErrorCode" },
+        "message": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "userInput": {
+      "type": "object",
+      "required": ["type", "id", "text"],
+      "properties": {
+        "type": { "const": "user_input" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "text": { "type": "string" },
+        "images": { "type": "array", "items": { "$ref": "./defs/app-pi-common.schema.json#/$defs/wireImage" } },
+        "streaming_behavior": { "$ref": "./defs/app-pi-common.schema.json#/$defs/streamingBehavior" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"], "turn-state": ["turn_id"] } }
+    },
+    "userMessage": {
+      "type": "object",
+      "required": ["type", "id", "text"],
+      "properties": {
+        "type": { "const": "user_message" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "text": { "type": "string" },
+        "images": { "type": "array", "items": { "$ref": "./defs/app-pi-common.schema.json#/$defs/wireImage" } },
+        "streaming_behavior": { "$ref": "./defs/app-pi-common.schema.json#/$defs/streamingBehavior" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"], "turn-state": ["turn_id"] } }
+    },
+    "queuedMessageState": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "queued_message_state" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "agentChunk": {
+      "type": "object",
+      "required": ["type", "in_reply_to", "delta"],
+      "properties": {
+        "type": { "const": "agent_chunk" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "delta": { "type": "string" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"], "turn-state": ["turn_id"] } }
+    },
+    "agentDone": {
+      "type": "object",
+      "required": ["type", "in_reply_to"],
+      "properties": {
+        "type": { "const": "agent_done" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "usage": { "$ref": "./defs/app-pi-common.schema.json#/$defs/usage" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"], "turn-state": ["turn_id"] } }
+    },
+    "agentMessage": {
+      "type": "object",
+      "required": ["type", "in_reply_to", "text"],
+      "properties": {
+        "type": { "const": "agent_message" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "text": { "type": "string" },
+        "usage": { "$ref": "./defs/app-pi-common.schema.json#/$defs/usage" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"], "turn-state": ["turn_id"] } }
+    },
+    "compaction": {
+      "type": "object",
+      "required": ["type", "summary", "tokens_before"],
+      "properties": {
+        "type": { "const": "compaction" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "summary": { "type": "string" },
+        "tokens_before": { "type": "integer", "minimum": 0 },
+        "ts": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "toolRequest": {
+      "type": "object",
+      "required": ["type", "tool_call_id", "tool", "args"],
+      "properties": {
+        "type": { "const": "tool_request" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "tool_call_id": { "type": "string", "minLength": 1 },
+        "tool": { "type": "string", "minLength": 1 },
+        "args": { "$ref": "./defs/common.schema.json#/$defs/openJson" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "toolResult": {
+      "type": "object",
+      "required": ["type", "tool_call_id"],
+      "properties": {
+        "type": { "const": "tool_result" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "tool_call_id": { "type": "string", "minLength": 1 },
+        "result": { "$ref": "./defs/common.schema.json#/$defs/openJson" },
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "error": {
+      "type": "object",
+      "required": ["type", "code", "message"],
+      "properties": {
+        "type": { "const": "error" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "code": { "$ref": "./defs/app-pi-common.schema.json#/$defs/errorCode" },
+        "message": { "type": "string" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "knownCodesRef": "./defs/app-pi-common.schema.json#/$defs/knownErrorCode", "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "cancelled": {
+      "type": "object",
+      "required": ["type", "in_reply_to", "target_id"],
+      "properties": {
+        "type": { "const": "cancelled" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "target_id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "pong": {
+      "type": "object",
+      "required": ["type", "in_reply_to"],
+      "properties": {
+        "type": { "const": "pong" },
+        "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" }
+      },
+      "additionalProperties": false
+    },
+    "bye": {
+      "type": "object",
+      "required": ["type", "reason"],
+      "properties": {
+        "type": { "const": "bye" },
+        "reason": { "enum": ["peer_stop", "session_replaced", "shutdown"] }
+      },
+      "additionalProperties": false
+    },
+    "sessionHistory": {
+      "type": "object",
+      "required": ["type", "in_reply_to", "session_started_at", "events", "eos", "truncated"],
+      "properties": {
+        "type": { "const": "session_history" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_started_at": { "type": "integer", "minimum": 0 },
+        "events": { "type": "array", "items": { "$ref": "#/$defs/sessionHistoryEvent" } },
+        "eos": { "type": "boolean" },
+        "truncated": { "type": "boolean" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "actionOk": {
+      "type": "object",
+      "required": ["type", "in_reply_to", "action"],
+      "properties": {
+        "type": { "const": "action_ok" },
+        "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "action": { "$ref": "./defs/app-pi-common.schema.json#/$defs/actionName" }
+      },
+      "additionalProperties": false
+    },
+    "actionError": {
+      "type": "object",
+      "required": ["type", "in_reply_to", "action", "error"],
+      "properties": {
+        "type": { "const": "action_error" },
+        "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "action": { "$ref": "./defs/app-pi-common.schema.json#/$defs/actionName" },
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "modelsList": {
+      "type": "object",
+      "required": ["type", "in_reply_to", "models"],
+      "properties": {
+        "type": { "const": "models_list" },
+        "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "models": { "type": "array", "items": { "$ref": "./defs/app-pi-common.schema.json#/$defs/wireModel" } },
+        "current": { "$ref": "./defs/app-pi-common.schema.json#/$defs/wireModel" }
+      },
+      "additionalProperties": false
+    },
+    "sessionHistoryEvent": {
+      "oneOf": [
+        { "$ref": "#/$defs/historyUserInput" },
+        { "$ref": "#/$defs/historyToolRequest" },
+        { "$ref": "#/$defs/historyToolResult" },
+        { "$ref": "#/$defs/historyAgentMessage" },
+        { "$ref": "#/$defs/historyCompaction" }
+      ]
+    },
+    "historyUserInput": {
+      "type": "object",
+      "required": ["ts", "type", "id", "text"],
+      "properties": {
+        "ts": { "type": "integer", "minimum": 0 },
+        "type": { "const": "user_input" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "text": { "type": "string" },
+        "images": { "type": "array", "items": { "$ref": "./defs/app-pi-common.schema.json#/$defs/wireImage" } }
+      },
+      "additionalProperties": false
+    },
+    "historyToolRequest": {
+      "type": "object",
+      "required": ["ts", "type", "tool_call_id", "tool", "args"],
+      "properties": {
+        "ts": { "type": "integer", "minimum": 0 },
+        "type": { "const": "tool_request" },
+        "tool_call_id": { "type": "string", "minLength": 1 },
+        "tool": { "type": "string", "minLength": 1 },
+        "args": { "$ref": "./defs/common.schema.json#/$defs/openJson" }
+      },
+      "additionalProperties": false
+    },
+    "historyToolResult": {
+      "type": "object",
+      "required": ["ts", "type", "tool_call_id"],
+      "properties": {
+        "ts": { "type": "integer", "minimum": 0 },
+        "type": { "const": "tool_result" },
+        "tool_call_id": { "type": "string", "minLength": 1 },
+        "result": { "$ref": "./defs/common.schema.json#/$defs/openJson" },
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "historyAgentMessage": {
+      "type": "object",
+      "required": ["ts", "type", "in_reply_to", "text"],
+      "properties": {
+        "ts": { "type": "integer", "minimum": 0 },
+        "type": { "const": "agent_message" },
+        "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "text": { "type": "string" },
+        "usage": { "$ref": "./defs/app-pi-common.schema.json#/$defs/usage" }
+      },
+      "additionalProperties": false
+    },
+    "historyCompaction": {
+      "type": "object",
+      "required": ["ts", "type", "summary", "tokens_before"],
+      "properties": {
+        "ts": { "type": "integer", "minimum": 0 },
+        "type": { "const": "compaction" },
+        "summary": { "type": "string" },
+        "tokens_before": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
   "x-remote-pi": {
     "family": "appPiServer",
     "transport": "relay-jsonl",
     "discriminator": "type",
-    "status": "placeholder"
+    "typeNames": [
+      "pair_ok",
+      "pair_error",
+      "user_input",
+      "user_message",
+      "queued_message_state",
+      "agent_chunk",
+      "agent_done",
+      "agent_message",
+      "compaction",
+      "tool_request",
+      "tool_result",
+      "error",
+      "cancelled",
+      "pong",
+      "bye",
+      "session_history",
+      "action_ok",
+      "action_error",
+      "models_list"
+    ],
+    "sessionHistoryEventTypeNames": ["user_input", "tool_request", "tool_result", "agent_message", "compaction"]
   }
 }

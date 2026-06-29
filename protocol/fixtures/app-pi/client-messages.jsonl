@@ -1,0 +1,14 @@
+{"type":"pair_request","id":"pair-1","token":"token-abc","device_name":"Pixel"}
+{"type":"user_message","id":"msg-1","text":"hello"}
+{"type":"user_message","id":"msg-2","text":"look","images":[{"data":"QUJD","mime":"image/jpeg"}],"streaming_behavior":"steer"}
+{"type":"queued_message_set","id":"queued-1","text":"next"}
+{"type":"queued_message_clear","id":"clear-1"}
+{"type":"approve_tool","id":"approve-1","tool_call_id":"tool-1","decision":"allow"}
+{"type":"cancel","id":"cancel-1","target_id":"msg-1"}
+{"type":"ping","id":"ping-1"}
+{"type":"session_sync","id":"sync-1","limit":30}
+{"type":"session_new","id":"new-1"}
+{"type":"session_compact","id":"compact-1"}
+{"type":"model_set","id":"model-1","provider":"anthropic","model_id":"claude-opus-4-7"}
+{"type":"thinking_set","id":"thinking-1","level":"xhigh"}
+{"type":"list_models","id":"models-1"}

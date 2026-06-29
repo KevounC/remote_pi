@@ -2,12 +2,193 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://remote-pi.dev/schemas/app-pi-client.schema.json",
   "title": "Remote Pi app-to-Pi client messages",
-  "description": "Placeholder family schema established by schema-source step 1. App/Pi client variants are ported in step 2.",
-  "not": {},
+  "oneOf": [
+    { "$ref": "#/$defs/pairRequest" },
+    { "$ref": "#/$defs/userMessage" },
+    { "$ref": "#/$defs/queuedMessageSet" },
+    { "$ref": "#/$defs/queuedMessageClear" },
+    { "$ref": "#/$defs/approveTool" },
+    { "$ref": "#/$defs/cancel" },
+    { "$ref": "#/$defs/ping" },
+    { "$ref": "#/$defs/sessionSync" },
+    { "$ref": "#/$defs/sessionNew" },
+    { "$ref": "#/$defs/sessionCompact" },
+    { "$ref": "#/$defs/modelSet" },
+    { "$ref": "#/$defs/thinkingSet" },
+    { "$ref": "#/$defs/listModels" }
+  ],
+  "$defs": {
+    "pairRequest": {
+      "type": "object",
+      "required": ["type", "id", "token", "device_name"],
+      "properties": {
+        "type": { "const": "pair_request" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "token": { "type": "string", "minLength": 1 },
+        "device_name": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "userMessage": {
+      "type": "object",
+      "required": ["type", "id", "text"],
+      "properties": {
+        "type": { "const": "user_message" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "text": { "type": "string" },
+        "images": { "type": "array", "items": { "$ref": "./defs/app-pi-common.schema.json#/$defs/wireImage" } },
+        "streaming_behavior": { "$ref": "./defs/app-pi-common.schema.json#/$defs/streamingBehavior" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"], "turn-state": ["turn_id"] } }
+    },
+    "queuedMessageSet": {
+      "type": "object",
+      "required": ["type", "id", "text"],
+      "properties": {
+        "type": { "const": "queued_message_set" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "queuedMessageClear": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "const": "queued_message_clear" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "approveTool": {
+      "type": "object",
+      "required": ["type", "id", "tool_call_id", "decision"],
+      "properties": {
+        "type": { "const": "approve_tool" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "tool_call_id": { "type": "string", "minLength": 1 },
+        "decision": { "$ref": "./defs/app-pi-common.schema.json#/$defs/approveDecision" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "cancel": {
+      "type": "object",
+      "required": ["type", "id", "target_id"],
+      "properties": {
+        "type": { "const": "cancel" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "target_id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "ping": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "const": "ping" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" }
+      },
+      "additionalProperties": false
+    },
+    "sessionSync": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "const": "session_sync" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "limit": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "sessionNew": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "const": "session_new" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "sessionCompact": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "const": "session_compact" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "modelSet": {
+      "type": "object",
+      "required": ["type", "id", "provider", "model_id"],
+      "properties": {
+        "type": { "const": "model_set" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "provider": { "type": "string", "minLength": 1 },
+        "model_id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "thinkingSet": {
+      "type": "object",
+      "required": ["type", "id", "level"],
+      "properties": {
+        "type": { "const": "thinking_set" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
+        "level": { "$ref": "./defs/app-pi-common.schema.json#/$defs/thinkingLevel" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    },
+    "listModels": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "const": "list_models" },
+        "id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
+    }
+  },
   "x-remote-pi": {
     "family": "appPiClient",
     "transport": "relay-jsonl",
     "discriminator": "type",
-    "status": "placeholder"
+    "typeNames": [
+      "pair_request",
+      "user_message",
+      "queued_message_set",
+      "queued_message_clear",
+      "approve_tool",
+      "cancel",
+      "ping",
+      "session_sync",
+      "session_new",
+      "session_compact",
+      "model_set",
+      "thinking_set",
+      "list_models"
+    ]
   }
 }

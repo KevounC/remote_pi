@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-schema-source-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app]
 parent: epic-bold-generated-protocol-schema-source
 depends_on: [epic-bold-generated-protocol-schema-source-step-1]
@@ -112,3 +112,10 @@ The server schema must include the types missing from `codec.ts`'s registry:
 ## Rollback
 
 Revert the new app-pi schema and fixture additions. Since no runtime consumer is switched, rollback is limited to the schema package.
+
+## Implementation notes
+
+- Ported the app→Pi and Pi→app message unions into `protocol/schema/app-pi-client.schema.json` and `protocol/schema/app-pi-server.schema.json`, with shared scalar/model/error/history definitions in `protocol/schema/defs/app-pi-common.schema.json`.
+- Preserved the `compat` profile as today's JSON wire while annotating future `canonical-session`/turn-state requirements through `x-remote-pi.profileRequired` metadata; no runtime TS/Dart/Rust consumer was switched in this step.
+- Added `protocol/fixtures/app-pi/client-messages.jsonl` and `protocol/fixtures/app-pi/server-messages.jsonl` covering all current `ClientMessage`, `ServerMessage`, and `SessionHistoryEvent` variants, including `user_message`, `compaction`, `action_ok`, `action_error`, and `models_list`.
+- Verification: `python3` JSON parse over all `protocol/schema/**/*.json` plus new app-pi fixtures passed. Full schema validation is intentionally deferred until step 5 adds the AJV check script.

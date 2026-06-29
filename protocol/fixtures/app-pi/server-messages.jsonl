@@ -1,0 +1,21 @@
+{"type":"pair_ok","in_reply_to":"pair-1","session_name":"remote_pi · repo","session_started_at":1716234500000,"session_id":"sdk-session-1","room_id":"room-main","harness":{"name":"Pi coding agent","version":"0.5.3"},"hostname":"codebox"}
+{"type":"pair_error","in_reply_to":"pair-2","code":"token_expired","message":"pairing token expired"}
+{"type":"user_input","id":"local-1","text":"local input"}
+{"type":"user_message","id":"msg-1","text":"hello","images":[{"data":"QUJD","mime":"image/jpeg"}],"streaming_behavior":"steer"}
+{"type":"queued_message_state","id":"queued-1","text":"next"}
+{"type":"queued_message_state"}
+{"type":"agent_chunk","in_reply_to":"msg-1","delta":"Hi"}
+{"type":"agent_done","in_reply_to":"msg-1","usage":{"input_tokens":10,"output_tokens":20}}
+{"type":"agent_message","in_reply_to":"msg-1","text":"complete","usage":{"input_tokens":10,"output_tokens":20}}
+{"type":"compaction","summary":"Context was compacted.","tokens_before":12345,"ts":1716234500123}
+{"type":"tool_request","tool_call_id":"tool-1","tool":"Bash","args":{"command":"pwd"}}
+{"type":"tool_result","tool_call_id":"tool-1","result":"/repo"}
+{"type":"tool_result","tool_call_id":"tool-2","error":"failed"}
+{"type":"error","in_reply_to":"msg-2","code":"session_mismatch","message":"stale session"}
+{"type":"cancelled","in_reply_to":"cancel-1","target_id":"msg-1"}
+{"type":"pong","in_reply_to":"ping-1"}
+{"type":"bye","reason":"peer_stop"}
+{"type":"session_history","in_reply_to":"sync-1","session_started_at":1716234500000,"events":[{"ts":1716234500001,"type":"user_input","id":"msg-1","text":"hello","images":[{"data":"QUJD","mime":"image/jpeg"}]},{"ts":1716234500002,"type":"tool_request","tool_call_id":"tool-1","tool":"Bash","args":{"command":"pwd"}},{"ts":1716234500003,"type":"tool_result","tool_call_id":"tool-1","result":"/repo"},{"ts":1716234500004,"type":"agent_message","in_reply_to":"msg-1","text":"done","usage":{"input_tokens":10,"output_tokens":20}},{"ts":1716234500005,"type":"compaction","summary":"Context was compacted.","tokens_before":12345}],"eos":true,"truncated":false}
+{"type":"action_ok","in_reply_to":"compact-1","action":"session_compact"}
+{"type":"action_error","in_reply_to":"model-1","action":"model_set","error":"model not found"}
+{"type":"models_list","in_reply_to":"models-1","models":[{"id":"claude-opus-4-7","name":"Claude Opus 4.7","provider":"anthropic","reasoning":true,"context_window":200000,"vision":true}],"current":{"id":"claude-opus-4-7","name":"Claude Opus 4.7","provider":"anthropic","reasoning":true,"context_window":200000,"vision":true}}
