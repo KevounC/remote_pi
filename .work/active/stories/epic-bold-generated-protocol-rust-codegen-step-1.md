@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-rust-codegen-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-generated-protocol-rust-codegen
 depends_on: [epic-bold-generated-protocol-schema-source-step-5]
@@ -82,4 +82,14 @@ Remove the Rust generator backend, generated module skeleton, and check wiring. 
 - Discrepancies from design: generated relay-owned Rust modules are side-by-side and intentionally not consumed by relay runtime code yet, except for adding the generated module to `protocol::mod`. The Step 1 catalog still lacks full per-field Rust metadata for every frame, so the backend emits stable relay-owned skeletons and fails staleness via `generate:rust:check` rather than switching handwritten consumers.
 - Adjacent issues parked: none.
 - Verification: `corepack pnpm --dir protocol generate:rust`, `corepack pnpm --dir protocol generate:rust:check`, `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` all passed from `relay/` (with pnpm warning about unreadable `/home/agent/.npmrc`, non-fatal).
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Inspected implementation commit `3d35248`; no `build.rs` exists, `cargo build`/`cargo test` do not require Node, generated Rust files are committed under `relay/src/protocol/generated/`, and `protocol/package.json` provides a stale-check path. `RoomMetaPatch` preserves tri-state nullable fields with `Option<Option<String>>` for nullable string patches and `Option<bool>` for non-nullable `working`; generated cross-PC/body fields remain `serde_json::Value`/opaque and do not parse inner `ct` or `session_id`. Verification run: `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store list-types`, `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store generate:rust:check`, and from `relay/` `cargo fmt --check && cargo clippy -- -D warnings && cargo test`.
 
