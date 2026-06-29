@@ -1,7 +1,7 @@
 ---
 id: story-fix-security-doc-drift
 kind: story
-stage: review
+stage: done
 tags: [docs, pi-extension, site, relay]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review]
@@ -45,3 +45,9 @@ Verification:
 - Ran `rg -n "end-to-end|E2E|Noise|libsodium|busy|opaque ciphertext" README.md site pi-extension PROTOCOL.md .agents docs 2>/dev/null`; remaining durable-doc hits are no-E2E disclosures, future-roadmap E2E mentions, cron `skip_if_busy` docs, or no-retry-on-busy semantics. Source/test hits were inspected but not changed except site documentation pages, per story boundaries.
 - Ran scoped durable-doc grep `rg -n "end-to-end|E2E|Noise|libsodium|busy|opaque ciphertext" README.md site/README.md site/src/app pi-extension/README.md pi-extension/CLAUDE.md pi-extension/skills PROTOCOL.md .agents docs 2>/dev/null`; remaining hits match current trust model or daemon busy/skip terminology.
 - Ran `cd site && corepack pnpm lint`; passed after Corepack installed site dependencies (plain `pnpm lint` was unavailable because `pnpm` was not on PATH).
+
+## Review (2026-06-28)
+
+Verdict: Approve
+
+Findings: None.
