@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-schema-source-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-generated-protocol-schema-source
 depends_on: [epic-bold-generated-protocol-schema-source-step-4]
@@ -80,11 +80,11 @@ addFormats(ajv);
 
 ## Acceptance Criteria
 
-- [ ] `corepack pnpm --dir protocol check` validates every protocol fixture against the schema.
-- [ ] `corepack pnpm --dir protocol list-types` emits a deterministic catalog of all manifest message types and their families.
-- [ ] The check fails for the exact drift class seen in `codec.ts` (a live type in the schema missing from a generated/server registry).
-- [ ] `protocol/README.md` explains how future TS/Dart/Rust generator stories consume the manifest and fixture catalog.
-- [ ] `.orchestration/contracts/` remains available as legacy reference until the generated protocol consumers replace it.
+- [x] `corepack pnpm --dir protocol check` validates every protocol fixture against the schema.
+- [x] `corepack pnpm --dir protocol list-types` emits a deterministic catalog of all manifest message types and their families.
+- [x] The check fails for the exact drift class seen in `codec.ts` (a live type in the schema missing from a generated/server registry).
+- [x] `protocol/README.md` explains how future TS/Dart/Rust generator stories consume the manifest and fixture catalog.
+- [x] `.orchestration/contracts/` remains available as legacy reference until the generated protocol consumers replace it.
 
 ## Rollback
 
@@ -98,3 +98,13 @@ Remove the validation scripts, protocol package metadata, and newly copied fixtu
 - Updated `protocol/README.md` with package commands, fixture/catalog semantics, and the rule that `.orchestration/contracts/` remains a legacy reference until generated consumers replace it.
 - Script entrypoints use `node --import tsx ...` rather than the bare `tsx` CLI because this harness rejects tsx's IPC pipe listen with `EPERM`; the package still depends on `tsx` for TS execution.
 - Verification run from repo root: `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store check` passed; `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store list-types` emitted 58 catalog entries and valid JSON. Install was run with `NPM_CONFIG_USERCONFIG=/tmp/remote-pi-empty-npmrc` and a local temp store because the default home npmrc/store were not writable in this harness.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane substrate review. Inspected commit `6ea8d69`, `check-fixtures.ts`, `list-types.ts`, manifest, README, and schema adjustments. Re-ran `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store check` (5 fixture families validated) and `list-types` (58 valid JSON entries: appPiClient 13, appPiServer 19, relayControl 17, crossPc 2, cockpitControl 7). Confirmed the catalog includes the prior `codec.ts` drift variants: `user_message`, `compaction`, `action_ok`, `action_error`, and `models_list`, making the handoff usable for downstream generated registries including `rust-codegen-step-1`.
