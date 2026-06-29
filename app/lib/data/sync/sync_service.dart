@@ -37,6 +37,11 @@ class SyncService extends Service {
   String? _activeEpk;
   String _activeRoomId = 'main';
 
+  // Highest `session_started_at` we currently trust for the active room.
+  // Any incoming SessionHistory older than this is dropped as stale (e.g.
+  // leftover from a just-closed New session).
+  int? _activeSessionStartedAt;
+
   // In-memory dedupe + ordering for the active session's msgs box. Rebuilt on
   // [activate]. Key = `<role>:<id>` so a user msg and the assistant reply that
   // shares its id don't collide.
@@ -382,6 +387,12 @@ class SyncService extends Service {
     final epk = _activeEpk;
     if (epk == null) return;
     final room = _activeRoomId;
+    // Bump the expected session timestamp boundary so any stale `session_history`
+    // from the previous session (including the final frames from the dying
+    // instance) is rejected if it arrives after New Session locally clears state.
+    if (_activeSessionStartedAt != null) {
+      _activeSessionStartedAt = _activeSessionStartedAt! + 1;
+    }
     // Session wiped → any optimistic sends are moot; disarm their backstops.
     _cancelAllSendTimers();
     await _enqueue(() async {
@@ -664,9 +675,20 @@ class SyncService extends Service {
     final epk = _activeEpk;
     if (epk == null) return;
     final room = _activeRoomId;
+    final incomingStartedAt = h.sessionStartedAt;
+    // Reject stale SessionHistory from the prior session after `clearActiveSession`
+    // raised the local expected session-start boundary.
+    if (_activeSessionStartedAt != null &&
+        incomingStartedAt < _activeSessionStartedAt!) {
+      return;
+    }
     final rows = _convertHistory(h.events);
     final historyIds = {for (final r in rows) _key(r.role, r.id)};
     await _enqueue(() async {
+      if (_activeEpk != epk || _activeRoomId != room) return;
+      final minStartedAt = _activeSessionStartedAt;
+      if (minStartedAt != null && incomingStartedAt < minStartedAt) return;
+
       final box = await _boxes.msgsBox(epk, room);
       // Preserve local pending user rows the Pi hasn't echoed yet.
       final preserved = <MessageRecord>[];
@@ -711,6 +733,10 @@ class SyncService extends Service {
           await box.put(i, newJson);
         }
       }
+      _activeSessionStartedAt =
+          incomingStartedAt > (_activeSessionStartedAt ?? -1)
+          ? incomingStartedAt
+          : _activeSessionStartedAt;
       if (_activeEpk == epk && _activeRoomId == room) {
         _idToSeq
           ..clear()
@@ -720,16 +746,15 @@ class SyncService extends Service {
           ]);
         _nextSeq = desired.length;
         _indexLoaded = true;
+        _updateIndex(
+          (cur) => cur.copyWith(
+            sessionStartedAt: DateTime.fromMillisecondsSinceEpoch(
+              incomingStartedAt,
+            ),
+          ),
+        );
       }
     });
-    if (_activeEpk == epk && _activeRoomId == room) {
-      final started = h.sessionStartedAt;
-      _updateIndex(
-        (cur) => cur.copyWith(
-          sessionStartedAt: DateTime.fromMillisecondsSinceEpoch(started),
-        ),
-      );
-    }
   }
 
   List<MessageRecord> _convertHistory(List<SessionHistoryEvent> events) {
@@ -835,6 +860,17 @@ class SyncService extends Service {
     return _enqueue(() async {
       if (_activeEpk != epk || _activeRoomId != room) return;
       final box = await _boxes.msgsBox(epk, room);
+      final idx = _boxes.sessionsIndexBox();
+      final indexRaw = idx.get(LocalBoxes.sessionKey(epk, room));
+      _activeSessionStartedAt = indexRaw is Map<String, dynamic>
+          ? SessionIndexRecord.fromJson(
+              indexRaw,
+            ).sessionStartedAt?.millisecondsSinceEpoch
+          : indexRaw is Map
+          ? SessionIndexRecord.fromJson(
+              indexRaw.cast<String, dynamic>(),
+            ).sessionStartedAt?.millisecondsSinceEpoch
+          : null;
       _idToSeq.clear();
       _nextSeq = 0;
       for (final k in box.keys) {

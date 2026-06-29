@@ -687,6 +687,62 @@ void main() {
     s.sync.dispose();
   });
 
+  test(
+    'clearActiveSession sets a new history boundary; stale SessionHistory is '
+    'dropped and a newer session history repopulates the box',
+    () async {
+      final s = await setup();
+
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-base',
+          sessionStartedAt: 1000,
+          events: const [UserInputEvt(ts: 1, id: 'base', text: 'legacy row')],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk), hasLength(1));
+
+      await s.sync.clearActiveSession();
+      await _settle();
+      expect(messages(s.epk), isEmpty);
+      expect(index(s.epk), isNull);
+
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-stale',
+          sessionStartedAt: 999,
+          events: const [
+            UserInputEvt(ts: 2, id: 'stale', text: 'from old session'),
+          ],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk), isEmpty);
+
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-fresh',
+          sessionStartedAt: 1001,
+          events: const [UserInputEvt(ts: 3, id: 'fresh', text: 'fresh row')],
+          eos: true,
+        ),
+      );
+      await _settle();
+      final rows = messages(s.epk);
+      expect(rows.map((r) => r.id), ['fresh']);
+      expect(
+        index(s.epk)?.sessionStartedAt,
+        DateTime.fromMillisecondsSinceEpoch(1001),
+      );
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
   // Plan/32 safety net — a sent message whose echo never comes back must not
   // spin forever. It must also not disappear silently: replace the optimistic
   // bubble with an explicit failure row so the user knows delivery was not
