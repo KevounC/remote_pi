@@ -22,6 +22,11 @@ Random thoughts from operator use of the mobile app.
   arrives (or is sent), the chat window stays at its current scroll position
   instead of scrolling down to show the latest message, so the user has to
   manually scroll to follow the conversation.
+- **Can't scroll back through much of the chat history.** Scrolling up through a
+  session's chat log is limited — sometimes only the agent's most recent turn is
+  reachable and earlier messages are missing/unreachable in the scrollable
+  transcript. Could be a render windowing issue, history not being retained in
+  the widget, or the scroll view clipping/limiting the loaded messages.
 
 ## UX/UI polish
 
