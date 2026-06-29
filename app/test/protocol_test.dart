@@ -39,6 +39,7 @@ void main() {
     test('parses in_reply_to and delta', () {
       final msg = ServerMessage.fromJson({
         'type': 'agent_chunk',
+        'session_id': 's1',
         'in_reply_to': '018f9c2a-7b1e-7000-9a3b-1c2d3e4f5a6e',
         'delta': 'Vou olhar o ',
       });
@@ -54,6 +55,7 @@ void main() {
     test('parses usage', () {
       final msg = ServerMessage.fromJson({
         'type': 'agent_done',
+        'session_id': 's1',
         'in_reply_to': 'x',
         'usage': {'input_tokens': 120, 'output_tokens': 340},
       });
@@ -65,6 +67,7 @@ void main() {
     test('usage is optional', () {
       final msg = ServerMessage.fromJson({
         'type': 'agent_done',
+        'session_id': 's1',
         'in_reply_to': 'x',
       });
       expect((msg as AgentDone).usage, isNull);
@@ -75,6 +78,7 @@ void main() {
     test('parses tool_call_id, tool, args', () {
       final msg = ServerMessage.fromJson({
         'type': 'tool_request',
+        'session_id': 's1',
         'tool_call_id': 'tc_018f9c2b',
         'tool': 'Bash',
         'args': {'command': 'rm -rf node_modules'},
@@ -89,6 +93,7 @@ void main() {
     test('parses result', () {
       final msg = ServerMessage.fromJson({
         'type': 'tool_result',
+        'session_id': 's1',
         'tool_call_id': 'tc_1',
         'result': {'exit_code': 0},
       });
@@ -99,6 +104,7 @@ void main() {
     test('parses error field', () {
       final msg = ServerMessage.fromJson({
         'type': 'tool_result',
+        'session_id': 's1',
         'tool_call_id': 'tc_2',
         'error': 'command timed out after 60s',
       });
@@ -426,6 +432,7 @@ void main() {
       final hist =
           ServerMessage.fromJson({
                 'type': 'session_history',
+                'session_id': 's1',
                 'in_reply_to': 'sync1',
                 'session_started_at': 0,
                 'eos': true,

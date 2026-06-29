@@ -1,4 +1,4 @@
-import { isServerMessageType } from "./session_scope.js";
+import { isServerMessageType, isSessionScopedServerType } from "./session_scope.js";
 import type { ClientMessage, ServerMessage } from "./types.js";
 
 export class DecodeError extends Error {
@@ -32,6 +32,12 @@ export function decodeServer(line: string): ServerMessage {
   const t = (obj as Record<string, unknown>).type as string;
   if (!isServerMessageType(t)) {
     throw new DecodeError("unsupported_type", `unknown type: ${t}`);
+  }
+  if (isSessionScopedServerType(t)) {
+    const sessionId = (obj as Record<string, unknown>).session_id;
+    if (typeof sessionId !== "string" || sessionId.length === 0) {
+      throw new DecodeError("invalid_message", `missing 'session_id' for ${t}`);
+    }
   }
   return obj as ServerMessage;
 }

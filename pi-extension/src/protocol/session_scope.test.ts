@@ -23,6 +23,9 @@ describe("session-scoped protocol registry", () => {
       "error",
       "cancelled",
       "session_history",
+      "action_ok",
+      "action_error",
+      "models_list",
     ]);
   });
 
@@ -53,6 +56,7 @@ describe("session-scoped protocol registry", () => {
   test("type predicates distinguish session-scoped families", () => {
     expect(isSessionScopedServerType("session_history")).toBe(true);
     expect(isSessionScopedServerType("pair_ok")).toBe(false);
+    expect(isSessionScopedServerType("action_ok")).toBe(true);
     expect(isSessionScopedClientType("session_sync")).toBe(true);
     expect(isSessionScopedClientType("pair_request")).toBe(false);
     expect(isSessionScopedClientType("ping")).toBe(false);

@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-wire-discriminator-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-canonical-session-wire-discriminator
 depends_on: [epic-bold-canonical-session-identity-model-step-1]
@@ -86,3 +86,10 @@ Medium. This is a cross-language contract bridge before generated protocol lands
 
 ## Rollback
 Revert the registry and field additions before reverting validators. Since generated protocol is the successor, rollback is a bridge removal, not a relay/schema decision.
+
+## Implementation notes
+- Files changed: `pi-extension/src/protocol/session_scope.ts`, `pi-extension/src/protocol/types.ts`, `pi-extension/src/protocol/codec.ts`, `pi-extension/src/actions/handlers.ts`, `pi-extension/src/index.ts` (daemon `session_new` ack line only), `app/lib/protocol/protocol.dart`, protocol/action tests, and `.orchestration/contracts/fixtures/*.jsonl` contract fixtures.
+- Tests added: TS codec coverage for missing `session_id`; TS session-scope registry expectations include action replies; Dart protocol/action tests now parse required `session_id` on scoped replies.
+- Discrepancies from design: `session_scope.ts` already existed from the identity-model slice, so this step completed it by moving `action_ok`, `action_error`, and `models_list` into the scoped server registry and making codec/Dart decoding fail fast for missing `session_id`.
+- Adjacent issues parked: none.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/protocol/codec.test.ts src/protocol/session_scope.test.ts src/actions/handlers.test.ts` passed; full `corepack pnpm test` was attempted and failed on pre-existing/environment UDS lock failures (`listen EPERM` under `/tmp/claude` and cwd lock/leader election failures), not on the touched protocol tests; `flutter test test/protocol_test.dart test/protocol/actions_protocol_test.dart` could not start because `/opt/flutter/bin/cache` is read-only; nearest checks `dart format` and `HOME=/tmp/remote-pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/protocol/protocol.dart test/protocol_test.dart test/protocol/actions_protocol_test.dart` passed; `dart test` could not run because pub.dev access was blocked by proxy 403.

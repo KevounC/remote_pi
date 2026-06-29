@@ -128,24 +128,24 @@ export function wireFromModel(model: Model<any>): WireModel {
 
 // ── ack helpers ────────────────────────────────────────────────────────────
 
-function ok(sender: ActionReplySender, msg: { id: string }, action: ActionName): void {
-  sender.send({ type: "action_ok", in_reply_to: msg.id, action });
+function ok(sender: ActionReplySender, msg: { id: string; session_id: string }, action: ActionName): void {
+  sender.send({ type: "action_ok", session_id: msg.session_id, in_reply_to: msg.id, action });
 }
 
 function fail(
   sender: ActionReplySender,
-  msg: { id: string },
+  msg: { id: string; session_id: string },
   action: ActionName,
   err: unknown,
 ): void {
   const error = err instanceof Error ? err.message : String(err);
-  sender.send({ type: "action_error", in_reply_to: msg.id, action, error });
+  sender.send({ type: "action_error", session_id: msg.session_id, in_reply_to: msg.id, action, error });
 }
 
 /** Run a synchronous action with uniform success/failure replies. */
 function runSync(
   sender: ActionReplySender,
-  msg: { id: string },
+  msg: { id: string; session_id: string },
   action: ActionName,
   body: () => void,
 ): void {
@@ -160,7 +160,7 @@ function runSync(
 /** Run an async action with uniform success/failure replies. */
 async function runAsync(
   sender: ActionReplySender,
-  msg: { id: string },
+  msg: { id: string; session_id: string },
   action: ActionName,
   body: () => Promise<void>,
 ): Promise<boolean> {
@@ -286,6 +286,7 @@ export function handleListModels(
     const current = ctx?.getModel?.();
     sender.send({
       type: "models_list",
+      session_id: msg.session_id,
       in_reply_to: msg.id,
       models,
       current: current ? wireFromModel(current) : undefined,

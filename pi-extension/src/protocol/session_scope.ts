@@ -13,6 +13,9 @@ export const SESSION_SCOPED_SERVER_TYPES = [
   "error",
   "cancelled",
   "session_history",
+  "action_ok",
+  "action_error",
+  "models_list",
 ] as const;
 
 export const NON_SESSION_SCOPED_SERVER_TYPES = [
@@ -20,9 +23,6 @@ export const NON_SESSION_SCOPED_SERVER_TYPES = [
   "pair_error",
   "pong",
   "bye",
-  "action_ok",
-  "action_error",
-  "models_list",
 ] as const;
 
 export const SERVER_MESSAGE_TYPES = [

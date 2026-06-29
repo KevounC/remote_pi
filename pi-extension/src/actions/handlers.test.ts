@@ -70,18 +70,18 @@ describe("handleSessionCompact", () => {
     const compactArgs: unknown[] = [];
     const ctx: ActionCtx = { compact: (opts) => { compactArgs.push(opts); } };
     const sender = makeSender();
-    handleSessionCompact(ctx, sender, { type: "session_compact", id: "r1" });
+    handleSessionCompact(ctx, sender, { type: "session_compact", id: "r1", session_id: "s1" });
     expect(compactArgs).toHaveLength(1);
     // The summary must be forced to English (surfaced via the `compaction` msg).
     expect(JSON.stringify(compactArgs[0])).toMatch(/English/i);
     expect(sender.sent).toEqual([
-      { type: "action_ok", in_reply_to: "r1", action: "session_compact" },
+      { type: "action_ok", session_id: "s1", in_reply_to: "r1", action: "session_compact" },
     ]);
   });
 
   test("returns action_error when ctx is null", () => {
     const sender = makeSender();
-    handleSessionCompact(null, sender, { type: "session_compact", id: "r1" });
+    handleSessionCompact(null, sender, { type: "session_compact", id: "r1", session_id: "s1" });
     expect(sender.sent).toHaveLength(1);
     expect(sender.sent[0]).toMatchObject({
       type: "action_error",
@@ -94,7 +94,7 @@ describe("handleSessionCompact", () => {
   test("returns action_error when ctx.compact throws", () => {
     const ctx: ActionCtx = { compact: () => { throw new Error("boom"); } };
     const sender = makeSender();
-    handleSessionCompact(ctx, sender, { type: "session_compact", id: "r1" });
+    handleSessionCompact(ctx, sender, { type: "session_compact", id: "r1", session_id: "s1" });
     expect(sender.sent[0]).toMatchObject({
       type: "action_error",
       error: "boom",
@@ -108,17 +108,17 @@ describe("handleSessionNew", () => {
   test("happy path → action_ok + returns true (drives Pi-side reset)", async () => {
     const ctx: ActionCtx = { newSession: async () => ({ cancelled: false }) };
     const sender = makeSender();
-    const created = await handleSessionNew(ctx, sender, { type: "session_new", id: "r2" });
+    const created = await handleSessionNew(ctx, sender, { type: "session_new", id: "r2", session_id: "s1" });
     expect(created).toBe(true);
     expect(sender.sent).toEqual([
-      { type: "action_ok", in_reply_to: "r2", action: "session_new" },
+      { type: "action_ok", session_id: "s1", in_reply_to: "r2", action: "session_new" },
     ]);
   });
 
   test("cancelled by extension hook → action_error + returns false (no reset)", async () => {
     const ctx: ActionCtx = { newSession: async () => ({ cancelled: true }) };
     const sender = makeSender();
-    const created = await handleSessionNew(ctx, sender, { type: "session_new", id: "r2" });
+    const created = await handleSessionNew(ctx, sender, { type: "session_new", id: "r2", session_id: "s1" });
     expect(created).toBe(false);
     expect(sender.sent[0]).toMatchObject({
       type: "action_error",
@@ -129,7 +129,7 @@ describe("handleSessionNew", () => {
 
   test("ctx without newSession → action_error + returns false (no reset)", async () => {
     const sender = makeSender();
-    const created = await handleSessionNew({}, sender, { type: "session_new", id: "r2" });
+    const created = await handleSessionNew({}, sender, { type: "session_new", id: "r2", session_id: "s1" });
     expect(created).toBe(false);
     expect(sender.sent[0]).toMatchObject({
       type: "action_error",
@@ -156,7 +156,7 @@ describe("handleSessionNew", () => {
     const created = await handleSessionNew(
       ctx,
       sender,
-      { type: "session_new", id: "r2" },
+      { type: "session_new", id: "r2", session_id: "s1" },
       (c) => { recaptured = c; },
     );
     expect(created).toBe(true);
@@ -171,17 +171,17 @@ describe("handleThinkingSet", () => {
     const calls: string[] = [];
     const pi = fakePi({ setThinkingLevel: (lvl) => { calls.push(lvl); } });
     const sender = makeSender();
-    handleThinkingSet(pi, sender, { type: "thinking_set", id: "r3", level: "high" });
+    handleThinkingSet(pi, sender, { type: "thinking_set", id: "r3", session_id: "s1", level: "high" });
     expect(calls).toEqual(["high"]);
     expect(sender.sent).toEqual([
-      { type: "action_ok", in_reply_to: "r3", action: "thinking_set" },
+      { type: "action_ok", session_id: "s1", in_reply_to: "r3", action: "thinking_set" },
     ]);
   });
 
   test("setThinkingLevel throwing surfaces as action_error", () => {
     const pi = fakePi({ setThinkingLevel: () => { throw new Error("nope"); } });
     const sender = makeSender();
-    handleThinkingSet(pi, sender, { type: "thinking_set", id: "r3", level: "low" });
+    handleThinkingSet(pi, sender, { type: "thinking_set", id: "r3", session_id: "s1", level: "low" });
     expect(sender.sent[0]).toMatchObject({
       type: "action_error",
       action: "thinking_set",
@@ -201,7 +201,7 @@ describe("handleModelSet", () => {
     });
     const sender = makeSender();
     await handleModelSet(pi, null, reg, sender, {
-      type: "model_set", id: "r4", provider: "anthropic", model_id: "claude-opus-4-7",
+      type: "model_set", id: "r4", session_id: "s1", provider: "anthropic", model_id: "claude-opus-4-7",
     });
     expect(setModelArgs).toHaveLength(1);
     expect(setModelArgs[0].id).toBe("claude-opus-4-7");
@@ -214,7 +214,7 @@ describe("handleModelSet", () => {
     const reg = fakeRegistry([sampleModel]);
     const sender = makeSender();
     await handleModelSet(fakePi(), null, reg, sender, {
-      type: "model_set", id: "r4", provider: "anthropic", model_id: "nope-3",
+      type: "model_set", id: "r4", session_id: "s1", provider: "anthropic", model_id: "nope-3",
     });
     expect(sender.sent[0]).toMatchObject({
       type: "action_error",
@@ -227,7 +227,7 @@ describe("handleModelSet", () => {
     const pi = fakePi({ setModel: async () => false });
     const sender = makeSender();
     await handleModelSet(pi, null, reg, sender, {
-      type: "model_set", id: "r4", provider: "anthropic", model_id: "claude-opus-4-7",
+      type: "model_set", id: "r4", session_id: "s1", provider: "anthropic", model_id: "claude-opus-4-7",
     });
     expect(sender.sent[0]).toMatchObject({
       type: "action_error",
@@ -242,7 +242,7 @@ describe("handleModelSet", () => {
     const persisted: Array<{ provider: string; modelId: string }> = [];
     await handleModelSet(
       pi, null, reg, sender,
-      { type: "model_set", id: "r4", provider: "anthropic", model_id: "claude-opus-4-7" },
+      { type: "model_set", id: "r4", session_id: "s1", provider: "anthropic", model_id: "claude-opus-4-7" },
       (provider, modelId) => persisted.push({ provider, modelId }),
     );
     // onPersist receives the resolved model's provider/id so it survives restart.
@@ -256,7 +256,7 @@ describe("handleModelSet", () => {
     let persistCalls = 0;
     await handleModelSet(
       pi, null, reg, sender,
-      { type: "model_set", id: "r4", provider: "anthropic", model_id: "claude-opus-4-7" },
+      { type: "model_set", id: "r4", session_id: "s1", provider: "anthropic", model_id: "claude-opus-4-7" },
       () => { persistCalls += 1; },
     );
     expect(persistCalls).toBe(0);
@@ -269,7 +269,7 @@ describe("handleModelSet", () => {
     let persistCalls = 0;
     await handleModelSet(
       fakePi(), null, reg, sender,
-      { type: "model_set", id: "r4", provider: "anthropic", model_id: "nope-3" },
+      { type: "model_set", id: "r4", session_id: "s1", provider: "anthropic", model_id: "nope-3" },
       () => { persistCalls += 1; },
     );
     expect(persistCalls).toBe(0);
@@ -283,7 +283,7 @@ describe("handleListModels", () => {
     const reg = fakeRegistry([sampleModel]);
     const ctx: ActionCtx = { getModel: () => sampleModel };
     const sender = makeSender();
-    handleListModels(ctx, reg, sender, { type: "list_models", id: "r5" });
+    handleListModels(ctx, reg, sender, { type: "list_models", id: "r5", session_id: "s1" });
     const reply = sender.sent[0];
     expect(reply.type).toBe("models_list");
     if (reply.type !== "models_list") throw new Error("type guard");
@@ -304,7 +304,7 @@ describe("handleListModels", () => {
   test("omits `current` when ctx.getModel is undefined", () => {
     const reg = fakeRegistry([sampleModel]);
     const sender = makeSender();
-    handleListModels(null, reg, sender, { type: "list_models", id: "r5" });
+    handleListModels(null, reg, sender, { type: "list_models", id: "r5", session_id: "s1" });
     const reply = sender.sent[0];
     expect(reply.type).toBe("models_list");
     if (reply.type !== "models_list") throw new Error("type guard");
@@ -323,7 +323,7 @@ describe("handleListModels", () => {
     const live = fakeRegistry([liveModel]);
     const ctx: ActionCtx = { modelRegistry: live };
     const sender = makeSender();
-    handleListModels(ctx, fallback, sender, { type: "list_models", id: "r5" });
+    handleListModels(ctx, fallback, sender, { type: "list_models", id: "r5", session_id: "s1" });
     const reply = sender.sent[0];
     expect(reply.type).toBe("models_list");
     if (reply.type !== "models_list") throw new Error("type guard");
@@ -346,7 +346,7 @@ describe("handleListModels", () => {
       find: () => undefined,
     };
     const sender = makeSender();
-    handleListModels(null, reg, sender, { type: "list_models", id: "r5" });
+    handleListModels(null, reg, sender, { type: "list_models", id: "r5", session_id: "s1" });
     expect(sender.sent[0]).toMatchObject({
       type: "error",
       in_reply_to: "r5",

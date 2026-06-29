@@ -112,6 +112,7 @@ void main() {
     test('action_ok parses in_reply_to and action', () {
       final m = ServerMessage.fromJson({
         'type': 'action_ok',
+        'session_id': 's1',
         'in_reply_to': 'r1',
         'action': 'session_compact',
       });
@@ -124,6 +125,7 @@ void main() {
     test('action_error parses error field', () {
       final m = ServerMessage.fromJson({
         'type': 'action_error',
+        'session_id': 's1',
         'in_reply_to': 'r2',
         'action': 'model_set',
         'error': 'no auth configured',
@@ -136,6 +138,7 @@ void main() {
     test('action_ok with unknown action keeps rawAction', () {
       final m = ServerMessage.fromJson({
         'type': 'action_ok',
+        'session_id': 's1',
         'in_reply_to': 'r3',
         'action': 'future_op',
       });
@@ -146,6 +149,7 @@ void main() {
     test('models_list parses models and current', () {
       final m = ServerMessage.fromJson({
         'type': 'models_list',
+        'session_id': 's1',
         'in_reply_to': 'r4',
         'models': [
           {
@@ -181,6 +185,7 @@ void main() {
     test('models_list without current returns null current', () {
       final m = ServerMessage.fromJson({
         'type': 'models_list',
+        'session_id': 's1',
         'in_reply_to': 'r5',
         'models': const <Map<String, dynamic>>[],
       });

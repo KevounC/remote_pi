@@ -3458,7 +3458,7 @@ export function _routeClientMessageFrom(
         // is unavailable. Ack, clear remote-pi's mirror, then exit with a
         // private code; the supervisor restarts once without --continue, which
         // creates a fresh Pi session. Later restarts resume that fresh session.
-        sender.send({ type: "action_ok", in_reply_to: msg.id, action: "session_new" });
+        sender.send({ type: "action_ok", session_id: msg.session_id, in_reply_to: msg.id, action: "session_new" });
         _resetSessionForNew(msg.id);
         setTimeout(() => process.exit(EXIT_DAEMON_FRESH_SESSION), 100);
         break;

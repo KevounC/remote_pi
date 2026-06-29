@@ -91,6 +91,18 @@ describe("rejects junk", () => {
     expect((err as DecodeError).code).toBe("unsupported_type");
     expect((err as DecodeError).message).toMatch(/unknown type/);
   });
+
+  test("session-scoped server messages require session_id", () => {
+    let err: unknown;
+    try {
+      decodeServer('{"type":"agent_chunk","in_reply_to":"r1","delta":"hi"}');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(DecodeError);
+    expect((err as DecodeError).code).toBe("invalid_message");
+    expect((err as DecodeError).message).toMatch(/session_id/);
+  });
 });
 
 describe("encodeClient roundtrip", () => {

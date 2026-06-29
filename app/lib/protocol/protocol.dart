@@ -465,6 +465,9 @@ const sessionScopedServerTypes = <String>{
   'error',
   'cancelled',
   'session_history',
+  'action_ok',
+  'action_error',
+  'models_list',
 };
 
 bool isSessionScopedClientType(String type) =>
@@ -473,8 +476,16 @@ bool isSessionScopedClientType(String type) =>
 bool isSessionScopedServerType(String type) =>
     sessionScopedServerTypes.contains(type);
 
-String _sessionIdFromJson(Map<String, dynamic> j) =>
-    (j['session_id'] as String?) ?? '';
+String _sessionIdFromJson(Map<String, dynamic> j) {
+  final sessionId = j['session_id'];
+  if (sessionId is String && sessionId.isNotEmpty) return sessionId;
+  throw const FormatException('missing required field session_id');
+}
+
+String _optionalSessionIdFromJson(Map<String, dynamic> j) {
+  final sessionId = j['session_id'];
+  return sessionId is String ? sessionId : '';
+}
 
 String? sessionIdOfServerMessage(ServerMessage message) => switch (message) {
   UserInput(:final sessionId) => sessionId,
@@ -488,6 +499,9 @@ String? sessionIdOfServerMessage(ServerMessage message) => switch (message) {
   ErrorMessage(:final sessionId) => sessionId,
   Cancelled(:final sessionId) => sessionId,
   SessionHistory(:final sessionId) => sessionId,
+  ActionOk(:final sessionId) => sessionId,
+  ActionError(:final sessionId) => sessionId,
+  ModelsList(:final sessionId) => sessionId,
   PairOk(:final sessionId) => sessionId.isEmpty ? null : sessionId,
   _ => null,
 };
@@ -917,7 +931,12 @@ sealed class ServerMessage {
   }
 }
 
-class AgentChunk extends ServerMessage {
+mixin SessionScopedServerMessage on ServerMessage {
+  String get sessionId;
+}
+
+class AgentChunk extends ServerMessage with SessionScopedServerMessage {
+  @override
   final String sessionId;
   final String inReplyTo;
   final String delta;
@@ -934,7 +953,8 @@ class AgentChunk extends ServerMessage {
   );
 }
 
-class AgentDone extends ServerMessage {
+class AgentDone extends ServerMessage with SessionScopedServerMessage {
+  @override
   final String sessionId;
   final String inReplyTo;
   final Usage? usage;
@@ -949,7 +969,8 @@ class AgentDone extends ServerMessage {
   );
 }
 
-class ToolRequest extends ServerMessage {
+class ToolRequest extends ServerMessage with SessionScopedServerMessage {
+  @override
   final String sessionId;
   final String toolCallId;
   final String tool;
@@ -969,7 +990,8 @@ class ToolRequest extends ServerMessage {
   );
 }
 
-class ToolResult extends ServerMessage {
+class ToolResult extends ServerMessage with SessionScopedServerMessage {
+  @override
   final String sessionId;
   final String toolCallId;
   final dynamic result;
@@ -989,7 +1011,8 @@ class ToolResult extends ServerMessage {
   );
 }
 
-class ErrorMessage extends ServerMessage {
+class ErrorMessage extends ServerMessage with SessionScopedServerMessage {
+  @override
   final String sessionId;
   final String? inReplyTo;
   final String code;
@@ -1009,7 +1032,8 @@ class ErrorMessage extends ServerMessage {
   );
 }
 
-class Cancelled extends ServerMessage {
+class Cancelled extends ServerMessage with SessionScopedServerMessage {
+  @override
   final String sessionId;
   final String inReplyTo;
   final String targetId;
@@ -1122,7 +1146,7 @@ class PairOk extends ServerMessage {
       // Callers that need to distinguish "Pi said main" from "Pi
       // omitted room" should peek at the raw JSON instead.
       roomId: (j['room_id'] as String?) ?? 'main',
-      sessionId: _sessionIdFromJson(j),
+      sessionId: _optionalSessionIdFromJson(j),
       harness: harnessJson is Map<String, dynamic>
           ? PiHarness.fromJson(harnessJson)
           : null,
@@ -1144,7 +1168,8 @@ WireImage? _firstImage(dynamic raw) {
   return WireImage.fromJson(first.cast<String, dynamic>());
 }
 
-class QueuedMessageState extends ServerMessage {
+class QueuedMessageState extends ServerMessage with SessionScopedServerMessage {
+  @override
   final String sessionId;
   final String? id;
   final String? text;
@@ -1158,8 +1183,9 @@ class QueuedMessageState extends ServerMessage {
       );
 }
 
-class UserInput extends ServerMessage {
+class UserInput extends ServerMessage with SessionScopedServerMessage {
   final String id;
+  @override
   final String sessionId;
   final String text;
 
@@ -1193,7 +1219,8 @@ class UserInput extends ServerMessage {
 /// (history dumps); real-time replies still flow as `agent_chunk` +
 /// `agent_done`. May also arrive standalone for backfill — treated as a
 /// final assistant message for the given `inReplyTo`.
-class AgentMessage extends ServerMessage {
+class AgentMessage extends ServerMessage with SessionScopedServerMessage {
+  @override
   final String sessionId;
   final String inReplyTo;
   final String text;
@@ -1218,7 +1245,8 @@ class AgentMessage extends ServerMessage {
 /// Plan/32 — emitted by the Pi-extension when a context compaction finishes.
 /// Rendered as a system bubble in the chat (✓ Contexto compactado + summary +
 /// the token count that was reclaimed). `ts` is optional (epoch millis).
-class Compaction extends ServerMessage {
+class Compaction extends ServerMessage with SessionScopedServerMessage {
+  @override
   final String sessionId;
   final String summary;
   final int? tokensBefore;
@@ -1246,7 +1274,8 @@ class Compaction extends ServerMessage {
 /// sets `eos: true`. `truncated: true` indicates Pi had more events
 /// than the requested `limit` and dropped the oldest — surfaced to
 /// logs only (no UI affordance per plan/16 D1=B).
-class SessionHistory extends ServerMessage {
+class SessionHistory extends ServerMessage with SessionScopedServerMessage {
+  @override
   final String sessionId;
   final String inReplyTo;
   final int sessionStartedAt;
@@ -1411,7 +1440,9 @@ enum ByeReason { peerStop, sessionReplaced, shutdown, unknown }
 // picker highlights the right row immediately.
 // ---------------------------------------------------------------------------
 
-class ActionOk extends ServerMessage {
+class ActionOk extends ServerMessage with SessionScopedServerMessage {
+  @override
+  final String sessionId;
   final String inReplyTo;
   final ActionName action;
 
@@ -1419,6 +1450,7 @@ class ActionOk extends ServerMessage {
   /// a new action without us silently dropping the ack.
   final String rawAction;
   ActionOk({
+    this.sessionId = '',
     required this.inReplyTo,
     required this.action,
     required this.rawAction,
@@ -1428,6 +1460,7 @@ class ActionOk extends ServerMessage {
     final raw = (j['action'] as String?) ?? '';
     final parsed = ActionName.fromWire(raw);
     return ActionOk(
+      sessionId: _sessionIdFromJson(j),
       inReplyTo: j['in_reply_to'] as String,
       action: parsed ?? ActionName.sessionCompact,
       rawAction: raw,
@@ -1435,12 +1468,15 @@ class ActionOk extends ServerMessage {
   }
 }
 
-class ActionError extends ServerMessage {
+class ActionError extends ServerMessage with SessionScopedServerMessage {
+  @override
+  final String sessionId;
   final String inReplyTo;
   final ActionName action;
   final String rawAction;
   final String error;
   ActionError({
+    this.sessionId = '',
     required this.inReplyTo,
     required this.action,
     required this.rawAction,
@@ -1451,6 +1487,7 @@ class ActionError extends ServerMessage {
     final raw = (j['action'] as String?) ?? '';
     final parsed = ActionName.fromWire(raw);
     return ActionError(
+      sessionId: _sessionIdFromJson(j),
       inReplyTo: j['in_reply_to'] as String,
       action: parsed ?? ActionName.sessionCompact,
       rawAction: raw,
@@ -1459,7 +1496,9 @@ class ActionError extends ServerMessage {
   }
 }
 
-class ModelsList extends ServerMessage {
+class ModelsList extends ServerMessage with SessionScopedServerMessage {
+  @override
+  final String sessionId;
   final String inReplyTo;
   final List<WireModel> models;
 
@@ -1467,7 +1506,12 @@ class ModelsList extends ServerMessage {
   /// resolved). `null` is honest absence — the UI should fall back to
   /// the cached `model_select` event from the rooms layer.
   final WireModel? current;
-  ModelsList({required this.inReplyTo, required this.models, this.current});
+  ModelsList({
+    this.sessionId = '',
+    required this.inReplyTo,
+    required this.models,
+    this.current,
+  });
 
   factory ModelsList.fromJson(Map<String, dynamic> j) {
     final list = (j['models'] as List<dynamic>? ?? const <dynamic>[])
@@ -1475,6 +1519,7 @@ class ModelsList extends ServerMessage {
         .toList();
     final cur = j['current'];
     return ModelsList(
+      sessionId: _sessionIdFromJson(j),
       inReplyTo: j['in_reply_to'] as String,
       models: list,
       current: cur is Map<String, dynamic> ? WireModel.fromJson(cur) : null,

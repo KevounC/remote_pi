@@ -166,9 +166,9 @@ export type ServerMessage =
   // `models_list` is the response to a `list_models` request; the optional
   // `current` echoes the model the Pi is using right now so the app can
   // highlight the selected row without a second round-trip.
-  | { type: "action_ok"; in_reply_to: string; action: ActionName }
-  | { type: "action_error"; in_reply_to: string; action: ActionName; error: string }
-  | { type: "models_list"; in_reply_to: string; models: WireModel[]; current?: WireModel };
+  | { type: "action_ok"; session_id: RemoteSessionId; in_reply_to: string; action: ActionName }
+  | { type: "action_error"; session_id: RemoteSessionId; in_reply_to: string; action: ActionName; error: string }
+  | { type: "models_list"; session_id: RemoteSessionId; in_reply_to: string; models: WireModel[]; current?: WireModel };
 
 /**
  * Plan/28 — Stable names for the typed actions the app can request. Kept
