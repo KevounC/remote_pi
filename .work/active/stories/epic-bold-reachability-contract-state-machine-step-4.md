@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-state-machine-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-reachability-contract-state-machine
 depends_on: [epic-bold-reachability-contract-state-machine-step-3]
@@ -102,3 +102,11 @@ Low. This changes a named constant source for an existing 25s interval. Behavior
 ## Rollback
 
 Inline `Duration::from_secs(25)` in `handlers/peer.rs` again and delete `relay/src/reachability.rs` plus tests.
+
+## Implementation notes
+
+- Added `relay/src/reachability.rs` with the five-state enum, wire-name projection, shared backoff policy, heartbeat/liveness constants, and a clamped backoff helper.
+- Exported `pub mod reachability;` from `relay/src/lib.rs` and changed the peer WebSocket heartbeat to use `RELAY_WS_PING_INTERVAL`, preserving first tick after 25s and repeat interval of 25s.
+- Kept relay semantics narrow: the relay only consumes the WS ping constant; it does not infer app/Pi degraded state, session state, or offline queue semantics.
+- Tests compare the Rust projection against `protocol/schema/reachability.json` for states, backoff seconds, and heartbeat fields.
+- Verification run from `relay/`: `cargo fmt --check`, `cargo test reachability`, and `cargo clippy -- -D warnings` all passed.

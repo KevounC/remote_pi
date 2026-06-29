@@ -16,6 +16,7 @@ use crate::auth::challenge::{
     HELLO_TIMEOUT_MS, challenge_line, gen_nonce, parse_hello, verify_auth,
 };
 use crate::protocol::outer::{OuterEnvelope, parse_line};
+use crate::reachability::RELAY_WS_PING_INTERVAL;
 use crate::rooms::{RoomMeta, RoomMetaPatch};
 
 /// Maximum number of peer IDs accepted in one presence/rooms control frame.
@@ -238,8 +239,8 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
     // Send a WS Ping every 25 s so NAT/LB idle timers don't close the connection.
     // First tick fires after 25 s (not immediately).
     let mut heartbeat = time::interval_at(
-        time::Instant::now() + Duration::from_secs(25),
-        Duration::from_secs(25),
+        time::Instant::now() + RELAY_WS_PING_INTERVAL,
+        RELAY_WS_PING_INTERVAL,
     );
 
     'routing: loop {

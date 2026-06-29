@@ -5,6 +5,7 @@ pub mod metrics;
 pub mod peers;
 pub mod presence;
 pub mod protocol;
+pub mod reachability;
 pub mod rooms;
 
 use std::sync::Arc;
