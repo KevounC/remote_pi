@@ -69,6 +69,7 @@ import { registerAgentTools } from "./session/tools.js";
 import { formatPeerInventory } from "./session/peer_inventory.js";
 import { MeshNode } from "./session/mesh_node.js";
 import { RemoteSessionIssuer } from "./session/remote_session.js";
+import { validateClientSession } from "./session/session_gate.js";
 import {
   initialTurnSnapshot,
   projectTurn,
@@ -3421,6 +3422,18 @@ export function _routeClientMessageFrom(
   msg: ClientMessage,
   ctx: Pick<ExtensionContext, "abort">,
 ): void {
+  const sessionGate = validateClientSession(msg, _currentRemoteSessionId(_lastEventCtx ?? _lastCtx));
+  if (!sessionGate.ok) {
+    sender.send({
+      type: "error",
+      code: sessionGate.code,
+      in_reply_to: "id" in msg ? msg.id : undefined,
+      message: sessionGate.message,
+      session_id: sessionGate.currentSessionId,
+    });
+    return;
+  }
+
   // session_sync has its own internal guards — handle before the strict
   // pi-binding guard so a missing _pi doesn't drop the reply.
   if (msg.type === "session_sync") {

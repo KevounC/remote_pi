@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-identity-model-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-canonical-session-identity-model
 depends_on: [epic-bold-canonical-session-identity-model-step-2]
@@ -74,3 +74,10 @@ High. A wrong expected-session bootstrap could drop legitimate traffic and make 
 
 ## Rollback
 Disable the session gate behind one internal constant, then revert the validation module and tests. Roll back after Step 4/5 consumers to avoid leaving required fields unused.
+
+## Implementation notes
+- Files changed: `pi-extension/src/session/session_gate.ts`, `pi-extension/src/index.ts`.
+- Tests added: none in this slice; existing app-side `SessionGate` and SyncService gate were already present from earlier work.
+- Discrepancies from design: limited this delegated pi-extension stride to the extension fail-closed boundary; app fail-closed gating was already present in `app/lib/data/sync/session_gate.dart` and `sync_service.dart`.
+- Adjacent issues parked: none.
+- Verification: `corepack pnpm typecheck` passed from `pi-extension/`. An attempted `corepack pnpm test -- src/extension.test.ts --runInBand` was misparsed by Vitest and ran the broader suite; it timed out after 120s with pre-existing filesystem/UDS-heavy failures outside the touched session-gate path, so it is not claimed green.
