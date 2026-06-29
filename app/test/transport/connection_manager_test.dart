@@ -1127,6 +1127,12 @@ void _registerRoomsTests() {
 
         final snapshots = <Map<String, List<RoomInfo>>>[];
         final sub = cm.roomsStream.listen(snapshots.add);
+        // The emit is debounced through a real `Timer(_emitDebounce)`.
+        // Await the actual stream emission rather than a fixed sleep so
+        // the test is deterministic under load (a zero-delay timer can
+        // fire after a `Future.delayed(5ms)` when the host is busy).
+        Future<void> nextRoomsEmit() =>
+            cm.roomsStream.first.timeout(const Duration(seconds: 1));
 
         ch.pushControl(const RoomAnnounced(
           peer: 'epkA',
@@ -1135,7 +1141,7 @@ void _registerRoomsTests() {
           cwd: '/Users/x',
           startedAt: 1000,
         ));
-        await Future<void>.delayed(const Duration(milliseconds: 5));
+        await nextRoomsEmit();
 
         expect(cm.roomsFor('epkA'), hasLength(1));
         expect(cm.roomsFor('epkA').single.roomId, 'r1');
@@ -1146,7 +1152,7 @@ void _registerRoomsTests() {
           roomId: 'r1',
           sinceTs: 2000,
         ));
-        await Future<void>.delayed(const Duration(milliseconds: 5));
+        await nextRoomsEmit();
         // Plan-17 follow-up: RoomEnded keeps the room CACHED so the
         // tile stays in Home (marked offline) — only the live set
         // shrinks. isRoomLive now distinguishes the two.
@@ -1157,7 +1163,7 @@ void _registerRoomsTests() {
           RoomInfo(roomId: 'rA', startedAt: 3000, cwd: '/a'),
           RoomInfo(roomId: 'rB', startedAt: 4000, cwd: '/b'),
         ]));
-        await Future<void>.delayed(const Duration(milliseconds: 5));
+        await nextRoomsEmit();
         // Plan-17 follow-up: snapshots MERGE with cached rooms (so a
         // room going offline keeps its tile). r1 is still in cache
         // (offline), rA and rB are now live → total 3.
