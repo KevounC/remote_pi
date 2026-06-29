@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen-step-2
 kind: story
-stage: implementing
+stage: review
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: [epic-bold-generated-protocol-dart-codegen-step-1]
 tags: [refactor]
@@ -106,3 +106,10 @@ final class UserMessage extends ClientMessage {
 ## Rollback
 
 Remove the generated client output and tests. The handwritten protocol remains the runtime source.
+
+## Implementation notes
+- Files changed: `tools/protocol-codegen/bin/protocol-codegen.mjs`, `tools/protocol-codegen/fixtures/app_pi_client_dart_ir.json`, `app/lib/protocol/generated/protocol.g.dart`, `app/test/protocol_codegen/client_messages_codegen_test.dart`.
+- Tests added: generator determinism check for the app client IR, generated client registry coverage, generated-vs-handwritten `toJson()` parity for every current client variant, shared value-type wire/equality checks, and representative generated `fromJson()` round trips.
+- Discrepancies from design: generated client constructors include the now-current canonical `session_id` fields present in the hand mirror; no production import was switched.
+- Adjacent issues parked: none.
+- Verification: `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/protocol/generated/protocol.g.dart test/protocol_codegen/client_messages_codegen_test.dart` passed. Minimal codegen fixture regeneration still matches the checked-in compile fixture. `dart test test/protocol_codegen/client_messages_codegen_test.dart` could not run because pub network access failed with `403 Forbidden`; `flutter analyze` cannot start because `/opt/flutter/bin/cache` is read-only.

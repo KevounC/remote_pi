@@ -72,19 +72,54 @@ function jsonReadExpression(field) {
       return field.required
         ? `${access} as ${field.dartType}`
         : `${access} as ${field.dartType}?`;
+    case 'WireImage':
+      return `WireImage.fromJson((${access} as Map).cast<String, dynamic>())`;
+    case 'List<WireImage>':
+      return `(${access} as List?)?.map((item) => WireImage.fromJson((item as Map).cast<String, dynamic>())).toList()`;
+    case 'ApproveDecision':
+      return `ApproveDecision.values.byName(${access} as String)`;
+    case 'UserMessageStreamingBehavior':
+      return `UserMessageStreamingBehavior.fromWire(${access} as String?)`;
+    case 'ThinkingLevel':
+      return field.required
+        ? `ThinkingLevel.fromWire(${access} as String)!`
+        : `(${access} as String?) == null ? null : ThinkingLevel.fromWire(${access} as String)`;
     default:
       throw new Error(`Unsupported Dart field type ${JSON.stringify(field.dartType)} for ${field.name}`);
+  }
+}
+
+function dartJsonValueExpression(field, valueName = field.name) {
+  switch (field.dartType) {
+    case 'WireImage':
+      return `${valueName}.toJson()`;
+    case 'List<WireImage>':
+      return `${valueName}.map((image) => image.toJson()).toList()`;
+    case 'ApproveDecision':
+      return `${valueName}.name`;
+    case 'UserMessageStreamingBehavior':
+      return `${valueName}.wireValue`;
+    case 'ThinkingLevel':
+      return `${valueName}.wire`;
+    default:
+      return valueName;
   }
 }
 
 function toJsonEntry(field) {
   const key = dartLiteral(field.wireName);
   if (field.required) {
-    return `        ${key}: ${field.name},`;
+    return `        ${key}: ${dartJsonValueExpression(field)},`;
+  }
+  if (field.dartType === 'List<WireImage>') {
+    return [
+      `        if (${field.name} case final ${field.name}? when ${field.name}.isNotEmpty)`,
+      `          ${key}: ${dartJsonValueExpression(field)},`,
+    ].join('\n');
   }
   return [
     `        if (${field.name} case final ${field.name}?)`,
-    `          ${key}: ${field.name},`,
+    `          ${key}: ${dartJsonValueExpression(field)},`,
   ].join('\n');
 }
 
@@ -272,12 +307,142 @@ function emitUnion(union) {
   return lines.join('\n');
 }
 
+function emitDartSharedTypes() {
+  return String.raw`
+final class WireImage {
+  const WireImage({required this.data, required this.mime});
+
+  final String data;
+  final String mime;
+
+  factory WireImage.fromJson(Map<String, dynamic> json) => WireImage(
+        data: json['data'] as String,
+        mime: json['mime'] as String,
+      );
+
+  Map<String, dynamic> toJson() => {'data': data, 'mime': mime};
+
+  @override
+  bool operator ==(Object other) =>
+      other is WireImage && other.data == data && other.mime == mime;
+
+  @override
+  int get hashCode => Object.hash(data, mime);
+}
+
+enum UserMessageStreamingBehavior {
+  steer;
+
+  static UserMessageStreamingBehavior? fromWire(String? raw) => switch (raw) {
+        'steer' => UserMessageStreamingBehavior.steer,
+        _ => null,
+      };
+
+  String get wireValue => switch (this) {
+        UserMessageStreamingBehavior.steer => 'steer',
+      };
+}
+
+enum ApproveDecision { allow, deny }
+
+enum ActionName {
+  sessionNew('session_new'),
+  sessionCompact('session_compact'),
+  modelSet('model_set'),
+  thinkingSet('thinking_set');
+
+  const ActionName(this.wire);
+  final String wire;
+
+  static ActionName? fromWire(String raw) {
+    for (final action in values) {
+      if (action.wire == raw) return action;
+    }
+    return null;
+  }
+}
+
+enum ThinkingLevel {
+  off('off'),
+  minimal('minimal'),
+  low('low'),
+  medium('medium'),
+  high('high'),
+  xhigh('xhigh');
+
+  const ThinkingLevel(this.wire);
+  final String wire;
+
+  static ThinkingLevel? fromWire(String raw) {
+    for (final level in values) {
+      if (level.wire == raw) return level;
+    }
+    return null;
+  }
+}
+
+final class WireModel {
+  const WireModel({
+    required this.id,
+    required this.name,
+    required this.provider,
+    required this.reasoning,
+    required this.contextWindow,
+    this.vision = false,
+  });
+
+  final String id;
+  final String name;
+  final String provider;
+  final bool reasoning;
+  final int contextWindow;
+  final bool vision;
+
+  factory WireModel.fromJson(Map<String, dynamic> json) => WireModel(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        provider: json['provider'] as String,
+        reasoning: (json['reasoning'] as bool?) ?? false,
+        contextWindow: (json['context_window'] as num?)?.toInt() ?? 0,
+        vision: (json['vision'] as bool?) ?? false,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'provider': provider,
+        'reasoning': reasoning,
+        'context_window': contextWindow,
+        'vision': vision,
+      };
+
+  @override
+  bool operator ==(Object other) =>
+      other is WireModel &&
+      other.id == id &&
+      other.provider == provider &&
+      other.name == name &&
+      other.reasoning == reasoning &&
+      other.contextWindow == contextWindow &&
+      other.vision == vision;
+
+  @override
+  int get hashCode =>
+      Object.hash(id, provider, name, reasoning, contextWindow, vision);
+}
+`.trim();
+}
+
 function emitDart(schema) {
   const sections = [];
   sections.push('// GENERATED CODE - DO NOT MODIFY BY HAND.');
   sections.push('// Generated by tools/protocol-codegen/bin/protocol-codegen.mjs.');
   sections.push('// ignore_for_file: use_null_aware_elements');
   sections.push('');
+  if (schema.includeAppPiSharedTypes === true) {
+    sections.push(emitDartSharedTypes());
+    sections.push('');
+  }
   sections.push('class UnsupportedTypeException implements Exception {');
   sections.push('  const UnsupportedTypeException(this.type);');
   sections.push('');

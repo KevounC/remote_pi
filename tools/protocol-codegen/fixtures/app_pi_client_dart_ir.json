@@ -1,0 +1,125 @@
+{
+  "includeAppPiSharedTypes": true,
+  "unions": [
+    {
+      "name": "ClientMessage",
+      "variants": [
+        {
+          "type": "pair_request",
+          "className": "PairRequest",
+          "fields": [
+            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
+            { "name": "token", "wireName": "token", "dartType": "String", "required": true },
+            { "name": "deviceName", "wireName": "device_name", "dartType": "String", "required": true }
+          ]
+        },
+        {
+          "type": "user_message",
+          "className": "UserMessage",
+          "fields": [
+            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
+            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
+            { "name": "text", "wireName": "text", "dartType": "String", "required": true },
+            { "name": "streamingBehavior", "wireName": "streaming_behavior", "dartType": "UserMessageStreamingBehavior", "required": false },
+            { "name": "images", "wireName": "images", "dartType": "List<WireImage>", "required": false }
+          ]
+        },
+        {
+          "type": "queued_message_set",
+          "className": "QueuedMessageSet",
+          "fields": [
+            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
+            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
+            { "name": "text", "wireName": "text", "dartType": "String", "required": true }
+          ]
+        },
+        {
+          "type": "queued_message_clear",
+          "className": "QueuedMessageClear",
+          "fields": [
+            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
+            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true }
+          ]
+        },
+        {
+          "type": "approve_tool",
+          "className": "ApproveTool",
+          "fields": [
+            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
+            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
+            { "name": "toolCallId", "wireName": "tool_call_id", "dartType": "String", "required": true },
+            { "name": "decision", "wireName": "decision", "dartType": "ApproveDecision", "required": true }
+          ]
+        },
+        {
+          "type": "cancel",
+          "className": "Cancel",
+          "fields": [
+            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
+            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
+            { "name": "targetId", "wireName": "target_id", "dartType": "String", "required": true }
+          ]
+        },
+        {
+          "type": "ping",
+          "className": "Ping",
+          "fields": [
+            { "name": "id", "wireName": "id", "dartType": "String", "required": true }
+          ]
+        },
+        {
+          "type": "session_sync",
+          "className": "SessionSync",
+          "fields": [
+            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
+            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
+            { "name": "limit", "wireName": "limit", "dartType": "int", "required": false }
+          ]
+        },
+        {
+          "type": "session_new",
+          "className": "SessionNew",
+          "fields": [
+            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
+            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true }
+          ]
+        },
+        {
+          "type": "session_compact",
+          "className": "SessionCompact",
+          "fields": [
+            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
+            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true }
+          ]
+        },
+        {
+          "type": "model_set",
+          "className": "ModelSet",
+          "fields": [
+            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
+            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
+            { "name": "provider", "wireName": "provider", "dartType": "String", "required": true },
+            { "name": "modelId", "wireName": "model_id", "dartType": "String", "required": true }
+          ]
+        },
+        {
+          "type": "thinking_set",
+          "className": "ThinkingSet",
+          "fields": [
+            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
+            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
+            { "name": "level", "wireName": "level", "dartType": "ThinkingLevel", "required": true }
+          ]
+        },
+        {
+          "type": "list_models",
+          "className": "ListModels",
+          "fields": [
+            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
+            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true }
+          ]
+        }
+      ]
+    }
+  ]
+}
