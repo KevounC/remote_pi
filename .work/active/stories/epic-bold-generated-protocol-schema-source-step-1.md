@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-schema-source-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-generated-protocol-schema-source
 depends_on: []
@@ -99,11 +99,11 @@ Create a repo-root schema package whose source is standards-based JSON Schema 20
 
 ## Acceptance Criteria
 
-- [ ] `protocol/README.md` states that `protocol/schema/` is the canonical schema source for generated protocol work.
-- [ ] `protocol/schema/remote-pi.schema.json` and `protocol/schema/manifest.json` exist and enumerate all five message families.
-- [ ] The schema source uses JSON Schema 2020-12 and keeps generator-only facts under `x-remote-pi`.
-- [ ] No runtime app/extension/relay/cockpit consumer is switched in this step.
-- [ ] The implementation notes record the schema-language choice and rejected alternatives in the parent feature body.
+- [x] `protocol/README.md` states that `protocol/schema/` is the canonical schema source for generated protocol work.
+- [x] `protocol/schema/remote-pi.schema.json` and `protocol/schema/manifest.json` exist and enumerate all five message families.
+- [x] The schema source uses JSON Schema 2020-12 and keeps generator-only facts under `x-remote-pi`.
+- [x] No runtime app/extension/relay/cockpit consumer is switched in this step.
+- [x] The implementation notes record the schema-language choice and rejected alternatives in the parent feature body.
 
 ## Rollback
 
@@ -116,3 +116,13 @@ Implemented inline by the bold-refactor implement-orchestrator because no subage
 Rationale logged in `protocol/README.md`: JSON Schema matches the current JSONL wire and keeps the source language-neutral; Protobuf/Buf, TypeScript-native schemas, and custom IDL were rejected for the reasons recorded there. This keeps the short-term fork refactor compatible with a future patchbay migration.
 
 Verification: `python3 -m json.tool` passed for `protocol/package.json`, `protocol/schema/*.json`, and `protocol/schema/defs/*.json`. No app/extension/relay/cockpit runtime checks were run because this step is side-by-side schema metadata only.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Verified commit `6d90a31`, the changed schema/package files, parent feature design decisions, and JSON validity with `python3 -m json.tool` across `protocol/package.json`, `protocol/schema/*.json`, and `protocol/schema/defs/*.json`. Runtime consumers remain unchanged as designed.
