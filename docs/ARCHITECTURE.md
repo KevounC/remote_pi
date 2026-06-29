@@ -2,8 +2,7 @@
 
 How the system is organized: components, data flow, the wire protocol shape,
 the session/room model, and lifecycle. Current truth. For the security/trust
-detail see `PROTOCOL.md`; for locked decisions see `plan/00-decisions.md`
-(where it has drifted from code, this doc reflects the code).
+detail see `PROTOCOL.md`; for locked decisions see `docs/DECISIONS.md`.
 
 ## Components
 
@@ -187,10 +186,18 @@ no-room frames unconditionally. The app's `sync_service._applyHistory`
 REPLACES the active session's message box, so a foreign `session_history`
 overwrites the viewed session — the cross-session contamination class.
 
+This is a designed-then-dropped regression: the absorbed project's protocol
+spec *designed* `session_id` on every push message, but it was dropped during
+MVP scoping (`app/lib/protocol/protocol.dart:750` comments it: "1 pairing =
+1 session: no session_id on any message"). The 1:1 assumption broke down once
+multi-session/multi-peer arrived. See `docs/DECISIONS.md` → "Session and
+reachability model."
+
 **Locked direction (in-flight via `epic-bold-canonical-session`).** Canonical
 `session_id` carried on every chat-bearing message, required and fail-closed,
 opaque to the relay (the relay carries it, endpoints validate it). This
-absorbs the contamination bug and the cross-PC targeting concern.
+restores the designed-then-dropped discriminator and absorbs the
+contamination bug and the cross-PC targeting concern.
 
 ## Reachability
 

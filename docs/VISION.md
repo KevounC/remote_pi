@@ -63,13 +63,18 @@ A developer who runs Pi as their coding agent and wants to:
 This checkout (`KevounC/remote_pi`) is a **private fork** of
 `jacobaraujo7/remote_pi`. Upstream is read-only comparison/reference. Work
 here is private-carry hardening plus fork-owned reconception (the bold-refactor
-arc): well-isolated, easy to rebase, and not pushed upstream unless the
-operator explicitly asks.
+arc): well-isolated, easy to rebase, and not pushed upstream. The bold
+refactor is fork-local — no upstream-compatibility constraints apply.
 
 The bold refactor is a fork-owned reconception of the absorbed codebase. It
 is not a product divergence in scope — the product is still "mobile remote
 control + cross-PC agent mesh for Pi." It is a structural reconception that
 makes the absorbed codebase safe to bugfix against.
+
+**Patchbay is the long-term play.** The bold refactor hardens the fork's
+structure in the short term; patchbay is the intended successor direction
+beyond carrying this fork. Bold-refactor design avoids decisions that would
+block a future patchbay migration.
 
 ## Anti-vision (failure modes)
 
@@ -87,11 +92,9 @@ makes the absorbed codebase safe to bugfix against.
 ## Detailed references
 
 - `PROTOCOL.md` — the canonical wire and security contract (detailed).
-- `plan/00-decisions.md` — locked product/architecture decisions and their
-  rationale. Read before re-opening any decision.
-- `plan/` — 47 numbered architectural plans (historical design context;
-  some pre-date the fork and have drifted from current code — verify against
-  the codebase, do not treat as current truth on face value).
+- `docs/DECISIONS.md` — the rolling-foundation decisions registry (locked
+  product/architecture decisions). Read before re-opening any decision.
+- `PROTOCOL.md` — the canonical wire and security contract (detailed).
 - `docs/ARCHITECTURE.md`, `docs/SPEC.md` — companion foundation docs.
 
 ## Open questions

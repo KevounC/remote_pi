@@ -143,32 +143,36 @@ foundation stays clean rather than baking in a guess.
    this is the right framing for a rolling-foundation doc, or whether VISION
    should describe the target state instead.
 
-2. **Relay "stateless" framing has drifted.** `plan/00-decisions.md` records
-   "Relay stateless / Sem persistência." The relay now has a SQLite-backed
-   `MeshStore` (the signed `mesh_versions` cartulary) plus in-memory
-   `PeerRegistry`, `PresenceManager`, `RoomManager`, and `FirehoseMetrics`. The
-   accurate framing: the relay is **stateless for message routing** (no
-   per-session state, no offline queue) **with a narrow persistence layer for
-   mesh membership** and ephemeral presence/rooms. ARCHITECTURE reflects this.
-   Confirm, or state the intended end-state if routing should also gain
-   persistence.
+2. **Relay "stateless" framing has drifted.** The absorbed project's
+   `plan/00-decisions.md` recorded "Relay stateless / Sem persistência." The
+   relay now has a SQLite-backed `MeshStore` (the signed `mesh_versions`
+   cartulary) plus in-memory `PeerRegistry`, `PresenceManager`, `RoomManager`,
+   and `FirehoseMetrics`. Accurate framing: the relay is **stateless for
+   message routing** (no per-session state, no offline queue) **with a narrow
+   persistence layer for mesh membership** and ephemeral presence/rooms.
+   Resolved — `docs/DECISIONS.md` records the current truth; the MVP-era
+   "stateless" line is superseded.
 
-3. **Daemon as first-class component.** `plan/00-decisions.md` records "Sem
-   daemon no MVP." A substantial `pi-extension/src/daemon/` module has shipped
-   (supervisord, cron registry, RPC child, install, registry). ARCHITECTURE
-   treats the daemon as a first-class component. Confirm the daemon is GA and
-   not experimental, or note the intended boundary.
+3. **Daemon as first-class component.** The absorbed project's
+   `plan/00-decisions.md` recorded "Sem daemon no MVP." A substantial
+   `pi-extension/src/daemon/` module has shipped (supervisord, cron registry,
+   RPC child, install, registry). The daemon is GA, first-class — the
+   MVP-scoping decision was explicitly revisited and shipped. Resolved —
+   `docs/DECISIONS.md` records current truth.
 
-4. **Fork product direction.** The fork posture is carrier + hardening
-   (upstream read-only). The bold refactor is a fork-owned structural
-   reconception. Open: does the operator intend to propose any of the bold
-   refactor upstream, or keep it entirely private-carry? This affects whether
-   ARCHITECTURE should call out upstream-compat constraints on the refactor.
+4. **Fork product direction.** Resolved — fully private-carry; no upstream
+   PRs. The bold refactor is fork-local with no upstream-compat constraints.
+   Patchbay is the long-term successor direction. `docs/DECISIONS.md` →
+   "Fork posture" records this.
 
-5. **Multi-session vs. 1:1 pairing.** `plan/00-decisions.md` has a complex
-   reverted-and-re-added history around "1 pairing = 1 session" vs. N
-   sessions per pairing. Current code: the app home page lists multiple
-   peers/sessions; `_peerChannel` is a singleton in the extension; broadcast
-   happens at the relay. ARCHITECTURE states this as current truth. Confirm
-   the runtime invariant is "1 active connection per `(peer, room)` at the
-   extension, broadcast-fanout at the relay," or clarify.
+5. **Multi-session vs. 1:1 pairing.** The absorbed project's
+   `plan/00-decisions.md` had a complex reverted-and-re-added history around
+   "1 pairing = 1 session" vs. N sessions per pairing. Current code: the app
+   home page lists multiple peers/sessions; `_peerChannel` is a singleton in
+   the extension; broadcast happens at the relay. Resolved — the runtime
+   invariant is "1 active connection per `(peer, room)` at the extension,
+   broadcast-fanout at the relay." `docs/DECISIONS.md` records this.
+
+All five resolved ambiguities are locked in `docs/DECISIONS.md`. The open
+questions section above is retained for future ambiguities surfaced during
+the bold refactor.

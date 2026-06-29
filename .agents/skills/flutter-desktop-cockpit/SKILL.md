@@ -9,7 +9,7 @@ provenance: skill-reference
 
 > Local scope: `cockpit/`
 > Versions/context: Dart SDK `^3.11.5`; `shadcn_flutter 0.0.52`; `flutter_modular 7.1.0`; Hive 2.2.x; `xterm` 4.0.0 git override; `kyroon_pty` git override ref `v1.0.5`; native desktop packages include `file_picker`, `window_manager`, `pasteboard`, `desktop_drop`, `flutter_local_notifications`, `media_kit`, `auto_updater`, `ffi`, and `win32`. [remote-pi-cockpit-pubspec]{1}
-> Canonical local docs: `cockpit/CLAUDE.md`, `cockpit/lib/app/CLAUDE.md`, `cockpit/lib/app/core/CLAUDE.md`, `plan/37-desktop-cockpit.md`.
+> Canonical local docs: `cockpit/CLAUDE.md`, `cockpit/lib/app/CLAUDE.md`, `cockpit/lib/app/core/CLAUDE.md`.
 
 ## When to load
 
