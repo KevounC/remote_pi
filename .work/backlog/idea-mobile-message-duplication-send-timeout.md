@@ -32,7 +32,30 @@ wrong. Worth investigating:
   the message into the transcript rather than just marking the existing bubble as
   failed.
 
-Likely touches both `app/` (optimistic insert / echo dedupe / failure rendering)
-and `pi-extension/` (send confirmation / ack semantics). Needs reproduction and a
-look at the message-id and ack flow before deciding the fix lives on one side or
-both.
+## Reproduction (operator-confirmed)
+
+The duplicate appears when sending and then leaving the chat screen mid-send:
+
+1. Send a message from a session's chat screen.
+2. While it is still sending, press **back** to return to the session list.
+3. Re-enter the **same** session.
+4. The sent message now appears **duplicated** in the chat.
+5. Press **back** again and re-enter the session again — the duplicate clears.
+
+So the duplication is tied to **navigating away from the chat screen and back
+while a send is in flight**. The likely cause is that re-entering the session
+re-runs the optimistic insert / transcript hydration and re-adds the in-flight
+message that was already optimistically inserted before navigation, producing
+two copies of the same outgoing bubble. A second back→re-enter cycle then
+re-hydrates from a consistent source and the duplicate collapses.
+
+The `send_timeout` earlier may be a related but separate in-flight-send state
+that gets orphaned by the back-navigation (the send confirmation never resolves
+because the screen/listener that owns the in-flight request was torn down).
+
+## Likely fix surface
+
+Likely touches both `app/` (optimistic insert / echo dedupe / failure rendering
+/ in-flight send lifecycle tied to screen navigation) and `pi-extension/`
+(send confirmation / ack semantics). Needs reproduction and a look at the
+message-id and ack flow before deciding the fix lives on one side or both.
