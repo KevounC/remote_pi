@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-late-attach-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-turn-state-machine-late-attach
 depends_on: [epic-bold-turn-state-machine-late-attach-step-1]
@@ -120,3 +120,13 @@ Revert `index.ts` and extension tests to the algebraic-state baseline. Step 1 ca
 - Discrepancies from design: owner attach and late-sync routing were already represented through `_applyTurnAndPublish({ type: "peer_attached" ... })`, `_turnProjection().canFlushLateAttachSync`, and `lateAttachSyncTargets`; this pass removed the remaining duplicate queued-message latch so queued drain is fully projection-driven.
 - Adjacent issues parked: none.
 - Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/session/turn_state.test.ts src/session/session_gate.test.ts` passed.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. The story's own implementation commit `208238f6a6fbf37c798dd8a6e458a17eeb9151ec` only advanced the item body; the code path had already landed in the current `pi-extension/src/index.ts`/`turn_state.ts` integration. Verified owner attach routes through `_applyTurnAndPublish({ type: "peer_attached", target: { kind: "owner", id } })`, late sync reads `projectTurn(_turn)` selectors (`canFlushLateAttachSync`, `awaitingSyncTurnId`, `lateAttachSyncTargets`), and queued drain reads `canDrainQueuedMessage`. Verification run: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/session/turn_state.test.ts src/session/session_gate.test.ts` passed. Full `corepack pnpm test` was attempted and failed in unrelated environment-sensitive UDS/cwd-lock suites (`listen EPERM` under `/tmp/.../*.sock` plus lock acquisition failures), while the targeted reducer/session-gate checks passed.
