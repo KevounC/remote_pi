@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-sdk-session-projection-module-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-sdk-session-projection-module
 depends_on: [epic-bold-split-pi-extension-index-composition-root]
@@ -67,3 +67,10 @@ Medium. This adds a new seam around high-risk SDK contexts, but the first step i
 
 ## Rollback
 Delete `sdk_session_projection.ts` and restore the context/API binding globals and helper functions in `index.ts`.
+
+## Implementation notes
+- Files changed: `pi-extension/src/session/sdk_session_projection.ts`, `pi-extension/src/index.ts`.
+- Tests added: none (capability-binding shell; existing stale-context tests remain the behavior guard).
+- Verification: `corepack pnpm typecheck` passed from `pi-extension/`; `corepack pnpm test` was run and failed on pre-existing/environment UDS lock/listen failures (`EPERM` under `/tmp/claude/...`, cwd lock/leader-election suites). Targeted extension run reached extension tests without new stale-context unhandled errors before the same UDS-gated suites timed out.
+- Discrepancies from design: the landed composition-root port is narrower than the drafted shell, so this step binds capabilities through `SdkSessionProjection` while legacy routing remains in `index.ts` until later steps.
+- Adjacent issues parked: none.
