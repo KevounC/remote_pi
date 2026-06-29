@@ -1,7 +1,7 @@
 ---
 id: story-fix-mobile-message-send-failures-visible
 kind: story
-stage: review
+stage: done
 tags: [bug, app]
 parent: null
 depends_on: []
@@ -50,3 +50,13 @@ Update `app/test/data/sync/sync_service_test.dart` so no-echo timeout, offline h
 - [x] Immediate channel send failures produce a visible failure row and clear local working/streaming state.
 - [x] Offline/reloaded pending rows time out into visible failures instead of disappearing.
 - [x] Targeted Flutter regression test passes in an environment with Flutter installed.
+
+## Review (2026-06-28)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Implementation record includes green targeted regression and analyze-with-SDK-skew verification; no blockers or important findings.
