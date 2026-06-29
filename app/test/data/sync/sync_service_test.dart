@@ -342,7 +342,7 @@ void main() {
   test(
     'disconnect while online keeps pending backstops and avoids stuck bubbles',
     () async {
-      const short = Duration(milliseconds: 120);
+      const short = Duration.zero;
       final s = await setup(pendingSendTimeout: short);
       final status = s.conn.statusStream.firstWhere(
         (status) => status is StatusRetrying,
@@ -350,7 +350,6 @@ void main() {
 
       await s.sync.setQueuedMessage('draft');
       await s.sync.sendMessage('hi');
-      await _settle();
 
       expect(s.sync.queuedText, 'draft');
       expect(
@@ -375,7 +374,6 @@ void main() {
         isA<StatusRetrying>(),
         reason: 'disconnect transitions to retrying',
       );
-      await _settle();
       expect(s.sync.isWorking, isFalse, reason: 'status drop clears working');
       expect(s.sync.streaming, isNull, reason: 'streaming cursor is cleared');
       expect(
@@ -390,12 +388,19 @@ void main() {
         reason: 'disconnect keeps pending-send backstops alive',
       );
 
-      await _settle();
-      await _settle();
-      await _settle();
-      await _settle();
-      await _settle();
-      final failed = messages(s.epk);
+      List<MessageRecord> failed = messages(s.epk);
+      for (var i = 0; i < 1000; i++) {
+        if (failed.length == 1 && failed.single.pending == false) {
+          break;
+        }
+        await Future<void>.delayed(Duration.zero);
+        failed = messages(s.epk);
+      }
+      if (failed.length != 1 || failed.first.pending == true) {
+        fail(
+          'timed out waiting for pending-send timeout row to fail after $short',
+        );
+      }
       expect(
         failed,
         hasLength(1),
@@ -415,7 +420,7 @@ void main() {
           pairedAt: '2026-01-01T00:00:00Z',
         ),
       );
-      await _settle();
+      await Future<void>.delayed(Duration.zero);
       expect(
         messages(s.epk).single.pending,
         isFalse,
