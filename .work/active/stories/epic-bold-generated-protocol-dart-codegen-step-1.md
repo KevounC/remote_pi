@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen-step-1
 kind: story
-stage: review
+stage: done
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: []
 tags: [refactor]
@@ -142,3 +142,13 @@ Delete `tools/protocol-codegen/` and the spike tests. No app runtime code should
 - Tests added: none; added a normalization adapter from the schema-source `list-types` handoff catalog to the existing Dart generator IR.
 - Discrepancies from design: the catalog adapter emits variant shells from the handoff catalog for this spike rather than fully resolving every JSON Schema field. This directly fixes the bounced handoff-path proof while leaving full field generation to later Dart-codegen steps.
 - Adjacent issues parked: none.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane re-review after prior bounce. Inspected implementation commit `76ff5ff`; the Dart target now normalizes the schema-source `list-types` catalog (not only `minimal_dart_ir.json`) into generator unions. Verified `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store list-types` emitted the 58-entry catalog, `node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema /tmp/remote_pi_protocol_catalog.json --out /tmp/remote_pi_from_catalog.g.dart` succeeded, and `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze /tmp/remote_pi_from_catalog.g.dart` passed. Targeted `HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter test test/protocol_codegen/dart_codegen_test.dart` passed. Full `flutter analyze` is still red on the pre-existing `axisAlignment` deprecation info in `lib/ui/chat/widgets/input_bar.dart:802`; full `flutter test` is still red on unrelated action/sync/chat session-identity failures, matching the implementation notes.
