@@ -59,3 +59,39 @@ Likely touches both `app/` (optimistic insert / echo dedupe / failure rendering
 / in-flight send lifecycle tied to screen navigation) and `pi-extension/`
 (send confirmation / ack semantics). Needs reproduction and a look at the
 message-id and ack flow before deciding the fix lives on one side or both.
+
+## Additional symptom: sending state not converging + false send_timeout + stale latest message
+
+Observed again during the duplicate-investigation conversation itself:
+
+1. Sent a message; the outgoing bubble kept showing the **sending spinner** even
+   after the message was actually delivered and the agent had applied/responded.
+2. The spinner eventually stopped and surfaced a **false `send_timeout: Message
+   was not confirmed by the Pi. It may not have been delivered.`** — even though
+   the message *was* delivered (the agent received and acted on it).
+3. The chat then showed a **prior operator turn as the most recent message**
+   ("Ah, the duplicate seems to appear...") instead of the latest exchange,
+   i.e. the transcript's notion of "latest" was stale.
+
+So three things are not converging correctly:
+
+- The **sending → sent/confirmed state** of an outgoing message: the spinner
+  never resolves to "sent" even when delivery succeeded. The in-flight send
+  state is not being cleared by the real ack/delivery signal.
+- The **send_timeout** is a false negative: it fires even when the message was
+  delivered. The confirmation/ack path is not matching the ack back to the
+  in-flight send request (possibly the request's owning listener/screen was torn
+  down, or the ack is keyed by an id the client no longer has).
+- The **"latest message" / transcript tail** is stale: after the false timeout,
+  the chat shows an older operator turn as the newest message rather than the
+  real latest. Transcript ordering / tail state is not being refreshed after the
+  send lifecycle resolves.
+
+This is a working-state convergence bug per the lifecycle-ownership rule: the
+outgoing message's `sending`/`sent`/`failed` state must converge to a terminal
+value after delivery success, ack failure, abort, navigation-away, or
+re-enter-session. Right now `sending` can stick and then fall back to a false
+`send_timeout` + stale tail. Likely the in-flight send request is owned by the
+chat screen/listener and dies when navigated away from, so its confirmation
+never resolves; re-entering the session rehydrates from a source that doesn't
+reflect the real delivered state.
