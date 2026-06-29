@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app, cockpit]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: []
@@ -87,3 +87,15 @@ Medium. Drift between per-language event mirrors would recreate the current prot
 ## Rollback
 
 Delete the new event/projection contract files. No existing runtime should depend on them until later steps.
+
+## Implementation Notes
+
+Implemented inline by the bold-refactor implement-orchestrator because no subagent dispatcher is exposed in this delegated harness. Added side-by-side transcript event algebra files for the app, Pi extension, and Cockpit using aligned kind/field names and required opaque `sessionId`/`sessionId` fields. Added the app projection seam (`deriveTranscriptProjection`) returning `messages`, `streaming`, and `TranscriptTurnView`; it is intentionally a minimal pure side-by-side reducer so later steps can pin the full optimistic/authoritative reconcile semantics without changing current runtime adapters in this story.
+
+Runtime behavior is unchanged: no SyncService, Pi-extension history, or Cockpit session code imports these contracts yet.
+
+Verification:
+- `cd pi-extension && corepack pnpm typecheck` passed.
+- `cd app && HOME=/tmp/remote-pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/domain/transcript/transcript_event.dart lib/domain/transcript/transcript_projection.dart` passed.
+- `cd cockpit && HOME=/tmp/remote-pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/app/cockpit/domain/entities/transcript_event.dart` passed.
+- Full `flutter analyze` was skipped because `/opt/flutter/bin/cache` is read-only in this environment; direct Dart analyzer with a writable HOME was the nearest meaningful check.
