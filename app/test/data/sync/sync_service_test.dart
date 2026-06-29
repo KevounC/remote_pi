@@ -717,72 +717,92 @@ void main() {
     s.sync.dispose();
   });
 
+  test('clearActiveSession with no-index session accepts replay after replacement and '
+      'maintains reconnect semantics when current boundary arrives', () async {
+    final s = await setup();
+    expect(messages(s.epk), isEmpty);
+    expect(index(s.epk), isNull);
+
+    await s.sync.clearActiveSession();
+    await _settle();
+    expect(messages(s.epk), isEmpty);
+    expect(index(s.epk), isNull);
+
+    // (a) older replay from the pre-clear channel is expected to settle on the
+    // new replacement token before final history establishes the boundary.
+    final staleStartedAt = DateTime.now().millisecondsSinceEpoch - 120_000;
+    s.ch.push(
+      SessionHistory(
+        inReplyTo: 'sync-stale-empty',
+        sessionStartedAt: staleStartedAt,
+        events: const [
+          UserInputEvt(ts: 1, id: 'stale', text: 'from old session'),
+        ],
+        eos: true,
+      ),
+    );
+    await s.sync.clearActiveSession();
+    await _settle();
+
+    // (b) fresh current replay below the phone's wall clock should be accepted.
+    final currentSessionStartedAt =
+        DateTime.now().millisecondsSinceEpoch - 90_000;
+    s.ch.push(
+      SessionHistory(
+        inReplyTo: 'sync-current',
+        sessionStartedAt: currentSessionStartedAt,
+        events: const [
+          UserInputEvt(ts: 2, id: 'fresh', text: 'from active session'),
+        ],
+        eos: true,
+      ),
+    );
+    await _settle();
+    expect(messages(s.epk).map((r) => r.id), ['fresh']);
+    expect(
+      index(s.epk)?.sessionStartedAt,
+      DateTime.fromMillisecondsSinceEpoch(currentSessionStartedAt),
+    );
+
+    // (c) older than the accepted current session is dropped.
+    s.ch.push(
+      SessionHistory(
+        inReplyTo: 'sync-older',
+        sessionStartedAt: currentSessionStartedAt - 10,
+        events: const [
+          UserInputEvt(
+            ts: 3,
+            id: 'older-after-current',
+            text: 'older than current',
+          ),
+        ],
+        eos: true,
+      ),
+    );
+    await _settle();
+    expect(messages(s.epk).map((r) => r.id), ['fresh']);
+
+    // (d) same boundary replay is accepted to keep reconnect replay semantics.
+    s.ch.push(
+      SessionHistory(
+        inReplyTo: 'sync-current-equal',
+        sessionStartedAt: currentSessionStartedAt,
+        events: const [
+          UserInputEvt(ts: 4, id: 'equal', text: 'reconnect same boundary'),
+        ],
+        eos: true,
+      ),
+    );
+    await _settle();
+    expect(messages(s.epk).map((r) => r.id), ['equal']);
+
+    s.conn.dispose();
+    s.sync.dispose();
+  });
+
   test(
-    'clearActiveSession establishes a history boundary even when session_started_at '
-    'is not yet known',
-    () async {
-      final s = await setup();
-      expect(messages(s.epk), isEmpty);
-      expect(index(s.epk), isNull);
-
-      await s.sync.clearActiveSession();
-      await _settle();
-      expect(messages(s.epk), isEmpty);
-      expect(index(s.epk), isNull);
-
-      final boundary = DateTime.now().millisecondsSinceEpoch;
-      final currentSessionStartedAt = boundary + 10000;
-      s.ch.push(
-        SessionHistory(
-          inReplyTo: 'sync-stale-empty',
-          sessionStartedAt: boundary - 10000,
-          events: const [
-            UserInputEvt(ts: 1, id: 'stale', text: 'from old session'),
-          ],
-          eos: true,
-        ),
-      );
-      await _settle();
-      expect(messages(s.epk), isEmpty);
-
-      s.ch.push(
-        SessionHistory(
-          inReplyTo: 'sync-current',
-          sessionStartedAt: currentSessionStartedAt,
-          events: const [
-            UserInputEvt(ts: 2, id: 'fresh', text: 'from active session'),
-          ],
-          eos: true,
-        ),
-      );
-      await _settle();
-      expect(messages(s.epk).map((r) => r.id), ['fresh']);
-      expect(
-        index(s.epk)?.sessionStartedAt,
-        DateTime.fromMillisecondsSinceEpoch(currentSessionStartedAt),
-      );
-
-      s.ch.push(
-        SessionHistory(
-          inReplyTo: 'sync-current-equal',
-          sessionStartedAt: currentSessionStartedAt,
-          events: const [
-            UserInputEvt(ts: 3, id: 'equal', text: 'reconnect same boundary'),
-          ],
-          eos: true,
-        ),
-      );
-      await _settle();
-      expect(messages(s.epk).map((r) => r.id), ['equal']);
-
-      s.conn.dispose();
-      s.sync.dispose();
-    },
-  );
-
-  test(
-    'clearActiveSession sets a new history boundary; stale SessionHistory is '
-    'dropped and a newer session history repopulates the box',
+    'clearActiveSession sets a new history boundary; older replay is superseded by '
+    'newer replay after replace',
     () async {
       final s = await setup();
 
@@ -813,7 +833,6 @@ void main() {
         ),
       );
       await _settle();
-      expect(messages(s.epk), isEmpty);
 
       s.ch.push(
         SessionHistory(
