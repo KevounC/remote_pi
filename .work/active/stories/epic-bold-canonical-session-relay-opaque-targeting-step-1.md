@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-relay-opaque-targeting-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-canonical-session-relay-opaque-targeting
 depends_on: [epic-bold-canonical-session-identity-model]
@@ -72,3 +72,13 @@ Revert the `to_room` extraction and tests; this restores the legacy `to_pc`-only
 - Discrepancies from design: none; this step parses and validates `to_room` but intentionally leaves the legacy `forward_to_peer` delivery path for the later room-targeted forwarding story.
 - Adjacent issues parked: none.
 - Verification: `cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed from `relay/`.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane substrate review. Implementation commit `76a6e53` was inspected. `handle_pi_envelope` now requires non-empty `to_pc` and `to_room` plus object `envelope`; missing/empty `to_room` returns `bad_envelope`; valid `to_pc`/`to_room` proceeds to mesh authorization while leaving `envelope.body.session_id` opaque and unparsed. This story intentionally only parses `to_room`; room-targeted forwarding remains a later step. Verification run during review: `cd relay && cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed. Item advanced to `stage: done`.
