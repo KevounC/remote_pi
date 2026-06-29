@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-rust-codegen-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-generated-protocol-rust-codegen
 depends_on: [epic-bold-generated-protocol-rust-codegen-step-1, epic-bold-generated-protocol-schema-source-step-3]
@@ -82,3 +82,10 @@ Medium. Changing no-`room` defaults or `ct` size behavior would be observable to
 ## Rollback
 
 Revert the generated `OuterEnvelope` consumption and restore the handwritten struct in `relay/src/protocol/outer.rs`. Parser constants/tests can remain if unchanged.
+
+## Implementation notes
+- Files changed: `relay/src/protocol/outer.rs`.
+- Tests added/updated: updated the outer-envelope parser test to assert missing `room` defaults to `main` through the generated struct; existing opaque-`ct`, limit, invalid JSON, and explicit-room tests remain.
+- Discrepancies from design: none; the handwritten module now re-exports the generated `OuterEnvelope` and owns only parser limits/errors/tests.
+- Adjacent issues parked: none.
+- Verification: from `relay/`, `cargo fmt --check`, `cargo test protocol::outer`, `cargo clippy -- -D warnings`, and full `cargo test` all passed.

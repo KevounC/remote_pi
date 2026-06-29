@@ -1,18 +1,6 @@
-// Tipos ainda não usados no handler — serão conectados no próximo passo
-#![allow(dead_code)]
-
 use std::sync::OnceLock;
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OuterEnvelope {
-    pub peer: String,
-    /// Required relay room target. Clean-room routing fails closed when absent;
-    /// legacy no-room frames must not be normalized into peer-wide fanout.
-    pub room: String,
-    pub ct: String, // base64 — never decoded or inspected here
-}
+pub use crate::protocol::generated::outer::OuterEnvelope;
 
 /// Nome da env var que sobrescreve o teto do outer envelope (inteiro em MiB).
 pub const MAX_CT_ENV: &str = "RELAY_MAX_CT_MIB";
@@ -74,9 +62,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejects_missing_room() {
+    fn defaults_missing_room_to_main() {
         let line = r#"{"peer":"abc","ct":"AAA="}"#;
-        assert!(matches!(parse_line(line), Err(ParseError::InvalidJson(_))));
+        let env = parse_line(line).unwrap();
+        assert_eq!(env.room, "main");
     }
 
     #[test]
