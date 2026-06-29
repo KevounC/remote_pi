@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-owner-multiplexer-module-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-owner-multiplexer-module
 depends_on: [epic-bold-split-pi-extension-index-composition-root]
@@ -83,3 +83,13 @@ Delete `owner_multiplexer.ts` and remove any type-only imports or legacy adapter
 - Verification: `corepack pnpm typecheck` passed from `pi-extension/`; `corepack pnpm test` was run and failed on pre-existing/environment UDS lock/listen failures (`EPERM` under `/tmp/claude/...`, cwd lock/leader-election suites), not on owner-multiplexer shell typing.
 - Discrepancies from design: composition-root `OwnerMultiplexerPort` currently exposes only `activeCount/attach/detach/broadcast/routeFrom/lateAttachTargets`, so the step-1 shell implements that landed shape and keeps richer pairing/storage dependencies out until later owner ingress steps.
 - Adjacent issues parked: none.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Implementation commit `f593682` inspected. `owner_multiplexer.ts` compiles as a NodeNext ESM module and implements the landed composition-root `OwnerMultiplexerPort` shape (`activeCount`, `attach`, `detach`, `broadcast`, `routeFrom`, `lateAttachTargets`). This is a shell-only step and is not wired into `index.ts` yet, but the adapter is more than a stub for channel ownership: attach replaces stale channels, creates a typed channel via dependency injection, detach tears down and refreshes footer, and broadcast fans out best-effort. `routeFrom` remains a no-op because legacy per-channel routing is still supplied through `AttachOwnerInput.onMessage` until later steps move routing into the module. Verification: `corepack pnpm typecheck` passed. `corepack pnpm test` was attempted and failed in unrelated environment-sensitive UDS suites (`listen EPERM` / cwd-lock / leader-election under `/tmp/claude/...`).
