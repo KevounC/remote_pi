@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-identity-model-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-canonical-session-identity-model
 depends_on: [epic-bold-canonical-session-identity-model-step-1]
@@ -84,3 +84,13 @@ Medium. This is a clean-room fork-private breaking wire change. Existing legacy 
 
 ## Rollback
 Revert the registry and field additions before reverting validation steps. Because this story only centralizes field semantics, rollback returns the wire mirrors to the current no-`session_id` shape.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: stale inline comment in `app/lib/protocol/protocol.dart` still says "MVP: 1 pairing = 1 Pi session" above the new session-scoped registries; non-blocking, but should be cleaned when the app-side validation gate lands.
+
+**Notes**: Fast-lane story review with direct commit/file verification. Reviewed commit `7493f79`; `pi-extension/src/protocol/session_scope.ts` centralizes the TS session-scoped client/server type sets, `pi-extension/src/session/remote_session.ts` resolves the issuer from `ctx.sessionManager.getSessionId()` with a UUIDv7 fallback only for legacy/test seams, and TS/Dart wire mirrors now carry opaque `session_id` fields on the intended session-scoped messages plus `pair_ok`. Targeted verification passed: `cd pi-extension && corepack pnpm typecheck`; `cd pi-extension && corepack pnpm vitest run src/protocol/codec.test.ts src/protocol/session_scope.test.ts src/session/remote_session.test.ts src/reachability/contract.test.ts` (50 tests). Full `corepack pnpm test` was run and remains blocked by this sandbox's UDS/lock environment failures (`listen EPERM`, leader-election/cwd-lock failures), not by this story's protocol tests. App verification from the implementation remains environment-limited; no code was weakened.
