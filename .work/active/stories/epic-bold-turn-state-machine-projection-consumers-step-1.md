@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-projection-consumers-step-1
 kind: story
-stage: review
+stage: implementing
 tags: [refactor]
 parent: epic-bold-turn-state-machine-projection-consumers
 depends_on: [epic-bold-turn-state-machine-algebraic-state]
@@ -119,3 +119,18 @@ Revert `index.ts` and tests to the algebraic-state integration baseline. Because
 - Discrepancies from design: The delegated prompt listed app/cockpit UI files for this story id, but the story body and parent feature step 1 are explicitly the pi-extension broadcast/room-meta projection. Implemented the item body as the load-bearing spec and left app/cockpit consumer rewrites to their designed downstream steps. Also preserved the existing empty `queued_message_state` runtime shape for compatibility with current extension tests, even though the newer TS union requires `session_id`.
 - Adjacent issues parked: none.
 - Verification: `corepack pnpm typecheck` passed. `corepack pnpm exec vitest run src/session/turn_state.test.ts` passed. Targeted `src/extension.test.ts` filters for queued drain, steering failure, compaction, late owner attach, and turn-end working false passed. A full `src/extension.test.ts` run before the focused fixes exposed unrelated/environment-sensitive mesh/lock failures in later tests; the touched-path filters are green.
+
+## Review bounce (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blockers**:
+- Implementation commit `c40b4ed` is not self-contained and has an undocumented app change. `git show c40b4ed --name-only` includes `app/lib/data/sync/sync_service.dart`, but the implementation notes say app/cockpit consumer rewrites were left to downstream steps and list only pi-extension/turn-state files. The commit adds an import/field for `SessionGate` without adding `app/lib/data/sync/session_gate.dart`; the current dirty working tree supplies that file, so the commit only builds when combined with uncommitted work from another story.
+- Required review target is masked by dirty app changes. `app/lib/data/sync/sync_service.dart`, `app/lib/protocol/protocol.dart`, `app/test/data/sync/sync_service_test.dart`, and new session-gate files are currently modified/untracked, so app verification for this story cannot be attributed honestly to `c40b4ed`.
+
+**Important**:
+- Story notes should accurately list all touched files and either remove the accidental app dependency from this pi-extension projection story or explicitly split/commit it under the app attribution story.
+
+**Nits**: none
+
+**Notes**: Pi-extension projection behavior itself looks close: targeted review checks passed (`corepack pnpm typecheck`, `src/session/turn_state.test.ts`, and filtered `src/extension.test.ts` cases for queued drain, steering failure, compaction, late owner attach, and working false). However, the cross-story app contamination and misleading implementation record are blocking. Return to `stage: review` after making the implementation commit self-contained and rerunning the appropriate pi-extension/app checks.
