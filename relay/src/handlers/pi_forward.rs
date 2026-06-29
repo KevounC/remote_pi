@@ -21,10 +21,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::ws::Message;
-use rand::{Rng, thread_rng};
+use rand::{RngCore, thread_rng};
 use tracing::warn;
 
 use crate::mesh::MeshStore;
@@ -181,7 +181,7 @@ fn make_transport_error(envelope: Option<&serde_json::Value>, reason: &str) -> M
         None => (None, "_unknown".to_string()),
     };
 
-    let new_id = format!("{:032x}", thread_rng().r#gen::<u128>());
+    let new_id = make_relay_envelope_id();
 
     let err_envelope = serde_json::json!({
         "from": "_relay",
@@ -197,6 +197,44 @@ fn make_transport_error(envelope: Option<&serde_json::Value>, reason: &str) -> M
         "envelope": err_envelope,
     });
     Message::Text(frame.to_string())
+}
+
+fn make_relay_envelope_id() -> String {
+    let ts_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let mut bytes = [0u8; 16];
+    thread_rng().fill_bytes(&mut bytes);
+
+    bytes[0] = (ts_ms >> 40) as u8;
+    bytes[1] = (ts_ms >> 32) as u8;
+    bytes[2] = (ts_ms >> 24) as u8;
+    bytes[3] = (ts_ms >> 16) as u8;
+    bytes[4] = (ts_ms >> 8) as u8;
+    bytes[5] = ts_ms as u8;
+    bytes[6] = (bytes[6] & 0x0f) | 0x70;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15]
+    )
 }
 
 #[cfg(test)]

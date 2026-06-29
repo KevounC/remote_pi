@@ -22,6 +22,32 @@ describe("uuidv7", () => {
 });
 
 describe("serialize/parse roundtrip", () => {
+  test("relay transport_error envelopes parse with UUID-shaped ids", () => {
+    const originalId = "018f3333-3333-7333-8333-333333333333";
+    for (const reason of ["offline", "not_authorized"] as const) {
+      const parsed = parse(JSON.stringify({
+        from: "_relay",
+        to: "casa:sess-3",
+        id: uuidv7(),
+        re: originalId,
+        body: { type: "transport_error", reason },
+      }));
+      expect(parsed.from).toBe("_relay");
+      expect(parsed.re).toBe(originalId);
+      expect(parsed.body).toEqual({ type: "transport_error", reason });
+    }
+
+    const badEnvelope = parse(JSON.stringify({
+      from: "_relay",
+      to: "_unknown",
+      id: uuidv7(),
+      re: null,
+      body: { type: "transport_error", reason: "bad_envelope" },
+    }));
+    expect(badEnvelope.re).toBeNull();
+    expect(badEnvelope.body).toEqual({ type: "transport_error", reason: "bad_envelope" });
+  });
+
   test("task message (body object)", () => {
     const env = envelope("orq", "backend", { task: "implement X", ctx: "foo" });
     const line = serialize(env);

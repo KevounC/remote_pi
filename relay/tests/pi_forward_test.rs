@@ -28,6 +28,32 @@ fn pk_hash_hex(pk: &[u8]) -> String {
     s
 }
 
+fn is_uuid_like(value: &str) -> bool {
+    value.len() == 36
+        && value.chars().enumerate().all(|(idx, ch)| match idx {
+            8 | 13 | 18 | 23 => ch == '-',
+            _ => ch.is_ascii_hexdigit(),
+        })
+}
+
+fn assert_transport_error(frame: &Value, reason: &str, re: Option<&str>) {
+    assert_eq!(frame["type"], "pi_envelope_in");
+    assert_eq!(frame["from_pc"], "_relay");
+    assert_eq!(frame["envelope"]["body"]["type"], "transport_error");
+    assert_eq!(frame["envelope"]["body"]["reason"], reason);
+    assert!(
+        is_uuid_like(frame["envelope"]["id"].as_str().unwrap_or_default()),
+        "relay-synthesized transport_error id must be UUID-shaped"
+    );
+    match re {
+        Some(expected) => assert_eq!(frame["envelope"]["re"], expected),
+        None => assert!(
+            frame["envelope"]["re"].is_null(),
+            "re must be null when original id is unrecoverable"
+        ),
+    }
+}
+
 /// Publishes an Owner-signed `mesh_versions` blob via the relay's HTTP API.
 /// `members` is the list of Pi-pubkeys (base64 strings) that this Owner
 /// authorizes as siblings.
@@ -157,24 +183,18 @@ async fn pi_b_offline_returns_transport_error_offline() {
     // Only A connects — B is offline.
     let (mut ws_a, _) = connect_and_auth_with_key(port, &sk_a).await;
 
+    let original_id = "018f1111-1111-7111-8111-111111111111";
     let envelope = json!({
         "from": "casa:sess-3",
         "to": "trab:agent-1",
-        "id": "u-offline",
+        "id": original_id,
         "re": null,
         "body": { "type": "ping" },
     });
     send_pi_envelope(&mut ws_a, &peer_b, envelope).await;
 
     let frame = recv_json(&mut ws_a, "ws_a transport_error").await;
-    assert_eq!(frame["type"], "pi_envelope_in");
-    assert_eq!(frame["from_pc"], "_relay");
-    assert_eq!(frame["envelope"]["body"]["type"], "transport_error");
-    assert_eq!(frame["envelope"]["body"]["reason"], "offline");
-    assert_eq!(
-        frame["envelope"]["re"], "u-offline",
-        "must correlate via re"
-    );
+    assert_transport_error(&frame, "offline", Some(original_id));
     assert_eq!(frame["envelope"]["from"], "_relay");
     assert_eq!(frame["envelope"]["to"], "casa:sess-3");
 }
@@ -200,21 +220,18 @@ async fn cross_owner_returns_transport_error_not_authorized() {
     let (mut ws_a, _) = connect_and_auth_with_key(port, &sk_a).await;
     let (mut _ws_b, _) = connect_and_auth_with_key(port, &sk_b).await;
 
+    let original_id = "018f2222-2222-7222-8222-222222222222";
     let envelope = json!({
         "from": "casa:sess-3",
         "to": "trab:agent-1",
-        "id": "u-cross",
+        "id": original_id,
         "re": null,
         "body": { "type": "ping" },
     });
     send_pi_envelope(&mut ws_a, &peer_b, envelope).await;
 
     let frame = recv_json(&mut ws_a, "ws_a transport_error").await;
-    assert_eq!(frame["type"], "pi_envelope_in");
-    assert_eq!(frame["from_pc"], "_relay");
-    assert_eq!(frame["envelope"]["body"]["type"], "transport_error");
-    assert_eq!(frame["envelope"]["body"]["reason"], "not_authorized");
-    assert_eq!(frame["envelope"]["re"], "u-cross");
+    assert_transport_error(&frame, "not_authorized", Some(original_id));
 }
 
 /// Malformed `pi_envelope` (missing `to_pc` / `envelope`): relay returns
@@ -233,14 +250,7 @@ async fn malformed_pi_envelope_returns_transport_error_bad_envelope() {
         .unwrap();
 
     let frame = recv_json(&mut ws_a, "ws_a bad_envelope").await;
-    assert_eq!(frame["type"], "pi_envelope_in");
-    assert_eq!(frame["from_pc"], "_relay");
-    assert_eq!(frame["envelope"]["body"]["type"], "transport_error");
-    assert_eq!(frame["envelope"]["body"]["reason"], "bad_envelope");
-    assert!(
-        frame["envelope"]["re"].is_null(),
-        "re must be null when original id is unrecoverable"
-    );
+    assert_transport_error(&frame, "bad_envelope", None);
 }
 
 /// Cache behavior: after a successful authorization lookup, subsequent
