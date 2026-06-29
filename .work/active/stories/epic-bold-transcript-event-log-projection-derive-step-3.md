@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-3
 kind: story
-stage: review
+stage: implementing
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-2]
@@ -81,4 +81,12 @@ Revert `SyncService` to direct `_upsert` / `_applyHistory` mutation. Projection 
 - Discrepancies from design: the append-only Hive `TranscriptEventStore` remains side-by-side for the later store step; this story keeps an in-memory active-session event buffer and continues using existing `msgs:<epk>:<room>` boxes as the materialized projection. Timeout failure rows are deliberately preserved for compatibility until a later store/projection cleanup, but a late authoritative `UserInput` confirmation now re-projects from events and suppresses stale projection rows.
 - Adjacent issues parked: none.
 - Verification: direct Dart analyzer check passed for `app/lib/data/sync/sync_service.dart` with `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/data/sync/sync_service.dart`. Full `flutter analyze && flutter test` could not start in this environment because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`).
+
+## Review bounce (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blocker**: Acceptance coverage for the high-risk `SyncService` projection switchover is still missing. The story explicitly requires tests proving history replay does not delete local pending events, duplicate replay emits no Hive churn, and late authoritative echo after timeout converges to the intended projection. The implementation notes say no tests were added, and I found no matching coverage in `app/test/data/sync/sync_service_test.dart`. Add focused regression tests for those three cases (or an explicit equivalent coverage path), then re-run/record `flutter test test/data/sync/sync_service_test.dart` when the Flutter toolchain is writable.
+
+**Verification**: Inspected implementation commit `843b56e00a17d4528f6ea875d6bf16d8417e8ccb` and `app/lib/data/sync/sync_service.dart`. `HOME=/tmp/pi-dart-home flutter analyze && flutter test` could not start because `/opt/flutter/bin/cache` is read-only. Direct analyzer fallback passed for changed app files: `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/data/sync/sync_service.dart lib/data/local/transcript_event_store_hive.dart lib/data/local/records/transcript_event_record.dart lib/domain/contracts/transcript_event_store.dart lib/config/dependencies.dart`. `dart test test/domain/transcript/transcript_projection_test.dart` could not run because pub attempted network access and got `403 Forbidden` from the proxy.
 
