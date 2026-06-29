@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-wire-discriminator-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-canonical-session-wire-discriminator
 depends_on: [epic-bold-canonical-session-identity-model-step-1]
@@ -93,3 +93,13 @@ Revert the registry and field additions before reverting validators. Since gener
 - Discrepancies from design: `session_scope.ts` already existed from the identity-model slice, so this step completed it by moving `action_ok`, `action_error`, and `models_list` into the scoped server registry and making codec/Dart decoding fail fast for missing `session_id`.
 - Adjacent issues parked: none.
 - Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/protocol/codec.test.ts src/protocol/session_scope.test.ts src/actions/handlers.test.ts` passed; full `corepack pnpm test` was attempted and failed on pre-existing/environment UDS lock failures (`listen EPERM` under `/tmp/claude` and cwd lock/leader election failures), not on the touched protocol tests; `flutter test test/protocol_test.dart test/protocol/actions_protocol_test.dart` could not start because `/opt/flutter/bin/cache` is read-only; nearest checks `dart format` and `HOME=/tmp/remote-pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/protocol/protocol.dart test/protocol_test.dart test/protocol/actions_protocol_test.dart` passed; `dart test` could not run because pub.dev access was blocked by proxy 403.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: Stale Dart protocol comment still says "MVP: 1 pairing = 1 Pi session" even though the typed registry now restores session-scoped messages.
+
+**Notes**: Fast-lane substrate review. Implementation commit `aa44412` was inspected. Required TS/Dart session-scoped registries are present; every scoped TS union and Dart subtype now carries required `session_id`/`sessionId`; TS codec and Dart parser fail closed for missing scoped `session_id`; `pair_ok` remains bootstrap metadata and non-session controls remain accepted without a scoped discriminator. Verification run during review: `cd pi-extension && corepack pnpm typecheck` passed; `cd pi-extension && corepack pnpm test` was attempted and did not produce a clean full-suite pass in this environment because existing UDS/daemon/leader-election tests fail or time out, while touched targeted tests (`codec`, `session_scope`, `actions`, plus shared targeted set) passed. App Flutter could not start because `/opt/flutter/bin/cache` is read-only; nearest protocol analysis `HOME=/tmp/remote-pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/protocol/protocol.dart test/protocol_test.dart test/protocol/actions_protocol_test.dart` passed, and `dart test` remained blocked by pub.dev proxy 403. Item advanced to `stage: done` based on scoped code review and targeted green checks.
