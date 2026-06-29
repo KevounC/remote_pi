@@ -1043,6 +1043,7 @@ class _ControllableChannel implements IChannel, IControlLink {
   final _ctrl = StreamController<ServerMessage>.broadcast();
   final _controlCtrl = StreamController<ControlInbound>.broadcast();
   final List<Map<String, dynamic>> sentControl = [];
+  final List<String> activeRoomIds = [];
 
   @override
   Stream<ServerMessage> get serverMessages => _ctrl.stream;
@@ -1054,6 +1055,10 @@ class _ControllableChannel implements IChannel, IControlLink {
   Future<void> close() async {
     if (!_ctrl.isClosed) await _ctrl.close();
     if (!_controlCtrl.isClosed) await _controlCtrl.close();
+  }
+
+  void setActiveRoom(String roomId) {
+    activeRoomIds.add(roomId);
   }
 
   void pushMessage(ServerMessage m) {
@@ -1268,6 +1273,121 @@ void _registerRoomsTests() {
         final saved = storage.savedPeers;
         expect(saved, isNotEmpty);
         expect(saved.last.roomId, 'discovered-room-id');
+
+        cm.dispose();
+      },
+    );
+
+    test(
+      'same-peer switchRoom survives a RoomsSnapshot whose first room is main',
+      () async {
+        final ch = _ControllableChannel();
+        final cm = ConnectionManager(
+          factory: (_, _) async => ch,
+          storage: _FakeStorage([]),
+          emitDebounce: Duration.zero,
+        );
+        await cm.connectTo(const PeerRecord(
+          remoteEpk: 'epk_switch_test',
+          sessionName: 'Pi',
+          relayUrl: 'wss://x',
+          pairedAt: '2026-01-01T00:00:00Z',
+          roomId: 'main',
+        ));
+
+        // Switch explicitly to a non-default room.
+        cm.switchRoom('work');
+        expect(cm.activeRoomId, 'work');
+
+        // Transport should be told the explicit room after the user switch.
+        expect(ch.activeRoomIds, ['main', 'work']);
+
+        // Legacy discovery is still called by snapshots; a non-buggy flow
+        // keeps the explicit switch intact.
+        final nextRoomsEmit = cm.roomsStream.first.timeout(
+          const Duration(seconds: 1),
+        );
+        ch.pushControl(const RoomsSnapshot(peer: 'epk_switch_test', rooms: [
+          RoomInfo(
+            roomId: 'main',
+            name: 'main',
+            cwd: '/Users/main',
+            startedAt: 100,
+          ),
+          RoomInfo(
+            roomId: 'work',
+            name: 'work',
+            cwd: '/Users/work',
+            startedAt: 200,
+          ),
+        ]));
+        await nextRoomsEmit;
+
+        expect(cm.activeRoomId, 'work');
+        expect(ch.activeRoomIds, ['main', 'work']);
+
+        cm.dispose();
+      },
+    );
+
+    test(
+      'legacy peer with no persisted room adopts first snapshot room once',
+      () async {
+        final storage = _FakeStorage([]);
+        final ch = _ControllableChannel();
+        final cm = ConnectionManager(
+          factory: (_, _) async => ch,
+          storage: storage,
+          emitDebounce: Duration.zero,
+        );
+
+        const legacyPeer = PeerRecord(
+          remoteEpk: 'epk_legacy_snapshot',
+          sessionName: 'Pi',
+          relayUrl: 'wss://x',
+          pairedAt: '2025-12-01T00:00:00Z',
+        );
+
+        await cm.connectTo(legacyPeer);
+        expect(cm.activeRoomId, 'main');
+
+        final adoptEmit = cm.roomsStream.first.timeout(const Duration(seconds: 1));
+        ch.pushControl(const RoomsSnapshot(peer: 'epk_legacy_snapshot', rooms: [
+          RoomInfo(
+            roomId: 'main',
+            name: 'main',
+            cwd: '/Users/main',
+            startedAt: 100,
+          ),
+          RoomInfo(
+            roomId: 'secondary',
+            name: 'secondary',
+            cwd: '/Users/secondary',
+            startedAt: 110,
+          ),
+        ]));
+        await adoptEmit;
+        expect(cm.activeRoomId, 'main');
+
+        final nextEmit = cm.roomsStream.first.timeout(const Duration(seconds: 1));
+        ch.pushControl(const RoomsSnapshot(peer: 'epk_legacy_snapshot', rooms: [
+          RoomInfo(
+            roomId: 'secondary',
+            name: 'secondary',
+            cwd: '/Users/secondary',
+            startedAt: 200,
+          ),
+          RoomInfo(
+            roomId: 'other',
+            name: 'other',
+            cwd: '/Users/other',
+            startedAt: 300,
+          ),
+        ]));
+        await nextEmit;
+        expect(cm.activeRoomId, 'main');
+        expect(storage.savedPeers, isNotEmpty);
+        expect(storage.savedPeers.last.roomId, 'main');
 
         cm.dispose();
       },

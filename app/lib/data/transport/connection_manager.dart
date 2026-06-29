@@ -125,6 +125,10 @@ class ConnectionManager extends Service {
   // Plan 17 — active room on the destination Pi. 'main' is the implicit
   // default and matches the per-cwd room a Pi opens.
   String _activeRoomId = 'main';
+  // Set when the user explicitly switches rooms during the current app
+  // lifetime. Prevents legacy discovery hooks from clobbering that
+  // explicit choice when room announcements/snapshots arrive later.
+  bool _activeRoomExplicitlySet = false;
 
   Timer? _retryTimer;
   Timer? _pingTimer;
@@ -240,6 +244,7 @@ class ConnectionManager extends Service {
       return;
     }
     _activeRoomId = roomId;
+    _activeRoomExplicitlySet = true;
     // Push down to the underlying WS transport so outbound envelopes
     // get the right `room` value.
     final cur = _status;
@@ -483,6 +488,7 @@ class ConnectionManager extends Service {
     _connectCancel = token;
     _connectInFlight = true;
     _activePeer = peer;
+    _activeRoomExplicitlySet = false;
     // Plan 17 fix — set the destination room from the persisted
     // PeerRecord BEFORE emitting StatusOnline so the very first send
     // after connect goes to the right (peer, room) on the relay. If
@@ -988,8 +994,10 @@ class ConnectionManager extends Service {
     final active = _activePeer;
     if (active == null) return;
     if (toStandardB64(active.remoteEpk) != peerKey) return;
-    if (active.roomId != null && active.roomId == _activeRoomId) {
-      return; // already bound — discovery is a no-op
+    // If this peer already has a persisted/explicitly chosen room,
+    // legacy-discovery must not override it.
+    if (active.roomId != null || _activeRoomExplicitlySet) {
+      return;
     }
     _activeRoomId = discoveredRoom;
     final cur = _status;
