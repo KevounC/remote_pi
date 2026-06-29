@@ -1,7 +1,7 @@
 ---
 id: story-preserve-pending-send-backstop-on-disconnect
 kind: story
-stage: implementing
+stage: review
 tags: [app, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [story-fix-mobile-working-convergence-on-disconnect]
@@ -17,6 +17,12 @@ Review of `story-fix-mobile-working-convergence-on-disconnect` found that the no
 
 ## Acceptance Criteria
 
-- [ ] Add a deterministic `SyncService` test for: online `sendMessage()` creates a pending row, status transitions to retrying/offline before echo, reconnect/session sync does not leave the row pending forever.
-- [ ] Preserve or re-arm the pending-send backstop across disconnects, or explicitly fail/clear the pending row on disconnect with a visible reason.
-- [ ] Continue to clear chat-local streaming/working/cancel state on every non-`StatusOnline` transition.
+- [x] Add a deterministic `SyncService` test for: online `sendMessage()` creates a pending row, status transitions to retrying/offline before echo, reconnect/session sync does not leave the row pending forever.
+- [x] Preserve or re-arm the pending-send backstop across disconnects, or explicitly fail/clear the pending row on disconnect with a visible reason.
+- [x] Continue to clear chat-local streaming/working/cancel state on every non-`StatusOnline` transition.
+
+## Implementation notes
+- Kept `SyncService` chat-local reset semantics intact for working/streaming and kept durable room index untouched on non-online transitions.
+- Added optional `_resetTurnState({bool clearPendingSendTimers = false})` and changed non-online `_onStatus` path to preserve timer-backed pending-send backstops (`clearPendingSendTimers: false`) while still clearing turn-local UI state.
+- Kept session-switch semantics by calling `_resetTurnState(clearPendingSendTimers: true)` from `activate(...)` so stale timers from another chat are not leaked into the new session.
+- Updated disconnect test to use deterministic async waits (`StatusRetrying` await + periodic `_settle()`): confirms queued input/working/streaming/cancel state are cleared on disconnect, confirms the pending timer remains armed across the drop, advances through settle windows so the row fails visibly, and verifies reconnect does not reintroduce a stuck pending bubble.
