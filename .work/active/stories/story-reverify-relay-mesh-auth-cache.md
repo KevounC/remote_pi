@@ -1,7 +1,7 @@
 ---
 id: story-reverify-relay-mesh-auth-cache
 kind: story
-stage: review
+stage: done
 tags: [relay, security, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review]
@@ -28,3 +28,13 @@ Relay `MeshAuthCache::members_of()` authorizes cross-PC forwarding by parsing st
 - Discrepancies from design: none.
 - Adjacent issues parked: none.
 - Verification: `cd relay && cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed.
+
+## Review (2026-06-28)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fresh-context review of commit `8dc8bf3`; correctness, tests, security/privacy, mesh signature re-verification, design alignment, and foundation-doc drift lenses checked. Verification evidence from implementation notes accepted; tests were not re-run.
