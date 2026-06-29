@@ -1,0 +1,89 @@
+---
+id: epic-bold-transcript-event-log-projection-derive-step-1
+kind: story
+stage: implementing
+tags: [refactor, bold, pi-extension, app, cockpit]
+parent: epic-bold-transcript-event-log-projection-derive
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-06-29
+updated: 2026-06-29
+---
+
+# Step 1: Define the `TranscriptEvent` algebra and projection contract
+
+**Priority**: High
+**Risk**: Medium
+**Source Lens**: missing abstraction / single source of truth
+**Files**: `app/lib/domain/transcript/transcript_event.dart`, `app/lib/domain/transcript/transcript_projection.dart`, `pi-extension/src/session/transcript_event.ts`, `cockpit/lib/app/cockpit/domain/entities/transcript_event.dart`
+
+## Current State
+
+```dart
+// app/lib/data/local/records/message_record.dart
+enum MsgRole { user, assistant, tool, compaction }
+
+class MessageRecord {
+  final String id;
+  final int seq;
+  final MsgRole role;
+  final bool pending;
+  ChatMessage toChatMessage() { /* UI projection lives on the row model */ }
+}
+```
+
+```ts
+// pi-extension/src/index.ts
+type BufferMsg = { role: "user" | "assistant" | "toolResult" | string; content?: unknown; timestamp?: number };
+let _messageBuffer: BufferMsg[] = [];
+```
+
+## Target State
+
+Define a canonical event algebra per surface, using the same kind and field names:
+
+```dart
+sealed class TranscriptEvent {
+  const TranscriptEvent({required this.eventId, required this.sessionId, required this.ts, this.turnId});
+  final String eventId;
+  final String sessionId;
+  final DateTime ts;
+  final String? turnId;
+}
+
+final class UserMessageSubmitted extends TranscriptEvent { /* clientMessageId, text, image */ }
+final class UserMessageConfirmed extends TranscriptEvent { /* clientMessageId, text, image, streamingBehavior */ }
+final class UserMessageFailed extends TranscriptEvent { /* clientMessageId, code, message */ }
+final class AssistantDeltaReceived extends TranscriptEvent { /* replyTo, delta */ }
+final class AssistantMessageCommitted extends TranscriptEvent { /* messageId, replyTo, text, usage */ }
+final class AssistantDoneReceived extends TranscriptEvent { /* replyTo, usage */ }
+final class ToolRequested extends TranscriptEvent { /* toolCallId, tool, args */ }
+final class ToolFinished extends TranscriptEvent { /* toolCallId, result, error */ }
+final class CompactionRecorded extends TranscriptEvent { /* summary, tokensBefore */ }
+```
+
+Projection contract returns `messages`, `streaming`, and a lightweight `TranscriptTurnView` without importing Hive, widgets, WebSocket, or Pi SDK types.
+
+## Implementation Notes
+
+- `sessionId` is required on every event and is opaque equality-only.
+- `eventId` is deterministic for server replay (`server:<sessionId>:<kind>:<stable-key>:<ts>`) and UUIDv7/local for optimistic events.
+- Carry `turnId` when available but do not depend on the turn-state-machine sibling landing first.
+- Keep app, TS, and cockpit kind names aligned so generated-protocol/patchbay can lift the contract later.
+- Add a clearly named compatibility boundary for pre-canonical-session active session ids; do not let missing ids flow into core projection code.
+
+## Acceptance Criteria
+
+- [ ] Event kind names and required fields are centralized on each touched surface.
+- [ ] Every event requires `sessionId`; adapters provide an explicit compatibility shim only at the boundary.
+- [ ] Projection contract returns `messages`, `streaming`, and `turn` without infrastructure imports.
+- [ ] No runtime behavior changes yet; this is side-by-side.
+
+## Risk
+
+Medium. Drift between per-language event mirrors would recreate the current protocol-mirror problem.
+
+## Rollback
+
+Delete the new event/projection contract files. No existing runtime should depend on them until later steps.
