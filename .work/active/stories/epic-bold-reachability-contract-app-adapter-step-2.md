@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-app-adapter-step-2
 kind: story
-stage: review
+stage: implementing
 tags: [refactor, bold, app]
 parent: epic-bold-reachability-contract-app-adapter
 depends_on: [epic-bold-reachability-contract-app-adapter-step-1]
@@ -123,3 +123,15 @@ mutation while leaving the adapter file unused.
 - Discrepancies from design: Step 1's adapter incremented retry attempts on failure, but this story's acceptance criteria require preserving the existing `ConnectionManager` sequence where the first retry emits attempt `0` and the counter advances when the retry timer fires. The adapter was aligned with that public behavior while keeping retry delays sourced from the reachability contract.
 - Adjacent issues parked: none.
 - Verification: pending full app verification in this run after the remaining app story integrations.
+
+## Review bounce (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blockers**:
+- `ReachabilityAdapter.onConnectSucceeded()` resets `_retryAttempt` immediately, and `ConnectionManager._connect()` calls it as soon as the WebSocket factory returns (`app/lib/data/transport/reachability_adapter.dart:27-31`, `app/lib/data/transport/connection_manager.dart:529`). That violates the preserved offline-loop invariant documented in the same file (`connection_manager.dart:24-27`): retry backoff must reset only after real inbound app/Pi traffic (`onAppFrameObserved`), not after merely re-authenticating to the relay. With the Pi still down but the relay accepting sockets, each factory success can pin the next retry back to attempt 0 / 1s, re-opening the retry storm this adapter refactor is required to preserve. Split the adapter transition so factory success clears `connectInFlight`/missed pings without clearing `retryAttempt`, and keep `_retryAttempt = 0` on real inbound traffic or explicit stop/reset.
+
+**Verification run**:
+- `HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter analyze` — red on the pre-existing `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802`.
+- Targeted tests passed: `HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter test test/protocol_codegen/dart_codegen_test.dart test/transport/reachability_adapter_test.dart test/transport/connection_manager_test.dart`.
+- Full `HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter test` remains red on pre-existing unrelated actions/sync/chat session-identity failures; not used as the regression signal for this bounce.
