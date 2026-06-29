@@ -49,7 +49,7 @@ Flutter app ──wss──► Relay (Rust) ◄──wss── Pi extension (Nod
 - **Pairing** via short-lived QR code; peers persisted in Keychain (mobile) and `~/.pi/remote/` (desktop)
 - **TLS in transit** on the WebSocket connection
 - **Ed25519 pairing authentication** — only paired devices can route messages through your peer slot on the relay (challenge-response handshake)
-- **The relay forwards opaque ciphertext** as far as routing is concerned, but the payload itself is **not end-to-end encrypted in the current version** — see [`relay/README.md`](./relay/README.md) for the security trade-offs
+- **The relay forwards authenticated WebSocket envelopes over TLS**, but it can see the current plaintext envelope contents; payloads are **not end-to-end encrypted in the current version** — see [`relay/README.md`](./relay/README.md) for the security trade-offs
 
 ## Local agent mesh
 

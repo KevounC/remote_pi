@@ -149,9 +149,10 @@ Whether a model accepts images is surfaced as a `vision` flag on each
 `WireModel` (derived from the SDK's `Model.input` including `"image"`); the app
 greys out the attach button when the active model is text-only.
 
-The **relay is unchanged** — the image travels inside the same opaque `ct` blob
+The **relay is unchanged** — the image travels inline in the same JSON envelope
 as the rest of the message, so there's no binary channel (large files are a
-future track). Text-only messages are unaffected.
+future track). This is not app-layer E2E encryption; the relay can see current
+plaintext envelope contents. Text-only messages are unaffected.
 
 ---
 
@@ -237,10 +238,11 @@ The shortid is the first 8 chars shown by `devices`.
 
 ## The relay
 
-The relay is the only network-touching piece of Remote Pi. It does **not**
-read messages — payloads are end-to-end encrypted between the Pi and the
-paired device — but it sees connection metadata: which keypair is online,
-which room/cwd identifiers exist, message timing, sizes.
+The relay is the only network-touching piece of Remote Pi. It forwards
+authenticated WebSocket envelopes over TLS, but there is **no app-layer E2E
+encryption** in the current implementation. The relay can see plaintext envelope
+contents while forwarding, plus connection metadata: which keypair is online,
+which room/cwd identifiers exist, message timing, and sizes.
 
 You have two options:
 
@@ -254,9 +256,11 @@ endpoint.)
 Caveats:
 
 - Shared infrastructure — availability is best-effort.
-- The operator could observe connection metadata as described above.
-- TLS + per-message encryption is the only protection; **there is no IP
-  allow-listing or VPN gating**.
+- The operator could observe connection metadata and current plaintext envelope
+  contents as described above.
+- TLS + Ed25519 pairing/relay authentication are the current built-in
+  protections; **there is no IP allow-listing, VPN gating, or app-layer E2E
+  encryption**.
 
 ### Option B — Self-host (recommended for privacy)
 

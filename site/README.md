@@ -1,8 +1,9 @@
 # Remote Pi — Site
 
 Landing page for [Remote Pi](https://github.com/jacobaraujo7/remote_pi) — the
-project that lets you control a Pi coding agent from your phone over an
-end-to-end encrypted channel.
+project that lets you control a Pi coding agent from your phone over a
+TLS-protected relay connection with Ed25519 pairing authentication. Payloads are
+not end-to-end encrypted at the application layer in the current MVP.
 
 This package ships three static routes:
 

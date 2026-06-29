@@ -21,9 +21,9 @@ Do not rewrite code first. Rewrite the specification surface first:
 4. Add property/conformance tests in Rust/TypeScript/mobile.
 5. Choose one schema/IDL source of truth before broad cross-language changes.
 
-## Current high-priority drift
+## Current delivery semantics to preserve
 
-`PROTOCOL.md` still describes `busy` as a dropped-message ACK. Current plan/tool docs say busy-drop was removed: a peer mid-turn still receives the message and processes it later. Any model or rewrite must use the current reliable-delivery semantics unless intentionally reversing the product decision.
+`PROTOCOL.md` and the agent-network skill now describe current reliable-delivery semantics: the broker does not emit `busy` for new work, and a peer mid-turn still receives the message for a later turn. Any model or rewrite must preserve no retry-on-busy semantics unless intentionally reversing the product decision.
 
 ## Tool placement
 

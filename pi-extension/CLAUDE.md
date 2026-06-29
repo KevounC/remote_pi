@@ -18,7 +18,7 @@ Protocolo, identidades, ACK, roteamento cross-PC e trust model: ver
 - Node 20+ / TypeScript 6
 - **Module system**: ESM only (NodeNext). Imports com extensão `.js` mesmo em `.ts`
 - Package manager: **pnpm** (não usar npm/yarn)
-- Crypto: libsodium-wrappers (Curve25519 + ChaCha20-Poly1305)
+- Crypto/auth: Ed25519 via `@noble/ed25519` for Pi/Owner identities, pairing signatures, and relay challenge-response. Transport confidentiality is WebSocket over TLS; there is **no app-layer E2E encryption** in the current implementation.
 - Pi-secret storage: `@napi-rs/keyring` (Keychain macOS / libsecret Linux desktop / Credential Manager Windows). Headless Linux sem D-Bus cai pra `~/.pi/remote/identity.json` (`chmod 0600`) com warning — instale GNOME Keyring/KWallet pra hardening real.
 
 ## Comandos
@@ -66,7 +66,7 @@ Slash commands:
 
 - Não escrever CommonJS (`require`, `module.exports`)
 - Não comitar `dist/` (já no .gitignore raiz)
-- Não criptografar/descriptografar de forma custom — usar libsodium
+- Não afirmar nem implementar E2E ad hoc; o modelo atual é TLS + Ed25519 para autenticação/pareamento, e qualquer cifragem de payload futura deve passar por `PROTOCOL.md` e dependências explícitas
 - Não introduzir dependência que não seja ESM-friendly
 
 ## Modo orquestrado

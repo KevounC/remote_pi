@@ -174,8 +174,8 @@ agent_send({
               it.
             </li>
             <li>
-              <InlineCode>busy</InlineCode> — the peer is mid-turn; the message
-              was dropped. Retry shortly.
+              Mid-turn peers still receive new work: the harness queues it for
+              the next turn. There is no retry-on-busy path in the current mesh.
             </li>
             <li>
               <InlineCode>denied</InlineCode> — the peer refused it. Don&apos;t

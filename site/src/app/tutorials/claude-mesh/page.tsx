@@ -129,8 +129,7 @@ Agent name [api]: reviewer`}
               <li>
                 <InlineCode>agent_send({`{ to, body, re? }`})</InlineCode> — send
                 a message and get an <strong className="text-fg">ACK</strong> back
-                (<InlineCode>received</InlineCode>, <InlineCode>busy</InlineCode>,{" "}
-                <InlineCode>denied</InlineCode>, or{" "}
+                (<InlineCode>received</InlineCode>, <InlineCode>denied</InlineCode>, or{" "}
                 <InlineCode>timeout</InlineCode>). It is{" "}
                 <strong className="text-fg">not fire-and-forget</strong>; set{" "}
                 <InlineCode>re</InlineCode> to the id of the message you&apos;re
@@ -160,8 +159,9 @@ Agent name [api]: reviewer`}
               </li>
               <li>
                 read the <InlineCode>agent_send</InlineCode> ACK and act on it
-                (retry on <InlineCode>busy</InlineCode>, give up on{" "}
-                <InlineCode>denied</InlineCode>) rather than assuming delivery;
+                (<InlineCode>received</InlineCode> means delivered, give up on{" "}
+                <InlineCode>denied</InlineCode>, investigate{" "}
+                <InlineCode>timeout</InlineCode>) rather than assuming delivery;
               </li>
               <li>
                 reply by echoing the original message id in{" "}

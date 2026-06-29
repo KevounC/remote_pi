@@ -308,11 +308,11 @@ agent_send({
                   back to you. Three agents, three folders, one coordinated change.
                 </p>
                 <Callout variant="note" title="If a reply never comes">
-                  An <InlineCode>agent_send</InlineCode> to a peer that&apos;s
-                  mid-turn can come back <InlineCode>busy</InlineCode> — the
-                  message was dropped, so retry shortly. The full set of ACKs
-                  (<InlineCode>Delivered</InlineCode>, <InlineCode>busy</InlineCode>
-                  , <InlineCode>denied</InlineCode>, timeout) is covered in{" "}
+                  An <InlineCode>agent_send</InlineCode> returns when the broker
+                  accepts the envelope; content replies are separate messages on
+                  later turns. The current mesh does not drop messages just
+                  because a peer is mid-turn. The ACKs (<InlineCode>Delivered</InlineCode>,{" "}
+                  <InlineCode>denied</InlineCode>, timeout) are covered in{" "}
                   <Link
                     href="/tutorials/mesh-local"
                     className="text-accent underline"

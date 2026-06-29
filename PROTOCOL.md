@@ -11,7 +11,7 @@ Atualizada em 2026-06-09.
 - **Cada PC** roda o `pi-extension` (Node.js daemon) com **uma Pi-key** Ed25519 no Keychain do sistema (macOS/Linux/Windows)
 - **Celular** é o **autenticador inicial** (estilo WhatsApp Web QR) — depois do pareamento, PCs operam autonomamente entre si
 - **Owner-key** Ed25519 vive no Keychain do celular (iOS Keychain / Android Block Store), sincroniza entre devices do mesmo Apple ID / Google Account
-- **Relay** WebSocket roteia ciphertext + armazena `mesh_versions` assinadas pelo Owner — nunca decide membership, sempre verifica assinaturas
+- **Relay** WebSocket roteia envelopes JSON sobre TLS + armazena `mesh_versions` assinadas pelo Owner — ele pode ver o conteúdo atual dos envelopes, mas nunca decide membership e sempre verifica assinaturas
 - **Cross-PC routing** via prefix `<pc>:<peer>` no envelope; broker UDS local em cada PC, relay forward Pi-to-Pi via WS
 
 ---
@@ -39,8 +39,9 @@ Atualizada em 2026-06-09.
 │  Routing           Local UDS broker  /  Cross-PC via relay forward  │
 │                    Prefix <pc>:<peer> distingue local vs remoto     │
 ├─────────────────────────────────────────────────────────────────────┤
-│  ACK protocol      received | busy | denied | timeout               │
+│  ACK protocol      received | denied | timeout                      │
 │                    Wrapper TS responde sem custar token              │
+│                    Legacy busy é tratado defensivamente, não emitido │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Transport         UDS (local)  /  WebSocket sobre TLS (relay)      │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -80,13 +81,13 @@ Toda chamada de `agent_send` aguarda um ACK rápido (default 5s) gerado pelo **w
 
 | Status | Significado |
 |---|---|
-| `received` | Peer está livre e vai processar; mensagem enfileirada |
-| `busy` | Peer está em meio a um turn; mensagem **descartada**, sender retry |
-| `denied` | Peer recusou (futuro: blacklist); abandona |
+| `received` | Broker/harness do peer aceitou o envelope; se o peer estiver em meio a um turn, a mensagem fica para o próximo turn |
+| `denied` | Peer recusou (ou destino não existe); abandona |
+| `busy` | **Legado/defensivo apenas**. O broker atual não emite `busy` para novo trabalho; mensagens para peers em meio a um turn são entregues ao harness e processadas no próximo turn. Se um broker antigo retornar `busy`, trate como entrega obsoleta/ambígua e atualize o peer em vez de projetar retry-on-busy. |
 | `timeout` | ACK não chegou em 5s; trata como transport error |
 | `transport_error` | Cross-PC apenas: relay reportou `offline`, `not_authorized`, ou `bad_envelope` |
 
-**Reply de conteúdo** é assíncrona: peer responde com **outro send normal** carregando `re: <send-id-original>`. Sender vê a reply na inbox no próximo turn. Sem `agent_wait`, sem `agent_request` — padrão event-driven puro.
+**Reply de conteúdo** é assíncrona: peer responde com **outro send normal** carregando `re: <send-id-original>`. Sender vê a reply na inbox no próximo turn. Sem `agent_wait`, sem `agent_request` — padrão event-driven puro. `re` é correlação, não mecanismo de delivery.
 
 Detalhes em `plan/25-pc-mesh-bootstrap.md` seção "ACK protocol".
 
@@ -265,10 +266,11 @@ O Pi monta o content multimodal do SDK na ordem **imagem(ns) → texto**:
 tem `vision:false`.
 
 ### Transporte
-A imagem vai **inline** na `user_message` (base64), dentro do `ct` opaco que já
-existe — **relay inalterado** (forward opaco). Custo: double-base64 (~+77%),
-aceito nesta fatia por usar imagem comprimida (~150–400 KB). Histórico/
-`session_sync` trafega os bytes (decisão #8). Canal binário fica pra Trilha 2.
+A imagem vai **inline** na `user_message` (base64), dentro do envelope que já
+existe — **relay inalterado** (forward sem interpretar o payload, mas não E2E).
+Custo: double-base64 (~+77%), aceito nesta fatia por usar imagem comprimida
+(~150–400 KB). Histórico/`session_sync` trafega os bytes (decisão #8). Canal
+binário fica pra Trilha 2.
 
 ---
 
