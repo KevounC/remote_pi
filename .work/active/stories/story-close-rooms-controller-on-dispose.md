@@ -1,7 +1,7 @@
 ---
 id: story-close-rooms-controller-on-dispose
 kind: story
-stage: implementing
+stage: review
 tags: [app, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review]
@@ -17,5 +17,17 @@ updated: 2026-06-28
 
 ## Acceptance Criteria
 
-- [ ] Dispose closes `_roomsController` and cancels related timers/subscriptions safely.
-- [ ] Add/adjust a test proving no rooms event can be emitted after dispose.
+- [x] Dispose closes `_roomsController` and cancels related timers/subscriptions safely.
+- [x] Add/adjust a test proving no rooms event can be emitted after dispose.
+
+## Implementation notes
+
+- Files changed:
+  - `app/lib/data/transport/connection_manager.dart`
+    - Added `_roomsController.close()` with `isClosed` guard in `dispose()`.
+  - `app/test/transport/connection_manager_test.dart`
+    - Added test: `roomsStream closes and ignores control frames after dispose`.
+- Verification:
+  - `cd app && /opt/flutter/bin/flutter analyze` (1 existing pre-existing issue in unrelated file: `lib/ui/chat/widgets/input_bar.dart:802`)
+  - `cd app && /opt/flutter/bin/flutter test --concurrency=1 test/transport/connection_manager_test.dart` (pass)
+  - `cd app && /opt/flutter/bin/flutter test --concurrency=1` (pass, 497 tests)

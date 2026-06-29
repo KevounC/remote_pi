@@ -463,6 +463,9 @@ class ConnectionManager extends Service {
     _controlSub = null;
     _statusController.close();
     _presenceController.close();
+    if (!_roomsController.isClosed) {
+      _roomsController.close();
+    }
   }
 
   // ---------------------------------------------------------------------------

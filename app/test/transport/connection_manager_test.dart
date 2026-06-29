@@ -1178,6 +1178,32 @@ void _registerRoomsTests() {
     );
 
     test(
+      'roomsStream closes and ignores control frames after dispose',
+      () async {
+        final ch = _ControllableChannel();
+        final cm = ConnectionManager(
+          factory: (_, _) async => ch,
+          storage: _FakeStorage([]),
+          emitDebounce: Duration.zero,
+        );
+        await cm.connectTo(_fakePeer());
+
+        final done = expectLater(cm.roomsStream, emitsDone);
+        cm.dispose();
+
+        ch.pushControl(const RoomAnnounced(
+          peer: 'epk_after_dispose',
+          roomId: 'r1',
+          name: 'work',
+          cwd: '/Users/x',
+          startedAt: 1000,
+        ));
+
+        await done.timeout(const Duration(seconds: 1));
+      },
+    );
+
+    test(
       '_connect adopts peer.roomId (plan 17 fix — bind room on the '
       'first frame so the relay routes correctly)',
       () async {
