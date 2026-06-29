@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, chmod, unlink } from "node:fs/promises";
+import { mkdir, readFile, writeFile, chmod, unlink, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { AsyncEntry } from "@napi-rs/keyring";
@@ -174,11 +174,15 @@ async function _readKeypairFromFile(): Promise<Ed25519Keypair | null> {
   }
 }
 
-async function _writeKeypairToFile(kp: Ed25519Keypair): Promise<void> {
-  await mkdir(PI_DIR, { recursive: true, mode: 0o700 });
+async function _ensurePrivateStorageDir(dir: string): Promise<void> {
+  await mkdir(dir, { recursive: true, mode: 0o700 });
   // Best-effort tighten of the dir in case it pre-existed with looser
   // permissions (mkdir's mode is only applied to NEW dirs).
-  try { await chmod(PI_DIR, 0o700); } catch { /* not fatal */ }
+  try { await chmod(dir, 0o700); } catch { /* not fatal */ }
+}
+
+async function _writeKeypairToFile(kp: Ed25519Keypair): Promise<void> {
+  await _ensurePrivateStorageDir(PI_DIR);
   await writeFile(IDENTITY_FILE, _serialize(kp), { mode: 0o600 });
   try { await chmod(IDENTITY_FILE, 0o600); } catch { /* not fatal */ }
 }
@@ -286,7 +290,30 @@ export interface PeerRecord {
   paired_at: string;  // ISO-8601
 }
 
+async function _hardenPeersFilePermissions(): Promise<void> {
+  try { await chmod(PEERS_PATH, 0o600); } catch { /* missing/non-POSIX/not fatal */ }
+}
+
+async function _writePeersFile(peers: PeerRecord[]): Promise<void> {
+  const dir = dirname(PEERS_PATH);
+  await _ensurePrivateStorageDir(dir);
+  const tmpPath = join(
+    dir,
+    `.peers.json.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`,
+  );
+  try {
+    await writeFile(tmpPath, JSON.stringify({ peers }, null, 2), { mode: 0o600 });
+    try { await chmod(tmpPath, 0o600); } catch { /* mode may be unsupported */ }
+    await rename(tmpPath, PEERS_PATH);
+    await _hardenPeersFilePermissions();
+  } catch (err) {
+    try { await unlink(tmpPath); } catch { /* temp file may not exist */ }
+    throw err;
+  }
+}
+
 export async function listPeers(): Promise<PeerRecord[]> {
+  await _hardenPeersFilePermissions();
   try {
     const raw = await readFile(PEERS_PATH, "utf8");
     const parsed = JSON.parse(raw) as { peers: PeerRecord[] };
@@ -304,8 +331,7 @@ export async function addPeer(record: PeerRecord): Promise<void> {
   } else {
     peers.push(record);
   }
-  await mkdir(dirname(PEERS_PATH), { recursive: true });
-  await writeFile(PEERS_PATH, JSON.stringify({ peers }, null, 2));
+  await _writePeersFile(peers);
 }
 
 /**
@@ -327,8 +353,7 @@ export async function removePeer(remoteEpk: string): Promise<boolean> {
   const peers = await listPeers();
   const filtered = peers.filter((p) => p.remote_epk !== remoteEpk);
   if (filtered.length === peers.length) return false;
-  await mkdir(dirname(PEERS_PATH), { recursive: true });
-  await writeFile(PEERS_PATH, JSON.stringify({ peers: filtered }, null, 2));
+  await _writePeersFile(filtered);
   return true;
 }
 

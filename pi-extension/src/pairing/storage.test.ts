@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { mkdtempSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,6 +16,8 @@ import { join } from "node:path";
 // path writes inside a temp dir instead of the dev's real ~/.pi/remote.
 // vi.mock must run before the real module load.
 const _tmpHome = mkdtempSync(join(tmpdir(), "pi-storage-"));
+const PEERS_DIR_FOR_TEST = join(_tmpHome, ".pi", "remote");
+const PEERS_FILE_FOR_TEST = join(PEERS_DIR_FOR_TEST, "peers.json");
 vi.mock("node:os", async (importOriginal) => {
   const orig = await importOriginal<typeof import("node:os")>();
   return { ...orig, homedir: () => _tmpHome };
@@ -23,6 +33,8 @@ const {
   _setKeyringRetryForTest,
   _unlinkIdentityFileForTest,
   _IDENTITY_FILE_FOR_TEST,
+  addPeer,
+  listPeers,
 } = storage;
 import type { KeyStoreBackend } from "./storage.js";
 
@@ -75,6 +87,29 @@ class InMemoryBackend implements KeyStoreBackend {
 const NEW_SERVICE = "dev.remotepi.pi";
 const OLD_SERVICE = "dev.remotepi.mac";
 const ACCOUNT = "longterm-ed25519";
+const POSIX_MODES_SUPPORTED = process.platform !== "win32";
+
+function expectPrivateFileMode(path: string): void {
+  if (!POSIX_MODES_SUPPORTED) return;
+  expect(statSync(path).mode & 0o777).toBe(0o600);
+}
+
+function expectPrivateDirMode(path: string): void {
+  if (!POSIX_MODES_SUPPORTED) return;
+  expect(statSync(path).mode & 0o777).toBe(0o700);
+}
+
+const PHONE_PEER = {
+  name: "phone",
+  remote_epk: Buffer.from(new Uint8Array(32).fill(11)).toString("base64"),
+  paired_at: "2026-06-28T00:00:00.000Z",
+};
+
+const TABLET_PEER = {
+  name: "tablet",
+  remote_epk: Buffer.from(new Uint8Array(32).fill(12)).toString("base64"),
+  paired_at: "2026-06-28T00:01:00.000Z",
+};
 
 beforeEach(async () => {
   // Silence the migration / fallback console output during tests so the
@@ -85,6 +120,7 @@ beforeEach(async () => {
   // Zero retry delay so persistent-failure tests don't sleep.
   _setKeyringRetryForTest(3, 0);
   await _unlinkIdentityFileForTest();
+  rmSync(PEERS_FILE_FOR_TEST, { force: true });
 });
 
 afterEach(() => {
@@ -237,6 +273,43 @@ describe("getOrCreateEd25519Keypair — headless Linux fallback", () => {
     );
   });
 
+});
+
+// ── peers.json permissions ──────────────────────────────────────────────────
+
+describe("peers.json storage permissions", () => {
+  test("addPeer writes peers.json with private file and parent directory permissions", async () => {
+    await addPeer(PHONE_PEER);
+
+    expect(existsSync(PEERS_FILE_FOR_TEST)).toBe(true);
+    const parsed = JSON.parse(readFileSync(PEERS_FILE_FOR_TEST, "utf8")) as { peers: unknown[] };
+    expect(parsed.peers).toEqual([PHONE_PEER]);
+    expectPrivateFileMode(PEERS_FILE_FOR_TEST);
+    expectPrivateDirMode(PEERS_DIR_FOR_TEST);
+  });
+
+  test("listPeers hardens an existing permissive peers.json on read", async () => {
+    mkdirSync(PEERS_DIR_FOR_TEST, { recursive: true, mode: 0o700 });
+    writeFileSync(PEERS_FILE_FOR_TEST, JSON.stringify({ peers: [PHONE_PEER] }, null, 2), { mode: 0o644 });
+    if (POSIX_MODES_SUPPORTED) chmodSync(PEERS_FILE_FOR_TEST, 0o644);
+
+    const peers = await listPeers();
+
+    expect(peers).toEqual([PHONE_PEER]);
+    expectPrivateFileMode(PEERS_FILE_FOR_TEST);
+  });
+
+  test("addPeer migrates an existing permissive peers.json on update", async () => {
+    mkdirSync(PEERS_DIR_FOR_TEST, { recursive: true, mode: 0o700 });
+    writeFileSync(PEERS_FILE_FOR_TEST, JSON.stringify({ peers: [PHONE_PEER] }, null, 2), { mode: 0o644 });
+    if (POSIX_MODES_SUPPORTED) chmodSync(PEERS_FILE_FOR_TEST, 0o644);
+
+    await addPeer(TABLET_PEER);
+
+    const parsed = JSON.parse(readFileSync(PEERS_FILE_FOR_TEST, "utf8")) as { peers: unknown[] };
+    expect(parsed.peers).toEqual([PHONE_PEER, TABLET_PEER]);
+    expectPrivateFileMode(PEERS_FILE_FOR_TEST);
+  });
 });
 
 // ── Locked-keychain protection (the "lost pairing after a week idle" bug) ────
