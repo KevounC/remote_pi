@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-state-machine
 kind: feature
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app, relay]
 parent: epic-bold-reachability-contract
 depends_on: []
@@ -345,4 +345,15 @@ let mut heartbeat = time::interval_at(
 ## Convention-Driven Steps
 
 None. `.agents/skills/refactor-conventions/` and `.agents/skills/patterns/` are absent, so this plan uses the default refactor-design lenses plus project code-design rules.
+
+## Implementation summary — wave 4
+
+Stories now ready for review:
+
+- `epic-bold-reachability-contract-state-machine-step-1` — done before this run.
+- `epic-bold-reachability-contract-state-machine-step-2` — done before this run.
+- `epic-bold-reachability-contract-state-machine-step-3` — advanced to review in this run; pure Dart domain projection and drift test added.
+- `epic-bold-reachability-contract-state-machine-step-4` — advanced to review in this run; Rust relay projection added and peer heartbeat now uses the shared constant.
+
+Verification in this run: Dart files formatted via `/opt/flutter/bin/cache/dart-sdk/bin/dart format`; Flutter test startup was blocked by read-only Flutter SDK cache in this harness before tests ran. Relay verification passed with `cargo fmt --check`, `cargo test reachability`, and `cargo clippy -- -D warnings` from `relay/`.
 
