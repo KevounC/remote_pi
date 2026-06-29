@@ -1,7 +1,7 @@
 ---
 id: story-harden-peers-json-permissions
 kind: story
-stage: review
+stage: done
 tags: [pi-extension, security]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review]
@@ -30,3 +30,13 @@ Verification from `pi-extension/`:
 - `corepack pnpm typecheck` — passed.
 - `corepack pnpm test -- src/pairing/storage.test.ts` — passed; Vitest ran 33 files / 580 tests passed, 3 skipped.
 - `corepack pnpm test` — passed; 33 files / 580 tests passed, 3 skipped.
+
+## Review (2026-06-28)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fresh-context review of commit `3c9d2e3`; correctness, tests, security/privacy, design alignment, and foundation-doc drift lenses checked. Verification evidence from implementation notes accepted; tests were not re-run.
