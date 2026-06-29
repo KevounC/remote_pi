@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-workspace-document-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-workspace-document
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document-step-2]
@@ -72,3 +72,10 @@ final class WorkspaceDocumentCommands {
 
 ## Rollback
 Delete `workspace_document_commands.dart` and its tests; leave the already-moved pane primitives and document codec in place because they are not behavior-coupled to command migration.
+
+## Implementation notes
+- Files changed: `cockpit/lib/app/cockpit/domain/entities/workspace_document_commands.dart`, `cockpit/test/domain/workspace_document_commands_test.dart`.
+- Tests added: pure command coverage for move-to-pane, move-to-new-split before/after, index clamp, select, resize, append/replace/fill, split, close-tab, close-pane, disposal effects, active fallback, focused-pane fallback, and invalid no-ops.
+- Discrepancies from design: added explicit `appendTab`/`replaceTab` helpers as the open/replace command seam; callers still own id generation and live-session disposal.
+- Adjacent issues parked: none.
+- Verification: `/opt/flutter/bin/cache/dart-sdk/bin/dart format` completed for changed files. `HOME=/tmp/pi-dart-home flutter test test/domain/workspace_document_commands_test.dart test/domain/workspace_pane_test.dart` and `flutter analyze` could not start because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`). Direct `dart test` could not run because pub network access failed with `403 Forbidden`; direct `dart analyze` could not resolve package imports for the same missing package-resolution state.
