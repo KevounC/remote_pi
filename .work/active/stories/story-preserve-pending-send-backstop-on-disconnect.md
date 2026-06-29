@@ -1,7 +1,7 @@
 ---
 id: story-preserve-pending-send-backstop-on-disconnect
 kind: story
-stage: review
+stage: done
 tags: [app, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [story-fix-mobile-working-convergence-on-disconnect]
@@ -26,3 +26,14 @@ Review of `story-fix-mobile-working-convergence-on-disconnect` found that the no
 - Added optional `_resetTurnState({bool clearPendingSendTimers = false})` and changed non-online `_onStatus` path to preserve timer-backed pending-send backstops (`clearPendingSendTimers: false`) while still clearing turn-local UI state.
 - Kept session-switch semantics by calling `_resetTurnState(clearPendingSendTimers: true)` from `activate(...)` so stale timers from another chat are not leaked into the new session.
 - Updated disconnect test to use deterministic async waits (`StatusRetrying` await + periodic `_settle()`): confirms queued input/working/streaming/cancel state are cleared on disconnect, confirms the pending timer remains armed across the drop, advances through settle windows so the row fails visibly, and verifies reconnect does not reintroduce a stuck pending bubble.
+
+## Review (2026-06-28)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**:
+- `story-make-pending-backstop-disconnect-test-deterministic` — `app/test/data/sync/sync_service_test.dart:393` waits for the backstop with repeated real-time `_settle()` sleeps. The test is behavior-asserting and passes, but the timer boundary should be deterministic for this lifecycle regression.
+**Nits**: none
+
+**Notes**: Reviewed commit `3a91f78` and combined state with `5fe399c`. `_resetTurnState(clearPendingSendTimers: false)` preserves pending backstops on non-online transitions while clearing chat-local state, and `activate(...)` still clears timers on session switch. Ran `cd app && /opt/flutter/bin/flutter test --concurrency=1 test/data/sync/sync_service_test.dart` (pass).
