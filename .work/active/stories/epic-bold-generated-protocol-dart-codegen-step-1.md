@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen-step-1
 kind: story
-stage: implementing
+stage: review
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: []
 tags: [refactor]
@@ -108,3 +108,10 @@ The generator may consume the canonical schema directly or a normalized IR emitt
 ## Rollback
 
 Delete `tools/protocol-codegen/` and the spike tests. No app runtime code should depend on this step yet.
+
+## Implementation notes
+- Files changed: `tools/protocol-codegen/bin/protocol-codegen.mjs`, `tools/protocol-codegen/fixtures/minimal_dart_ir.json`, `app/test/protocol_codegen/dart_codegen_test.dart`, `app/test/protocol_codegen/generated/minimal_protocol.g.dart`, `app/test/protocol_codegen/goldens/minimal_protocol.g.dart.golden`.
+- Tests added: `app/test/protocol_codegen/dart_codegen_test.dart` covers deterministic generator output, golden parity, fixture variant dispatch/type getter coverage, fromJson/toJson behavior, unknown type failure, and an exhaustive Dart switch over the generated sealed union.
+- Discrepancies from design: none. No `app/pubspec.yaml` dependency was needed; a small custom Node generator consumes the minimal normalized IR fixture directly and writes deterministic Dart.
+- Verification: targeted codegen test passed with a writable Flutter copy (`HOME=/tmp /tmp/flutter-writable/bin/flutter test test/protocol_codegen/dart_codegen_test.dart`); targeted analyzer passed via direct Dart SDK (`HOME=/tmp /opt/flutter/bin/cache/dart-sdk/bin/dart analyze test/protocol_codegen/dart_codegen_test.dart test/protocol_codegen/generated/minimal_protocol.g.dart`); generator/golden/compile smoke passed (`node ... && cmp ... && dart /tmp/remote_pi_dart_codegen_compile_check.dart`). Full `flutter analyze` reached one pre-existing unrelated deprecation info at `lib/ui/chat/widgets/input_bar.dart:802` (also recorded in archived work); full `flutter test` still fails in existing app action/sync/chat tests around session identity availability, with no app runtime files touched by this story.
+- Adjacent issues parked: none; full-suite failures are outside this generator spike and were not introduced by the changed files.

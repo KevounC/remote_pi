@@ -1,0 +1,39 @@
+{
+  "unions": [
+    {
+      "name": "ServerMessage",
+      "variants": [
+        {
+          "type": "pong",
+          "className": "Pong",
+          "fields": [
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": true
+            }
+          ]
+        },
+        {
+          "type": "error",
+          "className": "ErrorMessage",
+          "fields": [
+            {
+              "name": "message",
+              "wireName": "message",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "code",
+              "wireName": "code",
+              "dartType": "String",
+              "required": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
