@@ -17,7 +17,13 @@ Random thoughts from operator use of the mobile app.
   should reset when a new session is created.
 - **Slash commands are unusable from mobile.** There's no way to enter/discover
   slash commands (`/new`, `/help`, etc.) on the mobile keyboard surface. This
-  blocks a lot of pi interaction that relies on slash commands.
+  blocks a lot of pi interaction that relies on slash commands. One concrete
+  consequence: **`/reload` can't be run from mobile.** Since `/reload` is the
+  path to pick up extension installs and updates into a running session, this
+  means extension lifecycle changes sometimes block the mobile workflow — the
+  user has no mobile-native way to reload the extension/sessions and pick up new
+  or updated extensions. Worth treating a mobile `/reload` affordance as the
+  high-value slice of any slash-command surface work.
 - **New messages don't auto-scroll the chat to the bottom.** When a new message
   arrives (or is sent), the chat window stays at its current scroll position
   instead of scrolling down to show the latest message, so the user has to
