@@ -1,7 +1,7 @@
 ---
 id: story-add-mobile-resume-hydration
 kind: story
-stage: review
+stage: done
 tags: [app, pi-extension, relay]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review, story-fix-mobile-working-convergence-on-disconnect]
@@ -48,3 +48,14 @@ App lifecycle resume currently restarts mesh polling only. It does not explicitl
    - presence map updates are visible,
    - active chat history rehydrates.
 6. Confirm pause/inactive/detached path remains unchanged and does not await network calls.
+
+## Review (2026-06-28)
+
+Verdict: Approve
+
+Findings: none.
+
+Verification:
+- Reviewed commit `7325228` diff against acceptance criteria.
+- Confirmed resume invokes online hydration + session sync, retry/offline uses existing reconnect/boot paths, and pause/inactive/hidden/detached only stop mesh polling without awaiting network work.
+- Ran `cd app && /opt/flutter/bin/flutter test --concurrency=1 test/transport/connection_manager_test.dart test/data/sync/sync_service_test.dart test/main_lifecycle_test.dart` (pass).
