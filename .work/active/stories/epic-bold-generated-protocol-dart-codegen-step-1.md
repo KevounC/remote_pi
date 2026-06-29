@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen-step-1
 kind: story
-stage: review
+stage: implementing
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: []
 tags: [refactor]
@@ -115,3 +115,26 @@ Delete `tools/protocol-codegen/` and the spike tests. No app runtime code should
 - Discrepancies from design: none. No `app/pubspec.yaml` dependency was needed; a small custom Node generator consumes the minimal normalized IR fixture directly and writes deterministic Dart.
 - Verification: targeted codegen test passed with a writable Flutter copy (`HOME=/tmp /tmp/flutter-writable/bin/flutter test test/protocol_codegen/dart_codegen_test.dart`); targeted analyzer passed via direct Dart SDK (`HOME=/tmp /opt/flutter/bin/cache/dart-sdk/bin/dart analyze test/protocol_codegen/dart_codegen_test.dart test/protocol_codegen/generated/minimal_protocol.g.dart`); generator/golden/compile smoke passed (`node ... && cmp ... && dart /tmp/remote_pi_dart_codegen_compile_check.dart`). Full `flutter analyze` reached one pre-existing unrelated deprecation info at `lib/ui/chat/widgets/input_bar.dart:802` (also recorded in archived work); full `flutter test` still fails in existing app action/sync/chat tests around session identity availability, with no app runtime files touched by this story.
 - Adjacent issues parked: none; full-suite failures are outside this generator spike and were not introduced by the changed files.
+
+## Review bounce (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blockers**:
+- The generator does not consume the schema-source Step 5 handoff IR/catalog. `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store list-types` emits the canonical 58-entry generator handoff catalog, including the drift-prone app-pi server types, but `node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema /tmp/remote_pi_protocol_catalog.json --out /tmp/remote_pi_from_catalog.g.dart` fails with `schema.unions must be an array`. The current spike proves Dart emission from `tools/protocol-codegen/fixtures/minimal_dart_ir.json`, but not the requested schema-source/list-types handoff path.
+
+**Acceptance criteria status**:
+- Minimal IR generates sealed Dart variants, `fromJson`, and `toJson`: met.
+- Golden/generator test proves fixture variants appear exactly once: met.
+- Dart compile/exhaustive switch smoke: met.
+- Existing app tests unchanged apart from new generator tests: targeted new test passes; full app suite remains red on pre-existing action/sync/chat/session-identity failures and `flutter analyze` remains red on the pre-existing `axisAlignment` deprecation info.
+- Review-added handoff check: not met; wire this spike to the schema-source Step 5 `list-types` output or add a documented normalization adapter from that catalog/schema refs to the Dart generator IR.
+
+**Verification run**:
+- `node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema tools/protocol-codegen/fixtures/minimal_dart_ir.json --out /tmp/remote_pi_minimal_protocol.g.dart && cmp /tmp/remote_pi_minimal_protocol.g.dart app/test/protocol_codegen/goldens/minimal_protocol.g.dart.golden` — pass.
+- `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store list-types` — pass; emitted 58 catalog entries and includes `user_message`, `compaction`, `action_ok`, `action_error`, `models_list`.
+- `node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema /tmp/remote_pi_protocol_catalog.json --out /tmp/remote_pi_from_catalog.g.dart` — fail as above.
+- `HOME=/tmp /tmp/flutter-writable/bin/flutter test test/protocol_codegen/dart_codegen_test.dart` — pass.
+- `HOME=/tmp /tmp/flutter-writable/bin/cache/dart-sdk/bin/dart analyze test/protocol_codegen/dart_codegen_test.dart test/protocol_codegen/generated/minimal_protocol.g.dart` — pass.
+- `HOME=/tmp /tmp/flutter-writable/bin/flutter analyze` — fail only on pre-existing `lib/ui/chat/widgets/input_bar.dart:802` deprecation info.
+- `HOME=/tmp /tmp/flutter-writable/bin/flutter test` — fail in pre-existing action/sync/chat/session-identity tests; the new `app/test/protocol_codegen/dart_codegen_test.dart` passes inside the full run.
