@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-identity-model-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-canonical-session-identity-model
 depends_on: []
@@ -64,12 +64,12 @@ export function resolveRemoteSessionId(ctx: Pick<ExtensionContext, 'sessionManag
 - Do not persist fork-specific assumptions into the id. The wire treats it as opaque, which keeps a future patchbay migration free to use its own issuer.
 
 ## Acceptance Criteria
-- [ ] Pi-extension has one `RemoteSession`/issuer module and no duplicated session-id derivation.
-- [ ] `pair_ok` and room metadata include the current opaque `session_id`.
-- [ ] Relay reconnect keeps the same `session_id` for the same Pi SDK session.
-- [ ] Session replacement rotates `session_id` and resets `_sessionStartedAt`/message-buffer state consistently.
-- [ ] Tests cover stable-across-reconnect and rotates-on-session-replacement.
-- [ ] `corepack pnpm typecheck` and targeted Pi-extension tests pass.
+- [x] Pi-extension has one `RemoteSession`/issuer module and no duplicated session-id derivation.
+- [x] `pair_ok` and room metadata include the current opaque `session_id`.
+- [x] Relay reconnect keeps the same `session_id` for the same Pi SDK session.
+- [x] Session replacement rotates `session_id` and resets `_sessionStartedAt`/message-buffer state consistently.
+- [x] Tests cover stable-across-reconnect and rotates-on-session-replacement.
+- [x] `corepack pnpm typecheck` and targeted Pi-extension tests pass.
 
 ## Risk
 Medium. The risky edge is incorrectly rotating on reconnect/reload and splitting one real session, or failing to rotate on session replacement and preserving the contamination class.
@@ -89,3 +89,13 @@ Verification:
 - A broader filtered `extension.test.ts` run exercised pair/session tests but failed 3 existing mesh/relay lifecycle tests unrelated to the new identity assertions; the new targeted identity tests passed.
 - `cd relay && cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed.
 - `flutter analyze` could not run because `/opt/flutter/bin/cache` is read-only in this environment. Nearest check run: `HOME=/tmp/remote-pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/protocol/protocol.dart lib/data/transport/connection_manager.dart`, passed with no issues.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Verified commit `ca9176c`, changed files, and parent identity-model design. Reviewer reran `cd pi-extension && corepack pnpm typecheck`, `cd pi-extension && corepack pnpm exec vitest run src/session/remote_session.test.ts`, `cd relay && cargo fmt --check && cargo test`, `cd relay && cargo clippy -- -D warnings`, and the nearest app analyzer check `HOME=/tmp/remote-pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/protocol/protocol.dart lib/data/transport/connection_manager.dart`. Full `cd app && flutter analyze` was attempted but failed before analysis because `/opt/flutter/bin/cache` is read-only.
