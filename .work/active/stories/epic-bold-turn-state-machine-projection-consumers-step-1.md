@@ -125,8 +125,8 @@ Revert `index.ts` and tests to the algebraic-state integration baseline. Because
 **Verdict**: Request changes
 
 **Blockers**:
-- Implementation commit `c40b4ed` is not self-contained and has an undocumented app change. `git show c40b4ed --name-only` includes `app/lib/data/sync/sync_service.dart`, but the implementation notes say app/cockpit consumer rewrites were left to downstream steps and list only pi-extension/turn-state files. The commit adds an import/field for `SessionGate` without adding `app/lib/data/sync/session_gate.dart`; the current dirty working tree supplies that file, so the commit only builds when combined with uncommitted work from another story.
-- Required review target is masked by dirty app changes. `app/lib/data/sync/sync_service.dart`, `app/lib/protocol/protocol.dart`, `app/test/data/sync/sync_service_test.dart`, and new session-gate files are currently modified/untracked, so app verification for this story cannot be attributed honestly to `c40b4ed`.
+- Implementation commit `c40b4ed` is not self-contained and has an undocumented app change. `git show c40b4ed --name-only` includes `app/lib/data/sync/sync_service.dart`, but the implementation notes say app/cockpit consumer rewrites were left to downstream steps and list only pi-extension/turn-state files. The commit adds an import/field for `SessionGate` without adding `app/lib/data/sync/session_gate.dart`; later commit `c68f4ed` (the app-attribution story) supplies the missing file and real gate implementation. That cross-story coupling means this story's implementation commit is not independently reviewable as recorded.
+- The app touch in `c40b4ed` needs to be removed from this story commit, explicitly attributed to the app-attribution story, or at minimum documented in this story's implementation notes with the dependency on `c68f4ed` so future reviewers do not believe this was a pi-extension-only projection change.
 
 **Important**:
 - Story notes should accurately list all touched files and either remove the accidental app dependency from this pi-extension projection story or explicitly split/commit it under the app attribution story.
