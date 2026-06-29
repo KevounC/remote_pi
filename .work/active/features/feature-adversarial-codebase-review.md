@@ -1,7 +1,7 @@
 ---
 id: feature-adversarial-codebase-review
 kind: feature
-stage: review
+stage: done
 tags: [app, pi-extension, relay, cockpit, workflow]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-mobile-remote-coding-best-practices-skill]
@@ -198,3 +198,17 @@ Parked in `.work/backlog/` because they are larger, lower-confidence, or policy-
 ### Refactor recommendation
 
 Proceed with **narrow patches first** for the high-confidence correctness/security bugs above, especially queued messages, late attach, cross-PC transport errors, mobile disconnect convergence, resume hydration, and relay mesh-auth re-verification. Defer larger architectural refactors (cross-PC room-targeting, clone detection, revocation windows, generated protocol contracts) until the narrow patches are green and their tests expose any remaining state-machine shape problems.
+
+### Reviewer provenance note
+
+The original three adversarial reviewer story bodies preserved subagent IDs and read-only attestations, but did not preserve the exact model identifiers used by those reviewer passes. Final feature review treated that as a provenance gap and performed two fresh-context review passes with different model classes (`umans/umans-glm-5.2` for completeness and `openai-codex/gpt-5.5` for adversarial readiness) before advancing. Future multi-model review gates should record reviewer model identifiers directly in each reviewer story so model-family diversity remains auditable after subagent records expire.
+
+## Review (2026-06-28)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none after inline provenance note
+**Nits**: downstream `story-add-transport-frame-observability` remains intentionally `stage: drafting` for design-scope observability work; adjacent late-attach bridge work appears distinct but should be kept in mind during epic implementation.
+
+**Notes**: Substrate deep feature review. Phase 1 completeness pass used fresh-context `umans/umans-glm-5.2` and found the review gate ready; Phase 2 adversarial pass used fresh-context `openai-codex/gpt-5.5` and found one important provenance gap. The provenance gap is recorded above because the expired original subagent records cannot be reconstructed. No routing blockers remain: all four child stories are done, accepted active follow-up stories and parked backlog ideas exist, and the feature records the narrow-patch recommendation.
