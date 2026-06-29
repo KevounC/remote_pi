@@ -7,6 +7,8 @@ parent: epic-remote-session-resilience-refactor
 depends_on: []
 release_binding: null
 gate_origin: null
+status: superseded
+superseded_by: epic-bold-canonical-session-wire-discriminator
 created: 2026-06-29
 updated: 2026-06-29
 ---

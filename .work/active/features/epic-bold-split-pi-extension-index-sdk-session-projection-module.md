@@ -32,4 +32,28 @@ to it.
 - Evidence: `pi-extension/src/index.ts:408-424`, `:538-544`, `:1355-1625`,
   `:1446-1470`, `:3538-3590`.
 
+## Absorbed from `story-investigate-model-thinking-actions-after-session-replacement` (retired 2026-06-29)
+
+The retired investigation pinned a concrete consequence of the module-level
+`_pi` global: after app-triggered `session_new`, valid app `model_set` and
+`thinking_set` actions may return `action_error` until a full reload/restart,
+because they route through stale `_pi.setModel()` / `_pi.setThinkingLevel()`
+while the prompt path has a fresh `_messageApi`. The SDK-session-projection
+module must expose fresh model/thinking setters on the replacement context (or
+a fresh action-API wrapper) — not route through a stale module global. If the
+SDK cannot expose fresh setters on `ReplacedSessionContext` / `session_start`,
+this module records the SDK gap and degrades explicitly.
+
+## Absorbed from `story-fix-cross-pc-bridge-late-attach-after-shutdown` (retired 2026-06-29)
+
+The retired story pinned an async-teardown race in `MeshNode.attachBridge()` /
+`attachCrossPcBridge()`: a `PiForwardClient` can be constructed, await sibling
+discovery, and install `BrokerRemote` listeners *after* `MeshNode.close()` or
+session shutdown if teardown lands during the async discovery window —
+creating stale cross-PC routing state / ghost listeners. The SDK-session-
+projection module (and the relay-transport module's teardown) must enforce a
+post-await closed/epoch check on every bridge-attach continuation; `BrokerRemote
+.handleIncoming`, `PlainPeerChannel`, and `PiForwardClient` must carry internal
+detached guards, not rely solely on listener removal/upstream detach.
+
 <!-- /agile-workflow:refactor-design pins the module boundary. -->

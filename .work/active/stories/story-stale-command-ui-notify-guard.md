@@ -8,7 +8,7 @@ depends_on: [story-stale-session-bound-surface-deep-audit]
 release_binding: null
 gate_origin: null
 created: 2026-06-28
-updated: 2026-06-28
+updated: 2026-06-29
 ---
 
 # Guard command UI notifications against stale contexts after awaits
@@ -39,3 +39,14 @@ Representative areas from `pi-extension/src/index.ts`:
 - Add at least one delayed-await regression for `_cmdPair` or `_cmdRevoke`: pause an awaited dependency, fire `session_shutdown`, resume dependency, assert no stale UI throw.
 - Add at least one daemon/supervisor delayed-await regression or record why daemon commands are not session-bound in this path.
 - Full `pi-extension` verification passes.
+
+## Scope note (2026-06-29 dedup)
+
+This story is the **targeted, shippable slice** of the stale-notify problem — a
+safe command-notification helper that catches stale UI access. It ships as a
+patch under the resilience epic without waiting for the bold refactor. The
+broader concern — that *every* post-await `ctx.ui.notify` is an unnamed state
+machine depending on session-bound context — folds into
+`epic-bold-split-pi-extension-index` (the SDK-session-projection module names
+that boundary). This story's safe-helper becomes a transition aid: code that
+adopts it now is easier to migrate when the bold split lands.

@@ -30,4 +30,14 @@ of a special-case nullable. Retires the late-attach sync workaround
 ## Foundation references
 - Evidence: `pi-extension/src/index.ts:540`, `:1476-1484`, `:3324-3337`.
 
+## Absorbed from `story-fix-cross-pc-bridge-late-attach-after-shutdown` (retired 2026-06-29)
+
+The retired story's late-attach race (bridge attaches relay/broker listeners
+after teardown) is one instance of the broader late-attach pattern the
+`Done(awaitingSync)` state absorbs: an async continuation completing after the
+owning lifecycle has closed. The `Done(awaitingSync)` transition must cover
+not only late-attaching *owners* but any late-completing continuation whose
+owning context may have torn down — the state is "awaiting sync" precisely
+because the continuation may still land.
+
 <!-- /agile-workflow:refactor-design pins the Done(awaitingSync) transition. -->

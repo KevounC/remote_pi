@@ -8,7 +8,7 @@ depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-06-27
-updated: 2026-06-27
+updated: 2026-06-29
 ---
 
 # Remote session resilience refactor
@@ -42,6 +42,37 @@ Sequence the arc as **reference → review → design → refactor**, with only 
 - `feature-mobile-remote-coding-best-practices-skill` — targeted research + durable best-practices skill/checklist for mobile remote-coding mesh apps.
 - `feature-adversarial-codebase-review` — multi-model adversarial review of app, pi-extension, relay, cockpit/site where relevant.
 - `story-mobile-working-status-stuck` — reproduce and fix stale `Working` status.
+
+## Reframing (2026-06-29 bold-refactor scan)
+
+The bold-refactor scan superseded this epic's refactor framing. Arc steps 1-3
+(reference → review → prep) shipped; step 4 ("design the state-machine refactor")
+was the bold scan itself, which produced 8 `epic-bold-*` refactor epics that
+collectively realize the resilience arc's intent.
+
+This epic now tracks only the **residual targeted patches** that ship before the
+bold refactor lands — work that doesn't need to wait for the architectural
+reconception:
+
+- `story-stale-command-ui-notify-guard` — safe command-notification helper
+  (shippable slice; broader concern folds into `epic-bold-split-pi-extension-index`).
+- `story-stale-action-boundary-regression-tests` — boundary regression tests
+  that survive the refactor and inform it.
+- `story-add-transport-frame-observability` — privacy-safe diagnostics for
+  dropped frames (independent of the refactor).
+- `feature-remote-pi-fork-vendor-and-mobile-surface` — fork setup / mobile
+  build smoke (operational, not architectural).
+
+Superseded children retired to `.work/archive/` with `status: superseded` and
+folded into the bold epics that absorb them:
+
+- `story-mobile-working-status-stuck` → `epic-bold-turn-state-machine-projection-consumers`
+- `story-fix-cross-pc-bridge-late-attach-after-shutdown` → `epic-bold-split-pi-extension-index-sdk-session-projection-module` + `epic-bold-turn-state-machine-late-attach`
+- `story-investigate-model-thinking-actions-after-session-replacement` → `epic-bold-split-pi-extension-index-sdk-session-projection-module`
+- `feature-session-isolation-wire-discriminator` → `epic-bold-canonical-session-wire-discriminator`
+
+Do not add new refactor-scale work here — route it through the bold epics. This
+epic closes when its 4 residual survivors ship.
 
 ## Draft acceptance
 

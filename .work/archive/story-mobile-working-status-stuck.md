@@ -7,6 +7,8 @@ parent: epic-remote-session-resilience-refactor
 depends_on: []
 release_binding: null
 gate_origin: null
+status: superseded
+superseded_by: epic-bold-turn-state-machine-projection-consumers
 created: 2026-06-27
 updated: 2026-06-27
 ---

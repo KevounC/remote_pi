@@ -7,6 +7,8 @@ parent: epic-remote-session-resilience-refactor
 depends_on: [story-stale-extension-runtime-audit]
 release_binding: null
 gate_origin: null
+status: superseded
+superseded_by: epic-bold-split-pi-extension-index-sdk-session-projection-module
 created: 2026-06-28
 updated: 2026-06-28
 ---

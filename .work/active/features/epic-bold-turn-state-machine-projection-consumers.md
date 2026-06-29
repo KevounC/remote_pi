@@ -33,4 +33,22 @@ source.
   correction), `relay/src/handlers/peer.rs:386-407` (relay merge-patch),
   `cockpit/lib/app/cockpit/ui/session/agent_session.dart:1-140`.
 
+## Absorbed from `story-mobile-working-status-stuck` (retired 2026-06-29)
+
+The retired story's reproduction confirms the projection-consumer target: mobile
+can continue showing `Working` after the Pi agent is idle. Suspected causes it
+documented — all three are the "three loosely-coupled signals converging" the
+algebraic turn state machine eliminates:
+- Pi publishes `room_meta.working: true` on turn start but misses/loses the
+  corresponding false on turn end, errors, session switch, compaction, or
+  shutdown.
+- Reconnect hydration replays cached `working: true` without authoritative idle
+  correction.
+- App-side room meta treats `working` as sticky and does not reconcile with
+  connection/session lifecycle.
+
+The projection-consumer design must cover all five turn-end paths (end, error,
+session switch, compaction, shutdown) and the reconnect-hydration replay as
+projection states, not ad-hoc corrections.
+
 <!-- /agile-workflow:refactor-design pins each consumer's projection. -->

@@ -50,16 +50,16 @@ The current `remote-pi` mobile path is workable but now has two separate needs:
 
 ## Child work
 
-- [`story-remote-pi-local-vendor-switch`](../stories/story-remote-pi-local-vendor-switch.md) — switch
+- [`story-remote-pi-local-vendor-switch`](../releases/extension-0.5.4/story-remote-pi-local-vendor-switch.md) — shipped `extension-0.5.4`. Switch
   Pi development loading from the npm package to the local fork without losing the ability to revert.
-- [`story-remote-pi-stale-context-investigation`](../stories/story-remote-pi-stale-context-investigation.md)
-  — pin the recurring stale-context rejection sequence and classify unsafe context captures before patching.
-- [`story-remote-pi-stale-context-source-fix`](../stories/story-remote-pi-stale-context-source-fix.md)
-  — port the stale-context crash fix into `pi-extension/src/`, verify, and prepare upstreamable patch.
-- [`story-remote-pi-android-build-smoke`](../archive/story-remote-pi-android-build-smoke.md) — prove
+- [`story-remote-pi-stale-context-investigation`](../releases/extension-0.5.4/story-remote-pi-stale-context-investigation.md)
+  — shipped `extension-0.5.4`. Pinned the recurring stale-context rejection sequence and classified unsafe context captures before patching.
+- [`story-remote-pi-stale-context-source-fix`](../releases/extension-0.5.4/story-remote-pi-stale-context-source-fix.md)
+  — shipped `extension-0.5.4`. Ported the stale-context crash fix into `pi-extension/src/`, verified.
+- [`story-remote-pi-android-build-smoke`](../releases/app-v1.1.1/story-remote-pi-android-build-smoke.md) — shipped `app-v1.1.1`. Proved
   the Flutter app can build locally and pair against the current relay.
 - [`story-remote-pi-mobile-mode-client-slice`](../stories/story-remote-pi-mobile-mode-client-slice.md)
-  — only after the build path is known, add one thin in-app control slice if plain-text mobile mode
+  — still drafting. Only after the build path is known, add one thin in-app control slice if plain-text mobile mode
   is not enough.
 
 ## Acceptance
