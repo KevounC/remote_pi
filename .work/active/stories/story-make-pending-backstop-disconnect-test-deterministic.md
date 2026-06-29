@@ -1,7 +1,7 @@
 ---
 id: story-make-pending-backstop-disconnect-test-deterministic
 kind: story
-stage: review
+stage: done
 tags: [app, tests]
 parent: epic-remote-session-resilience-refactor
 depends_on: [story-preserve-pending-send-backstop-on-disconnect]
@@ -31,3 +31,12 @@ Review of `story-preserve-pending-send-backstop-on-disconnect` found that the re
 - Set the timeout under test to `Duration.zero` for this deterministic regression run and used a bounded yield loop (`Duration.zero`) to wait for the row to flip to the timeout-failure shape.
 - Removed the prior fixed 5× `_settle()` delay wall-clock wait entirely; failure-path synchronization is now an explicit row-state polling gate with a hard cap and loud failure when unmet.
 - No production behavior was changed; only test timing/sequencing was adjusted.
+## Review (2026-06-28)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Test-only change: replaced the 5× `_settle()` wall-clock wait with a zero-delay bounded poll gate and `pendingSendTimeout: Duration.zero`. Verification recorded green by implementer (`flutter test --concurrency=1` pass, 5-iteration loop pass, full suite 505 passed). No production code touched, so no lens walk required. All behavior assertions preserved; the test still fails if non-online `_resetTurnState` cancels pending-send backstops.
