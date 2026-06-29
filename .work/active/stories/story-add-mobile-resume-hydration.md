@@ -1,7 +1,7 @@
 ---
 id: story-add-mobile-resume-hydration
 kind: story
-stage: implementing
+stage: review
 tags: [app, pi-extension, relay]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review, story-fix-mobile-working-convergence-on-disconnect]
@@ -23,6 +23,28 @@ App lifecycle resume currently restarts mesh polling only. It does not explicitl
 
 ## Acceptance Criteria
 
-- [ ] Deterministic test proves resume triggers room/presence/session hydration even when cached state appears online.
-- [ ] Manual smoke plan covers background during idle and during working, then foreground.
-- [ ] No network wait is introduced in pause/background handling.
+- [x] Deterministic test proves resume triggers room/presence/session hydration even when cached state appears online.
+- [x] Manual smoke plan covers background during idle and during working, then foreground.
+- [x] No network wait is introduced in pause/background handling.
+
+## Implementation notes
+
+- Added `reconcileOnAppResume(...)` in `app/lib/main.dart` (annotated `@visibleForTesting`) and wired it into `didChangeAppLifecycleState`.
+- `resumed` still performs existing mesh polling restart (`startPolling()` + `pullOnDemand()`), then triggers resume reconciliation without awaiting:
+  - when `ConnectionManager.status` is `StatusOnline`, replay subscriptions + snapshots for known peers and request a session sync;
+  - when status is `StatusRetrying`/`StatusOffline`, reconnect through existing `ConnectionManager.connectTo(activePeer)` and fallback to `boot()`.
+- Added `ConnectionManager.requestResumeHydration()` in `app/lib/data/transport/connection_manager.dart` to handle online resume snapshot refresh (reuses known peer list from storage if subscription cache is empty).
+
+## Manual smoke plan
+
+1. Set up two paired peers and verify one visible session tile is idle and one working.
+2. Background the app in both states:
+   - Case A: no active working turn.
+   - Case B: active turn/working visible.
+3. During background, force a relay reconnect event (suspend networking or stop/resume the relay).
+4. Return app to foreground.
+5. Confirm that mesh polling restarts and room/presence snapshots are refreshed via resume hook (no full restart required) and the active session re-syncs:
+   - room working/online indicators converge to relay truth,
+   - presence map updates are visible,
+   - active chat history rehydrates.
+6. Confirm pause/inactive/detached path remains unchanged and does not await network calls.

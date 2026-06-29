@@ -12,6 +12,28 @@ import 'package:app/ui/core/themes/themes.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+@visibleForTesting
+Future<void> reconcileOnAppResume({
+  required ConnectionManager connectionManager,
+  required void Function() requestSessionSync,
+}) async {
+  final status = connectionManager.status;
+  if (status is StatusOnline) {
+    await connectionManager.requestResumeHydration();
+    requestSessionSync();
+    return;
+  }
+
+  if (status is StatusRetrying || status is StatusOffline) {
+    final peer = connectionManager.activePeer;
+    if (peer != null) {
+      await connectionManager.connectTo(peer);
+      return;
+    }
+    await connectionManager.boot();
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Plan 31 — open the v2 SSOT boxes + WIPE the volatile runtime box BEFORE
@@ -61,11 +83,19 @@ class _RemotePiAppState extends State<RemotePiApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final meshSync = injector.get<MeshSyncService>();
+    final connectionManager = injector.get<ConnectionManager>();
+    final syncService = injector.get<SyncService>();
+
     switch (state) {
       case AppLifecycleState.resumed:
         meshSync.startPolling();
         // ignore: unawaited_futures
         meshSync.pullOnDemand();
+        // ignore: unawaited_futures
+        reconcileOnAppResume(
+          connectionManager: connectionManager,
+          requestSessionSync: syncService.requestSync,
+        );
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:

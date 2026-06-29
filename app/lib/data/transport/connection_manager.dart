@@ -320,6 +320,23 @@ class ConnectionManager extends Service {
     link.sendControl(presenceCheckFrame(list));
   }
 
+  /// Reconnect-time and resume-time hydration entrypoint for visible state.
+  ///
+  /// Replays subscriptions and requests both presence and room snapshots for
+  /// every known peer currently bound in storage (or the existing
+  /// `_subscribedEpks` cache when already available). This keeps the app
+  /// converged after resume when status remained `StatusOnline` in cache.
+  Future<void> requestResumeHydration() async {
+    if (_status is! StatusOnline) return;
+    if (_subscribedEpks.isEmpty) {
+      final peers = await _storage.listPeers();
+      if (peers.isEmpty) return;
+      subscribeToPeers(peers.map((p) => p.remoteEpk).toList());
+      return;
+    }
+    _replaySubscriptions();
+  }
+
   /// Current online channel cast to its control side, when supported.
   IControlLink? get _controlLink {
     final s = _status;
