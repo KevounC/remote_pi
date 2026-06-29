@@ -1,7 +1,7 @@
 ---
 id: story-fix-cross-pc-transport-error-uuid
 kind: story
-stage: review
+stage: done
 tags: [relay, pi-extension, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review]
@@ -33,3 +33,13 @@ Relay-synthesized cross-PC `transport_error` envelopes currently use a 32-charac
 - Discrepancies from design: none.
 - Adjacent issues parked: none.
 - Verification: `cd relay && cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed; `cd pi-extension && corepack pnpm typecheck && corepack pnpm test -- src/session/envelope.test.ts` passed.
+
+## Review (2026-06-28)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fresh-context review of commit `69943ad`; correctness, tests, security/privacy, design alignment, UUID parser compatibility, and foundation-doc drift lenses checked. Verification evidence from implementation notes accepted; tests were not re-run.
