@@ -18,6 +18,10 @@ Random thoughts from operator use of the mobile app.
 - **Slash commands are unusable from mobile.** There's no way to enter/discover
   slash commands (`/new`, `/help`, etc.) on the mobile keyboard surface. This
   blocks a lot of pi interaction that relies on slash commands.
+- **New messages don't auto-scroll the chat to the bottom.** When a new message
+  arrives (or is sent), the chat window stays at its current scroll position
+  instead of scrolling down to show the latest message, so the user has to
+  manually scroll to follow the conversation.
 
 ## Feature requests
 
