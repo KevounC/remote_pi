@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-schema-source
 kind: feature
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-generated-protocol
 depends_on: []
@@ -391,6 +391,18 @@ The fixture set is useful but no longer complete and is not generated from the a
 5. `epic-bold-generated-protocol-schema-source-step-5`
 
 All five steps are buildable and reviewable in isolation because they add side-by-side schema/fixture/check artifacts before any runtime consumer swaps to generated code.
+
+## Implementation summary — wave 4
+
+Stories now ready for review:
+
+- `epic-bold-generated-protocol-schema-source-step-1` — done before this run.
+- `epic-bold-generated-protocol-schema-source-step-2` — done before this run.
+- `epic-bold-generated-protocol-schema-source-step-3` — advanced to review in this run; relay outer/control/rooms/presence/cross-PC schemas and fixtures added.
+- `epic-bold-generated-protocol-schema-source-step-4` — advanced to review in this run; cockpit control compatibility/target schema and fixtures added.
+- `epic-bold-generated-protocol-schema-source-step-5` — advanced to review in this run; AJV fixture checker and deterministic type catalog added.
+
+Verification in this run: Python parsed all `protocol/**/*.json` and `protocol/**/*.jsonl`; `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store check` passed; `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store list-types` emitted 58 valid JSON catalog entries. Runtime consumers remain unchanged.
 
 ## Atomic steps acknowledged
 
