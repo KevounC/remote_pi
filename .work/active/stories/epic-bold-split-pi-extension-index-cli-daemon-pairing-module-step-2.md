@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-cli-daemon-pairing-module
 depends_on: [epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-1]
@@ -88,3 +88,13 @@ Restore the explicit `pi.registerCommand(...)` block and delete the registry hel
 - Discrepancies from design: the registry is introduced as a helper consumed by the existing legacy command surface; command bodies remain in `index.ts` until later extraction steps.
 - Adjacent issues parked: none.
 - Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/extension/command_surface/commands.test.ts` passed.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Implementation commit `73fe0d1` introduces `registerRemotePiCommands`/`RemotePiCommandSpec`, derives root completions and nested command registration from the same spec table, preserves the public command list/descriptions, and keeps unknown root subcommands falling back to `_cmdRoot`. Verification run from `pi-extension/`: `corepack pnpm typecheck` passed; targeted `commands.test.ts` passed; `extension.test.ts` command registration/removed-command cases passed before unrelated current-head failures. Full `corepack pnpm test` remains not clean in this container due pre-existing UDS/cwd-lock/leader-election environment failures plus unrelated current-head session-gate expectations outside this command-registry slice.
