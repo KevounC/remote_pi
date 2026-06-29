@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-state-machine-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension, app, relay]
 parent: epic-bold-reachability-contract-state-machine
 depends_on: []
@@ -96,11 +96,11 @@ Optional markdown companion should state: this file is the temporary source unti
 
 ## Acceptance Criteria
 
-- [ ] `protocol/schema/reachability.json` contains exactly the five states: `connecting`, `online`, `degraded`, `offline`, `retrying`.
-- [ ] The only retry schedule in the artifact is `[1, 2, 5, 10, 30]` seconds.
-- [ ] The artifact records the 25s/25s/20s/70s heartbeat/liveness timings.
-- [ ] The transition table includes the Online → Degraded and Degraded → Online recovery paths.
-- [ ] No production adapter imports or behavior change in this step.
+- [x] `protocol/schema/reachability.json` contains exactly the five states: `connecting`, `online`, `degraded`, `offline`, `retrying`.
+- [x] The only retry schedule in the artifact is `[1, 2, 5, 10, 30]` seconds.
+- [x] The artifact records the 25s/25s/20s/70s heartbeat/liveness timings.
+- [x] The transition table includes the Online → Degraded and Degraded → Online recovery paths.
+- [x] No production adapter imports or behavior change in this step.
 
 ## Risk
 
@@ -138,3 +138,13 @@ Relocated the reachability contract from retired `.orchestration/contracts/` int
 Updated the parent feature and reachability child/app/pi adapter work items to reference `protocol/schema/reachability.json` so follow-on projection tests read from the owned schema-world location. The JSON payload itself is unchanged; this fix only changes ownership/location and companion prose. Runtime behavior remains unchanged.
 
 Verification: `python3 -m json.tool protocol/schema/reachability.json` passed.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Re-review after bounce. Verified commit `ddaefda`, confirmed the artifact now lives under `protocol/schema/` with no remaining `.orchestration/contracts/reachability` references, and re-ran `python3 -m json.tool protocol/schema/reachability.json`. The JSON still contains the five required states, `[1, 2, 5, 10, 30]` backoff, 25s/25s/20s/70s heartbeat/liveness timings, and Online→Degraded / Degraded→Online transitions. Fast-lane story advance to `done`.
