@@ -1,7 +1,7 @@
 ---
 id: story-guard-stale-session-history-after-new
 kind: story
-stage: review
+stage: done
 tags: [app, pi-extension, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review]
@@ -30,3 +30,14 @@ After `session_new`, the app clears local state immediately and waits for `actio
 - `clearActiveSession()` now bumps the boundary to reject stale reconnect `SessionHistory` replay from the previous session.
 - `_applyHistory()` now gates incoming `SessionHistory` by session-start boundary before write, updates the boundary on accepted history, and updates index `sessionStartedAt` only inside the accepted-history write path.
 - `_loadIndex()` now restores the boundary from persisted `SessionIndexRecord.sessionStartedAt` so session continuity is preserved across activation/reload.
+
+## Review (2026-06-28)
+
+Verdict: Approve with comments
+
+Findings:
+- Important: `app/lib/data/sync/sync_service.dart:393` only bumps the stale-history boundary when `_activeSessionStartedAt` is already non-null, and `_applyHistory()` only rejects older history when that boundary exists at `app/lib/data/sync/sync_service.dart:681`. A New Session issued before the first accepted/persisted `session_started_at` can still be repopulated by a late stale `SessionHistory`. Filed follow-up `story-guard-history-clear-without-prior-start`.
+
+Verification:
+- Reviewed commit `63b1a26` diff against acceptance criteria.
+- Ran `cd app && /opt/flutter/bin/flutter test --concurrency=1 test/transport/connection_manager_test.dart test/data/sync/sync_service_test.dart test/main_lifecycle_test.dart` (pass).
