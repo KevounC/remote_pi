@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-state-machine-step-1
 kind: story
-stage: review
+stage: implementing
 tags: [refactor, bold, pi-extension, app, relay]
 parent: epic-bold-reachability-contract-state-machine
 depends_on: []
@@ -115,3 +115,15 @@ Delete the new reachability contract artifact(s). No production code depends on 
 Implemented inline by the bold-refactor implement-orchestrator because no subagent dispatcher is exposed in this delegated harness. Added `.orchestration/contracts/reachability.json` as the inert canonical artifact and `.orchestration/contracts/reachability.md` as the temporary-source companion. The artifact records exactly the designed five states, `[1, 2, 5, 10, 30]` backoff seconds, 25s/25s/20s/70s heartbeat/liveness timings, and the Online→Degraded / Degraded→Online transitions. Runtime behavior is unchanged.
 
 Verification: `python3 -m json.tool .orchestration/contracts/reachability.json` passed. Production subproject builds were not run for this inert artifact-only story.
+
+## Review findings (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blockers**:
+- The new reachability contract artifact was placed under `.orchestration/contracts/`, but the current foundation decision in `docs/DECISIONS.md` says `.orchestration/` has been retired and only the legacy cross-language protocol contract test remains there until generated-protocol replaces it. This is a new contract and must be relocated into the new `protocol/schema/` world or an explicitly owned reachability contract location, with the story/parent references updated accordingly.
+
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review with direct verification. The JSON artifact itself parsed successfully and contains the requested five states, `[1, 2, 5, 10, 30]` backoff, 25s/25s/20s/70s timings, and Online→Degraded / Degraded→Online transitions; the blocker is the location, not the JSON content.
