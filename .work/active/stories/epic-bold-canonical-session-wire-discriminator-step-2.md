@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-wire-discriminator-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-canonical-session-wire-discriminator
 depends_on: [epic-bold-canonical-session-wire-discriminator-step-1]
@@ -77,3 +77,13 @@ Remove the session gate and server stamping together. Reverting only validation 
 - Discrepancies from design: server stamping already existed through `_withCurrentSession` from the identity-model work; this story locked the command-rejection behavior with focused tests rather than duplicating the same router edit.
 - Adjacent issues parked: none.
 - Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/session/session_gate.test.ts` passed.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Inspected implementation commit `1f5b7e2`; this story added focused gate tests over non-session controls, matching commands, stale ids, and missing ids, relying on the already-landed extension router integration/stamping from the parent chain. Verification run: `corepack pnpm --config.store-dir=/tmp/remote-pi-pnpm-store typecheck`; targeted Vitest `src/session/remote_session.test.ts src/session/session_gate.test.ts src/protocol/codec.test.ts src/actions/handlers.test.ts`. Full `corepack pnpm test` remains red on pre-existing UDS/cwd-lock/leader-election environment failures and is not treated as a regression.
