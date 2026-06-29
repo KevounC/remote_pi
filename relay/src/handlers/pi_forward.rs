@@ -24,10 +24,11 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::ws::Message;
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use rand::{RngCore, thread_rng};
 use tracing::warn;
 
-use crate::mesh::MeshStore;
+use crate::mesh::{MeshStore, owner_pk_hash, verify_envelope};
 use crate::peers::registry::PeerRegistry;
 
 /// Time-to-live for a positive membership lookup. The plan calls for 60 s.
@@ -66,18 +67,40 @@ impl MeshAuthCache {
             }
         }
 
-        let blobs = match store.all_blobs() {
-            Ok(b) => b,
+        let envelopes = match store.all_envelopes() {
+            Ok(records) => records,
             Err(e) => {
                 warn!("mesh store read failed during auth: {e}");
                 return None;
             }
         };
 
-        for blob in blobs {
-            let parsed: serde_json::Value = match serde_json::from_slice(&blob) {
+        for (stored_owner_hash, envelope) in envelopes {
+            let header = match verify_envelope(&envelope) {
+                Ok(header) => header,
+                Err(err) => {
+                    warn!(%err, "invalid stored mesh blob skipped during auth");
+                    continue;
+                }
+            };
+            let owner_pk_bytes = match B64.decode(&header.owner_pk) {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    warn!(%err, "stored mesh owner key decode failed during auth");
+                    continue;
+                }
+            };
+            if owner_pk_hash(&owner_pk_bytes) != stored_owner_hash.to_lowercase() {
+                warn!("stored mesh owner hash mismatch skipped during auth");
+                continue;
+            }
+
+            let parsed: serde_json::Value = match serde_json::from_slice(&envelope.blob) {
                 Ok(v) => v,
-                Err(_) => continue,
+                Err(err) => {
+                    warn!(%err, "verified mesh blob failed member parse during auth");
+                    continue;
+                }
             };
             let Some(members_arr) = parsed.get("members").and_then(|v| v.as_array()) else {
                 continue;
@@ -242,18 +265,20 @@ mod tests {
     use super::*;
     use crate::PresenceManager;
     use crate::RoomManager;
+    use ed25519_dalek::{Signer, SigningKey};
     use std::sync::Arc;
 
     fn fresh_cache_and_store() -> (MeshAuthCache, MeshStore) {
         (MeshAuthCache::new(), MeshStore::open_in_memory().unwrap())
     }
 
-    fn write_owner_blob(store: &MeshStore, owner_pk: &[u8], members: &[&str], version: u64) {
-        use sha2::{Digest, Sha256};
-        let pk_b64 = {
-            use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
-            B64.encode(owner_pk)
-        };
+    fn make_owner_key() -> SigningKey {
+        SigningKey::generate(&mut rand::thread_rng())
+    }
+
+    fn write_owner_blob(store: &MeshStore, owner_sk: &SigningKey, members: &[&str], version: u64) {
+        let owner_pk = owner_sk.verifying_key().to_bytes();
+        let pk_b64 = B64.encode(owner_pk);
         let members_json: Vec<serde_json::Value> = members
             .iter()
             .map(|m| serde_json::json!({ "remote_epk": m }))
@@ -264,23 +289,79 @@ mod tests {
             "members": members_json,
         });
         let blob_bytes = serde_json::to_vec(&blob).unwrap();
-        let hash = {
-            let d = Sha256::digest(owner_pk);
-            let mut s = String::with_capacity(64);
-            for b in d {
-                s.push_str(&format!("{b:02x}"));
-            }
-            s
-        };
+        let sig = owner_sk.sign(&blob_bytes).to_bytes();
         store
-            .upsert(&hash, owner_pk, version, &blob_bytes, &[0u8; 64], 0)
+            .upsert(
+                &owner_pk_hash(&owner_pk),
+                &owner_pk,
+                version,
+                &blob_bytes,
+                &sig,
+                0,
+            )
+            .unwrap();
+    }
+
+    fn write_owner_blob_with_hash(
+        store: &MeshStore,
+        owner_sk: &SigningKey,
+        row_owner_hash: &str,
+        members: &[&str],
+        version: u64,
+    ) {
+        let owner_pk = owner_sk.verifying_key().to_bytes();
+        let pk_b64 = B64.encode(owner_pk);
+        let members_json: Vec<serde_json::Value> = members
+            .iter()
+            .map(|m| serde_json::json!({ "remote_epk": m }))
+            .collect();
+        let blob = serde_json::json!({
+            "owner_pk": pk_b64,
+            "version": version,
+            "members": members_json,
+        });
+        let blob_bytes = serde_json::to_vec(&blob).unwrap();
+        let sig = owner_sk.sign(&blob_bytes).to_bytes();
+        store
+            .upsert(row_owner_hash, &owner_pk, version, &blob_bytes, &sig, 0)
+            .unwrap();
+    }
+
+    fn write_invalid_owner_blob(
+        store: &MeshStore,
+        owner_sk: &SigningKey,
+        members: &[&str],
+        version: u64,
+    ) {
+        let owner_pk = owner_sk.verifying_key().to_bytes();
+        let pk_b64 = B64.encode(owner_pk);
+        let members_json: Vec<serde_json::Value> = members
+            .iter()
+            .map(|m| serde_json::json!({ "remote_epk": m }))
+            .collect();
+        let blob = serde_json::json!({
+            "owner_pk": pk_b64,
+            "version": version,
+            "members": members_json,
+        });
+        let blob_bytes = serde_json::to_vec(&blob).unwrap();
+        store
+            .upsert(
+                &owner_pk_hash(&owner_pk),
+                &owner_pk,
+                version,
+                &blob_bytes,
+                &[0u8; 64],
+                0,
+            )
             .unwrap();
     }
 
     #[tokio::test]
     async fn authorized_same_owner() {
         let (cache, store) = fresh_cache_and_store();
-        write_owner_blob(&store, &[1u8; 32], &["pi_a", "pi_b"], 1);
+        let owner = make_owner_key();
+        write_owner_blob(&store, &owner, &["pi_a", "pi_b"], 1);
         assert!(cache.is_authorized("pi_a", "pi_b", &store));
         assert!(cache.is_authorized("pi_b", "pi_a", &store));
     }
@@ -288,8 +369,10 @@ mod tests {
     #[tokio::test]
     async fn not_authorized_cross_owner() {
         let (cache, store) = fresh_cache_and_store();
-        write_owner_blob(&store, &[1u8; 32], &["pi_a"], 1);
-        write_owner_blob(&store, &[2u8; 32], &["pi_b"], 1);
+        let owner_a = make_owner_key();
+        let owner_b = make_owner_key();
+        write_owner_blob(&store, &owner_a, &["pi_a"], 1);
+        write_owner_blob(&store, &owner_b, &["pi_b"], 1);
         assert!(!cache.is_authorized("pi_a", "pi_b", &store));
         assert!(!cache.is_authorized("pi_b", "pi_a", &store));
     }
@@ -297,7 +380,8 @@ mod tests {
     #[tokio::test]
     async fn cache_hits_after_first_lookup() {
         let (cache, store) = fresh_cache_and_store();
-        write_owner_blob(&store, &[3u8; 32], &["pi_x", "pi_y"], 1);
+        let owner = make_owner_key();
+        write_owner_blob(&store, &owner, &["pi_x", "pi_y"], 1);
         // First lookup: cold (scans store)
         assert!(cache.is_authorized("pi_x", "pi_y", &store));
         // Subsequent lookups: cache HIT (the test merely ensures correctness;
@@ -306,6 +390,71 @@ mod tests {
         assert!(cache.is_authorized("pi_x", "pi_y", &store));
         let g = cache.inner.lock().unwrap();
         assert!(g.contains_key("pi_x"), "first lookup must populate cache");
+    }
+
+    #[tokio::test]
+    async fn invalid_stored_blob_does_not_authorize_members() {
+        let (cache, store) = fresh_cache_and_store();
+        let owner = make_owner_key();
+        write_invalid_owner_blob(&store, &owner, &["pi_a", "pi_b"], 1);
+
+        assert!(!cache.is_authorized("pi_a", "pi_b", &store));
+        let g = cache.inner.lock().unwrap();
+        assert!(
+            !g.contains_key("pi_a"),
+            "invalid mesh blobs must not populate the positive auth cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn stored_owner_hash_mismatch_does_not_authorize_members() {
+        let (cache, store) = fresh_cache_and_store();
+        let owner = make_owner_key();
+        write_owner_blob_with_hash(
+            &store,
+            &owner,
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            &["pi_a", "pi_b"],
+            1,
+        );
+
+        assert!(!cache.is_authorized("pi_a", "pi_b", &store));
+    }
+
+    #[tokio::test]
+    async fn invalid_stored_blob_returns_not_authorized_for_pi_envelope() {
+        let registry = Arc::new(PeerRegistry::new(
+            Arc::new(PresenceManager::new()),
+            Arc::new(RoomManager::new()),
+            Arc::new(crate::metrics::FirehoseMetrics::new()),
+        ));
+        let store = MeshStore::open_in_memory().unwrap();
+        let cache = MeshAuthCache::new();
+        let owner = make_owner_key();
+        write_invalid_owner_blob(&store, &owner, &["pi_a", "pi_b"], 1);
+
+        let frame = serde_json::json!({
+            "type": "pi_envelope",
+            "to_pc": "pi_b",
+            "envelope": {
+                "from": "a:sess",
+                "to": "b:agent",
+                "id": "018f4444-4444-7444-8444-444444444444",
+                "re": null,
+                "body": { "type": "ping" },
+            },
+        });
+
+        match handle_pi_envelope("pi_a", &frame, &registry, &store, &cache).await {
+            PiForwardResult::TransportError(message) => {
+                let Message::Text(text) = message else {
+                    panic!("transport_error must be a text frame");
+                };
+                let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
+                assert_eq!(frame["envelope"]["body"]["reason"], "not_authorized");
+            }
+            PiForwardResult::Forwarded => panic!("invalid stored blob must not authorize forward"),
+        }
     }
 
     #[tokio::test]

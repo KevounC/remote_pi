@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::types::MeshRecord;
+use super::types::{MeshEnvelope, MeshRecord};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -126,14 +126,22 @@ impl MeshStore {
         Ok(())
     }
 
-    /// Returns the raw `blob` bytes of every stored mesh version (one per
-    /// Owner). Used by mesh authorization (plan 25) to find which Owner a
-    /// given Pi-pubkey belongs to.
-    pub fn all_blobs(&self) -> Result<Vec<Vec<u8>>, StoreError> {
+    /// Returns every stored mesh envelope with its row key. Used by mesh
+    /// authorization to re-verify Owner signatures before trusting members.
+    pub fn all_envelopes(&self) -> Result<Vec<(String, MeshEnvelope)>, StoreError> {
         let conn = self.conn.lock().expect("mesh store mutex poisoned");
-        let mut stmt = conn.prepare("SELECT blob FROM mesh_versions")?;
-        let rows: Result<Vec<Vec<u8>>, _> =
-            stmt.query_map([], |r| r.get::<_, Vec<u8>>(0))?.collect();
+        let mut stmt = conn.prepare("SELECT owner_pk_hash, blob, sig FROM mesh_versions")?;
+        let rows: Result<Vec<(String, MeshEnvelope)>, _> = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    MeshEnvelope {
+                        blob: r.get(1)?,
+                        sig: r.get(2)?,
+                    },
+                ))
+            })?
+            .collect();
         Ok(rows?)
     }
 

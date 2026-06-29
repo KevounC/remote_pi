@@ -1,7 +1,7 @@
 ---
 id: story-reverify-relay-mesh-auth-cache
 kind: story
-stage: implementing
+stage: review
 tags: [relay, security, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review]
@@ -17,6 +17,14 @@ Relay `MeshAuthCache::members_of()` authorizes cross-PC forwarding by parsing st
 
 ## Acceptance Criteria
 
-- [ ] Mesh auth cache read path verifies Owner signature and owner hash before trusting members.
-- [ ] Invalid/corrupt stored blobs are skipped and logged without authorizing forwarding.
-- [ ] Add relay tests proving an invalid stored blob cannot authorize `pi_envelope` forwarding.
+- [x] Mesh auth cache read path verifies Owner signature and owner hash before trusting members.
+- [x] Invalid/corrupt stored blobs are skipped and logged without authorizing forwarding.
+- [x] Add relay tests proving an invalid stored blob cannot authorize `pi_envelope` forwarding.
+
+## Implementation notes
+
+- Files changed: `relay/src/handlers/pi_forward.rs`, `relay/src/mesh/store.rs`.
+- Tests added: `MeshAuthCache` unit coverage for invalid signatures and owner-hash mismatches, plus `handle_pi_envelope` coverage proving corrupt stored blobs return `not_authorized` instead of authorizing forwarding.
+- Discrepancies from design: none.
+- Adjacent issues parked: none.
+- Verification: `cd relay && cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed.
