@@ -19,9 +19,27 @@ Rejected alternatives for this fork-private bold refactor:
 - `schema/remote-pi.schema.json` — umbrella schema and shared metadata.
 - `schema/manifest.json` — deterministic family registry for generators.
 - `schema/defs/common.schema.json` — shared scalar/JSON definitions.
-- Family schemas are created as side-by-side placeholders in Step 1 and are filled by later schema-source stories.
+- `schema/defs/agent-envelope.schema.json` — generic `{from,to,id,re,body}` agent envelope used by local/cross-PC mesh.
+- Family schemas define app↔Pi, relay control/outer, cross-PC, cockpit control, and reachability contract surfaces.
+- `fixtures/<family>/*.jsonl` — compatibility examples validated by the schema check.
+- `scripts/check-fixtures.ts` — compiles schemas and validates every configured fixture.
+- `scripts/list-types.ts` — emits the deterministic generator handoff catalog.
 
 Profiles:
 
 - `compat` describes the current compatibility wire.
 - `canonical-session` records the future `session_id`/`turn_id` enforcement target without changing live behavior in this step.
+
+## Commands
+
+Run from the repo root or this package:
+
+```bash
+corepack pnpm --dir protocol install
+corepack pnpm --dir protocol check
+corepack pnpm --dir protocol list-types
+```
+
+`check` fails when a fixture violates its family schema or when a configured fixture file is empty/missing. `list-types` prints JSON entries with `family`, `transport`, discriminator (`type`, `customType`, or `untagged`), schema ref, and profile-required fields. The TS, Dart, and Rust generator stories consume this catalog instead of re-discovering message names independently.
+
+`.orchestration/contracts/` remains a legacy cross-language reference until generated consumers replace it; do not delete it as part of schema-source work.

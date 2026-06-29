@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-schema-source-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-generated-protocol-schema-source
 depends_on: [epic-bold-generated-protocol-schema-source-step-4]
@@ -89,3 +89,12 @@ addFormats(ajv);
 ## Rollback
 
 Remove the validation scripts, protocol package metadata, and newly copied fixtures. The schema files from earlier steps may remain usable as static documents, and no runtime consumer rollback is required.
+
+## Implementation notes
+
+- Added protocol package scripts and dev dependencies for AJV 2020-12 fixture validation and generator type-catalog emission.
+- Added `protocol/scripts/check-fixtures.ts`, which loads all schema files with `$id`, compiles each manifest family, and validates configured JSONL fixtures for app-pi client/server, relay control/outer, cross-PC, and cockpit control.
+- Added `protocol/scripts/list-types.ts`, which emits deterministic JSON catalog entries with family, transport, discriminator, type/customType/untagged id, schema ref, and profile-required fields for downstream TS/Dart/Rust generator stories.
+- Updated `protocol/README.md` with package commands, fixture/catalog semantics, and the rule that `.orchestration/contracts/` remains a legacy reference until generated consumers replace it.
+- Script entrypoints use `node --import tsx ...` rather than the bare `tsx` CLI because this harness rejects tsx's IPC pipe listen with `EPERM`; the package still depends on `tsx` for TS execution.
+- Verification run from repo root: `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store check` passed; `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store list-types` emitted 58 catalog entries and valid JSON. Install was run with `NPM_CONFIG_USERCONFIG=/tmp/remote-pi-empty-npmrc` and a local temp store because the default home npmrc/store were not writable in this harness.

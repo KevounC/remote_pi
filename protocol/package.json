@@ -3,5 +3,15 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Canonical JSON Schema source for Remote Pi protocol code generation"
+  "description": "Canonical JSON Schema source for Remote Pi protocol code generation",
+  "scripts": {
+    "check": "node --import tsx scripts/check-fixtures.ts",
+    "list-types": "node --import tsx scripts/list-types.ts"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.0",
+    "ajv-formats": "^3.0.0",
+    "tsx": "^4.22.0",
+    "typescript": "^6.0.3"
+  }
 }

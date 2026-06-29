@@ -54,14 +54,10 @@
         "name": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false,
-      "allOf": [
-        {
-          "if": { "properties": { "command": { "const": "rename" } }, "required": ["command"] },
-          "then": { "required": ["name"] },
-          "else": { "not": { "required": ["name"] } }
-        }
-      ],
-      "x-remote-pi": { "targetEncoding": "structured-pi-custom-event" }
+      "x-remote-pi": {
+        "targetEncoding": "structured-pi-custom-event",
+        "commandArgumentRules": { "rename": ["name"] }
+      }
     },
     "relayStatus": { "enum": ["connected", "reconnecting", "disconnected"] },
     "relayStateDetails": {

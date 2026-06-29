@@ -55,9 +55,9 @@
         "type": { "const": "pi_envelope_in" },
         "from_pc": { "type": "string", "minLength": 1 },
         "envelope": {
-          "oneOf": [
-            { "$ref": "#/$defs/agentEnvelope" },
-            { "$ref": "#/$defs/transportErrorEnvelope" }
+          "anyOf": [
+            { "$ref": "#/$defs/transportErrorEnvelope" },
+            { "$ref": "#/$defs/agentEnvelope" }
           ]
         }
       },
