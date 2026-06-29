@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-schema-source-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-generated-protocol-schema-source
 depends_on: []
@@ -108,3 +108,11 @@ Create a repo-root schema package whose source is standards-based JSON Schema 20
 ## Rollback
 
 Delete the new `protocol/` schema package and revert the parent item notes. Because this step is side-by-side only, rollback does not require changing app, extension, relay, or cockpit runtime code.
+
+## Implementation Notes
+
+Implemented inline by the bold-refactor implement-orchestrator because no subagent dispatcher is exposed in this delegated harness. Added the repo-root `protocol/` package with JSON Schema 2020-12 as the committed neutral source, a manifest enumerating the five families (`appPiClient`, `appPiServer`, `relayControl`, `crossPc`, `cockpitControl`), shared `defs/common.schema.json`, and placeholder family schemas for later schema-source steps. Runtime consumers are intentionally unchanged.
+
+Rationale logged in `protocol/README.md`: JSON Schema matches the current JSONL wire and keeps the source language-neutral; Protobuf/Buf, TypeScript-native schemas, and custom IDL were rejected for the reasons recorded there. This keeps the short-term fork refactor compatible with a future patchbay migration.
+
+Verification: `python3 -m json.tool` passed for `protocol/package.json`, `protocol/schema/*.json`, and `protocol/schema/defs/*.json`. No app/extension/relay/cockpit runtime checks were run because this step is side-by-side schema metadata only.

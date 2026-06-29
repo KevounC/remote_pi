@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://remote-pi.dev/schemas/app-pi-server.schema.json",
+  "title": "Remote Pi Pi-to-app server messages",
+  "description": "Placeholder family schema established by schema-source step 1. ServerMessage and SessionHistoryEvent variants are ported in step 2.",
+  "not": {},
+  "x-remote-pi": {
+    "family": "appPiServer",
+    "transport": "relay-jsonl",
+    "discriminator": "type",
+    "status": "placeholder"
+  }
+}

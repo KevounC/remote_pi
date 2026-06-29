@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://remote-pi.dev/schemas/cockpit-control.schema.json",
+  "title": "Remote Pi cockpit control overlay",
+  "description": "Placeholder family schema established by schema-source step 1. The current NUL-prefix compatibility and target structured commands are ported in step 4.",
+  "not": {},
+  "x-remote-pi": {
+    "family": "cockpitControl",
+    "transport": "pi-custom-event",
+    "discriminator": "type",
+    "status": "placeholder"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://remote-pi.dev/schemas/relay-control.schema.json",
+  "title": "Remote Pi relay control frames",
+  "description": "Placeholder family schema established by schema-source step 1. Relay-owned auth, presence, room, and control frames are ported in step 3.",
+  "not": {},
+  "x-remote-pi": {
+    "family": "relayControl",
+    "transport": "relay-jsonl",
+    "discriminator": "type",
+    "status": "placeholder"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://remote-pi.dev/schemas/cross-pc.schema.json",
+  "title": "Remote Pi cross-PC frames",
+  "description": "Placeholder family schema established by schema-source step 1. Pi-to-Pi forwarding frames and agent envelopes are ported in step 3.",
+  "not": {},
+  "x-remote-pi": {
+    "family": "crossPc",
+    "transport": "relay-jsonl",
+    "discriminator": "type",
+    "status": "placeholder"
+  }
+}

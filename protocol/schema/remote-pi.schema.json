@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://remote-pi.dev/schemas/remote-pi.schema.json",
+  "title": "Remote Pi wire protocol",
+  "description": "Umbrella schema for Remote Pi protocol families. Step 1 establishes the neutral source and manifest; later stories fill each family schema without changing runtime behavior.",
+  "$defs": {
+    "uuid": { "$ref": "./defs/common.schema.json#/$defs/uuid" },
+    "sessionId": { "$ref": "./defs/common.schema.json#/$defs/sessionId" },
+    "turnId": { "$ref": "./defs/common.schema.json#/$defs/turnId" },
+    "openJson": { "$ref": "./defs/common.schema.json#/$defs/openJson" }
+  },
+  "oneOf": [
+    { "$ref": "./app-pi-client.schema.json" },
+    { "$ref": "./app-pi-server.schema.json" },
+    { "$ref": "./relay-control.schema.json" },
+    { "$ref": "./cross-pc.schema.json" },
+    { "$ref": "./cockpit-control.schema.json" }
+  ],
+  "x-remote-pi": {
+    "discriminator": "type",
+    "profiles": ["compat", "canonical-session"],
+    "transports": ["relay-jsonl", "pi-custom-event"],
+    "manifest": "./manifest.json"
+  }
+}

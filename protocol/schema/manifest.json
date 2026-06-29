@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "source": "json-schema-2020-12",
+  "discriminator": "type",
+  "profiles": ["compat", "canonical-session"],
+  "families": [
+    {
+      "id": "appPiClient",
+      "transport": "relay-jsonl",
+      "schema": "schema/app-pi-client.schema.json",
+      "description": "App-to-Pi ClientMessage variants"
+    },
+    {
+      "id": "appPiServer",
+      "transport": "relay-jsonl",
+      "schema": "schema/app-pi-server.schema.json",
+      "description": "Pi-to-app ServerMessage and SessionHistoryEvent variants"
+    },
+    {
+      "id": "relayControl",
+      "transport": "relay-jsonl",
+      "schema": "schema/relay-control.schema.json",
+      "description": "Relay-owned auth, presence, room, and control frames"
+    },
+    {
+      "id": "crossPc",
+      "transport": "relay-jsonl",
+      "schema": "schema/cross-pc.schema.json",
+      "description": "Pi-to-Pi forwarding frames and generic agent envelope"
+    },
+    {
+      "id": "cockpitControl",
+      "transport": "pi-custom-event",
+      "schema": "schema/cockpit-control.schema.json",
+      "description": "Remote Pi cockpit control overlay over Pi custom events"
+    }
+  ]
+}

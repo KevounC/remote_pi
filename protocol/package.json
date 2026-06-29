@@ -1,0 +1,7 @@
+{
+  "name": "@remote-pi/protocol-schema",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Canonical JSON Schema source for Remote Pi protocol code generation"
+}

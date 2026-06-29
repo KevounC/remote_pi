@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://remote-pi.dev/schemas/defs/common.schema.json",
+  "title": "Remote Pi common schema definitions",
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sessionId": {
+      "type": "string",
+      "minLength": 1,
+      "x-remote-pi": {
+        "opaque": true,
+        "profileRequired": ["canonical-session"]
+      }
+    },
+    "turnId": {
+      "type": "string",
+      "minLength": 1,
+      "x-remote-pi": {
+        "opaque": true,
+        "profileRequired": ["canonical-session"]
+      }
+    },
+    "openJson": true
+  }
+}
