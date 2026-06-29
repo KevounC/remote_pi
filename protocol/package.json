@@ -6,7 +6,9 @@
   "description": "Canonical JSON Schema source for Remote Pi protocol code generation",
   "scripts": {
     "check": "node --import tsx scripts/check-fixtures.ts",
-    "list-types": "node --import tsx scripts/list-types.ts"
+    "list-types": "node --import tsx scripts/list-types.ts",
+    "generate:rust": "node --import tsx scripts/list-types.ts | node ../tools/protocol-codegen/bin/protocol-codegen.mjs --target rust --schema - --out-dir ../relay/src/protocol/generated",
+    "generate:rust:check": "node --import tsx scripts/list-types.ts | node ../tools/protocol-codegen/bin/protocol-codegen.mjs --target rust --schema - --out-dir ../relay/src/protocol/generated --check"
   },
   "devDependencies": {
     "ajv": "^8.17.0",

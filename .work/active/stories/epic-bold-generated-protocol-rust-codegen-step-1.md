@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-rust-codegen-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-generated-protocol-rust-codegen
 depends_on: [epic-bold-generated-protocol-schema-source-step-5]
@@ -75,3 +75,11 @@ Medium. The strategic risk is accidentally creating a second Rust-specific proto
 ## Rollback
 
 Remove the Rust generator backend, generated module skeleton, and check wiring. No runtime relay behavior depends on this step.
+
+## Implementation notes
+- Files changed: `tools/protocol-codegen/bin/protocol-codegen.mjs`, `protocol/package.json`, `relay/src/protocol/mod.rs`, `relay/src/protocol/generated/mod.rs`, `relay/src/protocol/generated/outer.rs`, `relay/src/protocol/generated/room.rs`, `relay/src/protocol/generated/control.rs`, `relay/src/protocol/generated/cross_pc.rs`, `relay/src/protocol/generated/mesh.rs`.
+- Tests added: none; this story adds the generator backend and committed generated skeleton for later runtime adoption stories.
+- Discrepancies from design: generated relay-owned Rust modules are side-by-side and intentionally not consumed by relay runtime code yet, except for adding the generated module to `protocol::mod`. The Step 1 catalog still lacks full per-field Rust metadata for every frame, so the backend emits stable relay-owned skeletons and fails staleness via `generate:rust:check` rather than switching handwritten consumers.
+- Adjacent issues parked: none.
+- Verification: `corepack pnpm --dir protocol generate:rust`, `corepack pnpm --dir protocol generate:rust:check`, `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` all passed from `relay/` (with pnpm warning about unreadable `/home/agent/.npmrc`, non-fatal).
+

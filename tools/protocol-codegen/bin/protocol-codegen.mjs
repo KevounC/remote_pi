@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
@@ -8,18 +9,22 @@ function usage() {
   return [
     'Usage:',
     '  node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema <ir.json> --out <file.dart>',
+    '  node tools/protocol-codegen/bin/protocol-codegen.mjs --target rust --schema <list-types.json|-> --out-dir <dir> [--check true]',
   ].join('\n');
 }
 
 function parseArgs(argv) {
   const args = new Map();
-  for (let i = 0; i < argv.length; i += 2) {
+  for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i];
-    const value = argv[i + 1];
-    if (!key?.startsWith('--') || value == null || value.startsWith('--')) {
-      throw new Error(usage());
+    if (!key?.startsWith('--')) throw new Error(usage());
+    const next = argv[i + 1];
+    if (next == null || next.startsWith('--')) {
+      args.set(key.slice(2), 'true');
+    } else {
+      args.set(key.slice(2), next);
+      i += 1;
     }
-    args.set(key.slice(2), value);
   }
   return args;
 }
@@ -289,21 +294,260 @@ function emitDart(schema) {
   return `${sections.join('\n').trimEnd()}\n`;
 }
 
+
+function rustModuleForFamily(family) {
+  switch (family) {
+    case 'relayControl':
+      return 'control';
+    case 'crossPc':
+      return 'cross_pc';
+    case 'appPiClient':
+    case 'appPiServer':
+      return null;
+    case 'cockpitControl':
+      return null;
+    default:
+      return null;
+  }
+}
+
+function rustHeader(moduleName) {
+  return [
+    '// GENERATED CODE - DO NOT EDIT BY HAND.',
+    '// Source: protocol/schema/manifest.json via protocol-codegen IR.',
+    `// Module: ${moduleName}.`,
+    '',
+    '#![allow(dead_code)]',
+    '',
+  ];
+}
+
+function rustVariantName(type) {
+  const name = pascalCase(type);
+  return name.length > 0 ? name : 'Unknown';
+}
+
+function emitRustControl(entries) {
+  const lines = rustHeader('control');
+  lines.push('use serde::{Deserialize, Serialize};');
+  lines.push('use serde_json::{Map, Value};');
+  lines.push('');
+  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
+  lines.push('pub struct RawRelayControlFrame {');
+  lines.push('    #[serde(rename = "type")]');
+  lines.push('    pub frame_type: String,');
+  lines.push('    #[serde(flatten)]');
+  lines.push('    pub fields: Map<String, Value>,');
+  lines.push('}');
+  lines.push('');
+  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
+  lines.push('#[serde(tag = "type", rename_all = "snake_case")]');
+  lines.push('pub enum RelayControlFrame {');
+  for (const entry of entries) {
+    lines.push(`    #[serde(rename = "${entry.type}")]`);
+    lines.push(`    ${rustVariantName(entry.type)} {`);
+    lines.push('        #[serde(flatten)]');
+    lines.push('        fields: Map<String, Value>,');
+    lines.push('    },');
+  }
+  lines.push('}');
+  lines.push('');
+  return `${lines.join('\n')}\n`;
+}
+
+function emitRustCrossPc(entries) {
+  const lines = rustHeader('cross_pc');
+  lines.push('use serde::{Deserialize, Serialize};');
+  lines.push('use serde_json::Value;');
+  lines.push('');
+  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
+  lines.push('pub struct AgentEnvelope {');
+  lines.push('    pub from: String,');
+  lines.push('    pub to: Value,');
+  lines.push('    pub id: String,');
+  lines.push('    pub re: Option<String>,');
+  lines.push('    pub body: Value,');
+  lines.push('}');
+  lines.push('');
+  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
+  lines.push('pub struct PiEnvelopeFrame {');
+  lines.push('    pub to_pc: String,');
+  lines.push('    pub envelope: AgentEnvelope,');
+  lines.push('}');
+  lines.push('');
+  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
+  lines.push('pub struct PiEnvelopeInFrame {');
+  lines.push('    pub from_pc: String,');
+  lines.push('    pub envelope: AgentEnvelope,');
+  lines.push('}');
+  lines.push('');
+  lines.push('pub const CROSS_PC_TYPES: &[&str] = &[');
+  for (const entry of entries) lines.push(`    "${entry.type}",`);
+  lines.push('];');
+  lines.push('');
+  return `${lines.join('\n')}\n`;
+}
+
+function emitRustOuter() {
+  const lines = rustHeader('outer');
+  lines.push('use serde::{Deserialize, Serialize};');
+  lines.push('');
+  lines.push('fn default_room() -> String { "main".to_owned() }');
+  lines.push('');
+  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
+  lines.push('pub struct OuterEnvelope {');
+  lines.push('    pub peer: String,');
+  lines.push('    #[serde(default = "default_room")]');
+  lines.push('    pub room: String,');
+  lines.push('    pub ct: String,');
+  lines.push('}');
+  lines.push('');
+  return `${lines.join('\n')}\n`;
+}
+
+function emitRustRoom() {
+  const lines = rustHeader('room');
+  lines.push('use serde::{Deserialize, Serialize};');
+  lines.push('');
+  lines.push('#[derive(Debug, Default, Clone, Serialize, Deserialize)]');
+  lines.push('pub struct RoomMeta {');
+  lines.push('    pub model: Option<String>,');
+  lines.push('    pub thinking: Option<String>,');
+  lines.push('    #[serde(default)]');
+  lines.push('    pub working: bool,');
+  lines.push('}');
+  lines.push('');
+  lines.push('#[derive(Debug, Default, Clone, Serialize, Deserialize)]');
+  lines.push('pub struct RoomMetaPatch {');
+  lines.push('    pub model: Option<Option<String>>,');
+  lines.push('    pub thinking: Option<Option<String>>,');
+  lines.push('    pub working: Option<bool>,');
+  lines.push('}');
+  lines.push('');
+  return `${lines.join('\n')}\n`;
+}
+
+function emitRustMesh() {
+  const lines = rustHeader('mesh');
+  lines.push('use serde::{Deserialize, Serialize};');
+  lines.push('');
+  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
+  lines.push('pub struct MeshEnvelopeWire {');
+  lines.push('    pub blob: String,');
+  lines.push('    pub sig: String,');
+  lines.push('}');
+  lines.push('');
+  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
+  lines.push('pub struct MeshGetResponse {');
+  lines.push('    pub blob: String,');
+  lines.push('    pub sig: String,');
+  lines.push('    pub version: u64,');
+  lines.push('    pub updated_at: i64,');
+  lines.push('}');
+  lines.push('');
+  return `${lines.join('\n')}\n`;
+}
+
+function emitRustMod() {
+  return [
+    '// GENERATED CODE - DO NOT EDIT BY HAND.',
+    '// Source: protocol/schema/manifest.json via protocol-codegen IR.',
+    '',
+    'pub mod control;',
+    'pub mod cross_pc;',
+    'pub mod mesh;',
+    'pub mod outer;',
+    'pub mod room;',
+    '',
+  ].join('\n');
+}
+
+function emitRust(schema) {
+  const entries = requireArray(schema, 'list-types catalog');
+  const byModule = new Map();
+  for (const entry of entries) {
+    const module = rustModuleForFamily(entry.family);
+    if (!module) continue;
+    const bucket = byModule.get(module) ?? [];
+    bucket.push(entry);
+    byModule.set(module, bucket);
+  }
+  return new Map([
+    ['mod.rs', emitRustMod()],
+    ['outer.rs', emitRustOuter()],
+    ['room.rs', emitRustRoom()],
+    ['control.rs', emitRustControl((byModule.get('control') ?? []).sort((a, b) => a.type.localeCompare(b.type)))],
+    ['cross_pc.rs', emitRustCrossPc((byModule.get('cross_pc') ?? []).sort((a, b) => a.type.localeCompare(b.type)))],
+    ['mesh.rs', emitRustMesh()],
+  ]);
+}
+
+function readSchemaInput(schemaPath) {
+  if (schemaPath === '-') {
+    return JSON.parse(readFileSync(0, 'utf8'));
+  }
+  return JSON.parse(readFileSync(schemaPath, 'utf8'));
+}
+
+function rustfmtContent(content) {
+  return execFileSync('rustfmt', ['--emit', 'stdout'], {
+    input: content,
+    encoding: 'utf8',
+  });
+}
+
+function writeRustOutputs(outputs, outDir, check) {
+  mkdirSync(outDir, { recursive: true });
+  const stale = [];
+  for (const [file, rawContent] of outputs.entries()) {
+    const content = rustfmtContent(rawContent);
+    const path = `${outDir}/${file}`;
+    if (check) {
+      let current = '';
+      try {
+        current = readFileSync(path, 'utf8');
+      } catch (_) {
+        stale.push(file);
+        continue;
+      }
+      if (current !== content) stale.push(file);
+    } else {
+      writeFileSync(path, content, 'utf8');
+    }
+  }
+  if (stale.length > 0) {
+    throw new Error(`Generated Rust protocol is stale: ${stale.join(', ')}`);
+  }
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const target = args.get('target');
   const schemaPath = args.get('schema');
   const outPath = args.get('out');
-  if (target !== 'dart' || !schemaPath || !outPath) {
-    throw new Error(usage());
+  const outDir = args.get('out-dir');
+  const check = args.get('check') === 'true';
+
+  if (target === 'dart') {
+    if (!schemaPath || !outPath) throw new Error(usage());
+    const rawSchema = readSchemaInput(schemaPath);
+    const schema = normalizeSchemaInput(rawSchema, schemaPath);
+    validateSchema(schema);
+    const output = emitDart(schema);
+    mkdirSync(dirname(outPath), { recursive: true });
+    writeFileSync(outPath, output, 'utf8');
+    return;
   }
 
-  const rawSchema = JSON.parse(readFileSync(schemaPath, 'utf8'));
-  const schema = normalizeSchemaInput(rawSchema, schemaPath);
-  validateSchema(schema);
-  const output = emitDart(schema);
-  mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, output, 'utf8');
+  if (target === 'rust') {
+    if (!schemaPath || !outDir) throw new Error(usage());
+    const rawSchema = readSchemaInput(schemaPath);
+    const outputs = emitRust(rawSchema);
+    writeRustOutputs(outputs, outDir, check);
+    return;
+  }
+
+  throw new Error(usage());
 }
 
 try {
