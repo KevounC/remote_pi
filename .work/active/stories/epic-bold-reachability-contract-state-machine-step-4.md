@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-state-machine-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-reachability-contract-state-machine
 depends_on: [epic-bold-reachability-contract-state-machine-step-3]
@@ -89,11 +89,11 @@ let mut heartbeat = time::interval_at(
 
 ## Acceptance Criteria
 
-- [ ] `cargo fmt --check` passes from `relay/`.
-- [ ] `cargo test reachability` (or nearest filter) passes from `relay/`.
-- [ ] The relay heartbeat interval in `handlers/peer.rs` comes from `reachability.rs`.
-- [ ] Relay behavior remains the same: first ping after 25s, then every 25s.
-- [ ] The relay does not attempt to classify app/Pi `Degraded` state.
+- [x] `cargo fmt --check` passes from `relay/`.
+- [x] `cargo test reachability` (or nearest filter) passes from `relay/`.
+- [x] The relay heartbeat interval in `handlers/peer.rs` comes from `reachability.rs`.
+- [x] Relay behavior remains the same: first ping after 25s, then every 25s.
+- [x] The relay does not attempt to classify app/Pi `Degraded` state.
 
 ## Risk
 
@@ -110,3 +110,13 @@ Inline `Duration::from_secs(25)` in `handlers/peer.rs` again and delete `relay/s
 - Kept relay semantics narrow: the relay only consumes the WS ping constant; it does not infer app/Pi degraded state, session state, or offline queue semantics.
 - Tests compare the Rust projection against `protocol/schema/reachability.json` for states, backoff seconds, and heartbeat fields.
 - Verification run from `relay/`: `cargo fmt --check`, `cargo test reachability`, and `cargo clippy -- -D warnings` all passed.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane substrate review. Inspected commit `8c255aa`; relay heartbeat now imports `RELAY_WS_PING_INTERVAL` and keeps the first tick/repeat interval at 25s. Relay only consumes the WS ping constant and does not infer degraded/session/offline-queue state. Verification run from `relay/`: `cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed.
