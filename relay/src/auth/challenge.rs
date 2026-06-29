@@ -6,6 +6,8 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use rand::RngCore as _;
 use serde::{Deserialize, Serialize};
 
+use crate::rooms::RoomMeta;
+
 /// Max milliseconds to wait for a "hello" before closing the connection.
 pub const HELLO_TIMEOUT_MS: u64 = 5_000;
 
@@ -13,8 +15,34 @@ pub const HELLO_TIMEOUT_MS: u64 = 5_000;
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientAuthMsg {
-    Hello { pubkey: String },
-    Auth { sig: String },
+    Hello {
+        pubkey: String,
+        #[serde(default)]
+        room_id: Option<String>,
+        #[serde(default)]
+        room_meta: Option<ClientHelloRoomMeta>,
+    },
+    Auth {
+        sig: String,
+    },
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ClientHelloRoomMeta {
+    pub name: Option<String>,
+    pub cwd: Option<String>,
+    pub session_id: Option<String>,
+    pub model: Option<String>,
+    pub thinking: Option<String>,
+    #[serde(default)]
+    pub working: bool,
+}
+
+#[derive(Debug)]
+pub struct AuthenticatedPeer {
+    pub verifying_key: VerifyingKey,
+    pub peer_id: String,
+    pub room_meta: RoomMeta,
 }
 
 /// Messages that the relay sends during the auth handshake.
@@ -51,14 +79,39 @@ pub fn gen_nonce() -> ([u8; 32], String) {
 /// Parses a JSONL "hello" line and returns the peer's Ed25519 verifying key.
 /// Returns [`AuthError::NoHello`] if the line is not a hello message.
 pub fn parse_hello(line: &str) -> Result<VerifyingKey, AuthError> {
+    Ok(parse_hello_bootstrap(line, 0)?.verifying_key)
+}
+
+pub fn parse_hello_bootstrap(line: &str, now_ms: i64) -> Result<AuthenticatedPeer, AuthError> {
     let msg: ClientAuthMsg = serde_json::from_str(line)?;
     match msg {
-        ClientAuthMsg::Hello { pubkey } => {
+        ClientAuthMsg::Hello {
+            pubkey,
+            room_id,
+            room_meta,
+        } => {
             let bytes = B64.decode(&pubkey)?;
             let arr: [u8; 32] = bytes
                 .try_into()
                 .map_err(|_| AuthError::InvalidPubkey("expected 32 bytes".into()))?;
-            VerifyingKey::from_bytes(&arr).map_err(|e| AuthError::InvalidPubkey(e.to_string()))
+            let verifying_key = VerifyingKey::from_bytes(&arr)
+                .map_err(|e| AuthError::InvalidPubkey(e.to_string()))?;
+            let peer_id = B64.encode(verifying_key.to_bytes());
+            let meta = room_meta.unwrap_or_default();
+            Ok(AuthenticatedPeer {
+                verifying_key,
+                peer_id,
+                room_meta: RoomMeta {
+                    room_id: room_id.unwrap_or_else(|| "main".to_string()),
+                    name: meta.name,
+                    cwd: meta.cwd,
+                    session_id: meta.session_id,
+                    model: meta.model,
+                    thinking: meta.thinking,
+                    working: meta.working,
+                    started_at: now_ms,
+                },
+            })
         }
         _ => Err(AuthError::NoHello),
     }

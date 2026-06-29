@@ -5,7 +5,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, State};
 use axum::response::Response;
-use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
@@ -13,12 +12,12 @@ use tracing::{info, warn};
 
 use crate::AppState;
 use crate::auth::challenge::{
-    HELLO_TIMEOUT_MS, challenge_line, gen_nonce, parse_hello, verify_auth,
+    HELLO_TIMEOUT_MS, challenge_line, gen_nonce, parse_hello_bootstrap, verify_auth,
 };
 use crate::handlers::control::{ControlFrameError, bounded_peer_list};
 use crate::protocol::outer::{OuterEnvelope, parse_line};
 use crate::reachability::RELAY_WS_PING_INTERVAL;
-use crate::rooms::{RoomMeta, RoomMetaPatch};
+use crate::rooms::RoomMetaPatch;
 
 /// Maximum number of peer IDs accepted in one presence/rooms control frame.
 /// The relay uses unbounded per-connection channels internally, so every frame
@@ -128,13 +127,18 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
         }
     };
 
-    let vk = match parse_hello(&hello_text) {
-        Ok(vk) => vk,
+    let started_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    let authenticated = match parse_hello_bootstrap(&hello_text, started_at) {
+        Ok(peer) => peer,
         Err(e) => {
             warn!(addr = %peer_addr, err = %e, "bad hello, closing");
             return;
         }
     };
+    let vk = authenticated.verifying_key;
 
     // ── 2. Send challenge ─────────────────────────────────────────────────
     let (nonce, nonce_b64) = gen_nonce();
@@ -158,58 +162,9 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
         return;
     }
 
-    let peer_id = B64.encode(vk.to_bytes());
+    let peer_id = authenticated.peer_id;
     let peer_short = peer_id[peer_id.len().saturating_sub(8)..].to_string();
-
-    // Extract room_id and room_meta from hello (auth handled separately above).
-    let room_meta = {
-        let hello: serde_json::Value =
-            serde_json::from_str(&hello_text).unwrap_or(serde_json::Value::Null);
-        let room_id = hello
-            .get("room_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("main")
-            .to_string();
-        let room_meta_val = hello.get("room_meta");
-        let name = room_meta_val
-            .and_then(|m| m.get("name"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let cwd = room_meta_val
-            .and_then(|m| m.get("cwd"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let session_id = room_meta_val
-            .and_then(|m| m.get("session_id"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let model = room_meta_val
-            .and_then(|m| m.get("model"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let thinking = room_meta_val
-            .and_then(|m| m.get("thinking"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let working = room_meta_val
-            .and_then(|m| m.get("working"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let started_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
-        RoomMeta {
-            room_id,
-            name,
-            cwd,
-            session_id,
-            model,
-            thinking,
-            working,
-            started_at,
-        }
-    };
+    let room_meta = authenticated.room_meta;
     let room_id = room_meta.room_id.clone();
 
     info!(peer = %peer_short, room = %room_id, addr = %peer_addr, "authenticated");

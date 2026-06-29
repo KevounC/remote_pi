@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-control-handlers-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-control-handlers
 depends_on: [epic-bold-relay-typed-actor-control-handlers-step-1]
@@ -92,3 +92,10 @@ Medium. The auth path is connection-critical; default handling for existing clie
 ## Rollback
 
 Restore `parse_hello`/`verify_auth` plus the current raw hello `room_meta` extraction in `handle_peer`. This rollback is isolated from the post-auth control-handler stories.
+
+## Implementation notes
+- Files changed: `relay/src/auth/challenge.rs`, `relay/src/auth/auth_test.rs`, `relay/src/handlers/peer.rs`.
+- Tests added: auth bootstrap tests for explicit room metadata and default `main`/`working:false` behavior.
+- Discrepancies from design: implemented a typed `parse_hello_bootstrap` admission result in the current auth module rather than a full async `authenticate_peer` wrapper so the existing socket/challenge flow stays behavior-preserving. `handle_peer` no longer reparses `hello_text` as raw JSON after auth.
+- Adjacent issues parked: none.
+- Verification: `cargo fmt --check` passed; `cargo test auth::auth_test` passed; `cargo test authorized_forward_targets_only_to_room` passed as a cross-check that the prior relay targeting changes still compile.
