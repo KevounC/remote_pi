@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-state-machine-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract-state-machine
 depends_on: [epic-bold-reachability-contract-state-machine-step-1]
@@ -124,3 +124,13 @@ Low. This introduces a pure module and tests only. The only likely failure mode 
 ## Rollback
 
 Delete `pi-extension/src/reachability/contract.ts` and its test. Existing reconnect code remains unchanged.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review with direct commit/file verification. Reviewed commit `6f06bd0`; `pi-extension/src/reachability/contract.ts` is a pure projection only, with exactly the five contract states, display names, `[1_000, 2_000, 5_000, 10_000, 30_000]` capped backoff, heartbeat constants, and transition triples matching `protocol/schema/reachability.json`. No production reconnect adapter imports the new projection yet. Verification passed: `cd pi-extension && corepack pnpm typecheck`; targeted Vitest run including `src/reachability/contract.test.ts` passed (50 tests across the selected protocol/session/reachability files). Full `corepack pnpm test` was attempted separately and remains blocked by sandbox UDS/lock failures unrelated to this pure module.
