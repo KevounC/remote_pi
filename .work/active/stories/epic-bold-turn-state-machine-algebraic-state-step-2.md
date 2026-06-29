@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-algebraic-state-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-turn-state-machine-algebraic-state
 depends_on: [epic-bold-turn-state-machine-algebraic-state-step-1]
@@ -146,3 +146,13 @@ Revert `index.ts`, `relay_client.ts`, and the related tests to the previous bool
 - Discrepancies from design: the hook integration and `RoomMeta` typing had already landed before this stride; this pass completed the remaining queue migration by removing the duplicate `_queuedMessage` global and deriving queued state/drain from `projectTurn(_turn)`.
 - Adjacent issues parked: none.
 - Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/session/turn_state.test.ts src/session/session_gate.test.ts` passed.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Inspected implementation commit `8c9a1f80b4683b4d93d0263ef6a016992230a6e3` and current `pi-extension/src/index.ts` / `src/session/turn_state.ts`. The remaining duplicate `_queuedMessage` global is gone; queued state is projected from `TurnSnapshot`, and direct greps found no module-level `_currentTurnId`, `_turnActive`, `_finishedTurnIdAwaitingSync`, `_peersAttachedDuringTurn`, or `_queuedMessage` globals in `index.ts` (only projected helper names remain). Verification run: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/session/turn_state.test.ts src/session/session_gate.test.ts` passed. Full `corepack pnpm test` was also attempted and failed in unrelated environment-sensitive UDS/cwd-lock suites (`listen EPERM` under `/tmp/.../*.sock` plus lock acquisition failures), while the targeted turn reducer/session-gate checks passed.
