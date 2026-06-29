@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-wire-discriminator-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-canonical-session-wire-discriminator
 depends_on: [epic-bold-canonical-session-wire-discriminator-step-1]
@@ -70,3 +70,10 @@ High. Incorrect bootstrap/rotation could reject legitimate app commands. Keep va
 
 ## Rollback
 Remove the session gate and server stamping together. Reverting only validation while leaving required fields risks false confidence and legacy contamination.
+
+## Implementation notes
+- Files changed: `pi-extension/src/session/session_gate.test.ts`, prior gate/stamping integration in `pi-extension/src/index.ts` now validates `session_sync`, `cancel`, queued messages, prompt delivery, and typed actions before SDK calls.
+- Tests added: `pi-extension/src/session/session_gate.test.ts` covers non-session controls, matching session-scoped commands, stale ids, and missing ids.
+- Discrepancies from design: server stamping already existed through `_withCurrentSession` from the identity-model work; this story locked the command-rejection behavior with focused tests rather than duplicating the same router edit.
+- Adjacent issues parked: none.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/session/session_gate.test.ts` passed.
