@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log
 kind: epic
-stage: drafting
+stage: implementing
 tags: [refactor, bold, pi-extension, app, cockpit]
 parent: null
 depends_on: [epic-bold-canonical-session]
@@ -51,3 +51,7 @@ generated-protocol epic (events are generated wire types).
   session (pi-extension source of truth + app local log).
 - epic-bold-transcript-event-log-hydration-replay — `_applyHistory` becomes
   replay, not replace; foreign-history corruption structurally impossible.
+
+## Decomposition
+
+Decomposition pre-existed (bold-refactor scan) — child features listed above in "Child features (riskiest first". Advanced to implementing via epic-design Phase 1.5 short-circuit.

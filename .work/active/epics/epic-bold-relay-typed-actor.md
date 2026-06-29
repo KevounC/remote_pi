@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor
 kind: epic
-stage: drafting
+stage: implementing
 tags: [refactor, bold, relay]
 parent: null
 depends_on: [epic-bold-generated-protocol]
@@ -49,3 +49,7 @@ or keep them separate-but-typed.
   fanout already retired by the canonical-session epic.
 - epic-bold-relay-typed-actor-control-handlers — presence/rooms/`room_meta_update`
   become typed handlers; `presence.rs` vs `rooms.rs` duplication resolved.
+
+## Decomposition
+
+Decomposition pre-existed (bold-refactor scan) — child features listed above in "Child features (riskiest first". Advanced to implementing via epic-design Phase 1.5 short-circuit.

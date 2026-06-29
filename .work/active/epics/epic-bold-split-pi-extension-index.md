@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index
 kind: epic
-stage: drafting
+stage: implementing
 tags: [refactor, bold, pi-extension]
 parent: null
 depends_on: [epic-bold-generated-protocol, epic-bold-canonical-session, epic-bold-turn-state-machine]
@@ -57,3 +57,7 @@ them apart requires introducing explicit interfaces between them. Sequenced last
   projects from canonical-session + turn-state-machine.
 - epic-bold-split-pi-extension-index-cli-daemon-pairing-module — CLI/command /
   daemon / cron / pairing as a named module.
+
+## Decomposition
+
+Decomposition pre-existed (bold-refactor scan) — child features listed above in "Child features (riskiest first". Advanced to implementing via epic-design Phase 1.5 short-circuit.

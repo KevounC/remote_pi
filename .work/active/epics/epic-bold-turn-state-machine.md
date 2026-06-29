@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine
 kind: epic
-stage: drafting
+stage: implementing
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: null
 depends_on: [epic-bold-generated-protocol]
@@ -54,3 +54,7 @@ cases without becoming a state explosion.
 - epic-bold-turn-state-machine-late-attach — `_finishedTurnIdAwaitingSync`
   becomes the `Done(awaitingSync)` state; late-attaching owners hydrate from it
   instead of a special-case nullable.
+
+## Decomposition
+
+Decomposition pre-existed (bold-refactor scan) — child features listed above in "Child features (riskiest first". Advanced to implementing via epic-design Phase 1.5 short-circuit.

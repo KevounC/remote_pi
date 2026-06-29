@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session
 kind: epic
-stage: drafting
+stage: implementing
 tags: [refactor, bold, pi-extension, app, relay, cockpit, security]
 parent: null
 depends_on: [epic-bold-generated-protocol]
@@ -71,3 +71,7 @@ change already locked (required + fail-closed `session_id`).
 - epic-bold-canonical-session-app-attribution-hydration — app validates
   `session_id` before accepting; `_applyHistory` refuses foreign sessions;
   retires the "legacy no-room routes unconditionally" path.
+
+## Decomposition
+
+Decomposition pre-existed (bold-refactor scan) — child features listed above in "Child features (riskiest first". Advanced to implementing via epic-design Phase 1.5 short-circuit.

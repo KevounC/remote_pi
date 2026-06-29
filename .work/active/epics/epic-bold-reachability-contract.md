@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract
 kind: epic
-stage: drafting
+stage: implementing
 tags: [refactor, bold, pi-extension, app, relay]
 parent: null
 depends_on: []
@@ -47,3 +47,7 @@ and is a gentle on-ramp to the generated-protocol world.
   over the contract; its private backoff/timer booleans collapse.
 - epic-bold-reachability-pi-adapter — pi-extension relay client + `MeshNode`
   reconnect adopt the contract; retire their duplicated `RECONNECT_BACKOFFS_MS`.
+
+## Decomposition
+
+Decomposition pre-existed (bold-refactor scan) — child features listed above in "Child features (riskiest first". Advanced to implementing via epic-design Phase 1.5 short-circuit.

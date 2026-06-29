@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol
 kind: epic
-stage: drafting
+stage: implementing
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: null
 depends_on: []
@@ -64,3 +64,7 @@ so the schema must span two transports.
   `relay/src/protocol/`, `rooms.rs`.
 - epic-bold-generated-protocol-cockpit-control-rpc — fold the `\x00remote-pi-ctrl:`
   NUL-prefix string RPC into the generated schema; retire the magic prefix.
+
+## Decomposition
+
+Decomposition pre-existed (bold-refactor scan) — child features listed above in "Child features (riskiest first". Advanced to implementing via epic-design Phase 1.5 short-circuit.

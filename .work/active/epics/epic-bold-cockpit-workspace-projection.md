@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection
 kind: epic
-stage: drafting
+stage: implementing
 tags: [refactor, bold, cockpit]
 parent: null
 depends_on: [epic-bold-generated-protocol]
@@ -56,3 +56,7 @@ genuinely intricate layout logic.
 - epic-bold-cockpit-workspace-projection-settings-split — `settings_page.dart`
   becomes a route shell; each category (appearance, connectivity, daemons,
   scheduling) owns its state/dialogs.
+
+## Decomposition
+
+Decomposition pre-existed (bold-refactor scan) — child features listed above in "Child features (riskiest first". Advanced to implementing via epic-design Phase 1.5 short-circuit.
