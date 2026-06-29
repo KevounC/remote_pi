@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-state-machine-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-reachability-contract-state-machine
 depends_on: [epic-bold-reachability-contract-state-machine-step-2]
@@ -115,3 +115,10 @@ Low. This adds pure domain constants/types plus tests. Risk is path brittleness 
 ## Rollback
 
 Delete the Dart reachability value object and its test. Existing `ConnectionManager` behavior remains unchanged.
+
+## Implementation notes
+
+- Added the pure Dart projection at `app/lib/domain/value_objects/reachability.dart` with the five canonical states, display labels, clamped backoff helper, heartbeat constants, and typed transition registry.
+- Added `app/test/domain/reachability_test.dart`, which reads `../protocol/schema/reachability.json` and checks state names, display names, backoff seconds, heartbeat fields, and transitions for drift.
+- Kept `ConnectionManager` untouched; this story adds inert domain value objects only.
+- Verification: formatted with `/opt/flutter/bin/cache/dart-sdk/bin/dart format`. `flutter test test/domain/reachability_test.dart` could not run because both available Flutter installs attempted to write `bin/cache/engine.stamp.tmp.*` under a read-only SDK cache before test startup. This is classified as an environment issue, not a test failure.
