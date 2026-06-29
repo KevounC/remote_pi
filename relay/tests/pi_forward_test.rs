@@ -95,6 +95,7 @@ async fn send_pi_envelope(ws: &mut common::WsStream, to_pc: &str, envelope: Valu
         json!({
             "type": "pi_envelope",
             "to_pc": to_pc,
+            "to_room": "main",
             "envelope": envelope,
         })
         .to_string(),

@@ -3,7 +3,7 @@
 //! Pi-A sends a control frame:
 //!
 //! ```jsonc
-//! { "type": "pi_envelope", "to_pc": "<Pi-B-pubkey-b64>", "envelope": { ... } }
+//! { "type": "pi_envelope", "to_pc": "<Pi-B-pubkey-b64>", "to_room": "<room>", "envelope": { ... } }
 //! ```
 //!
 //! The relay authenticates Pi-A via the existing challenge-response (so we
@@ -157,10 +157,13 @@ pub async fn handle_pi_envelope(
     cache: &MeshAuthCache,
 ) -> PiForwardResult {
     let to_pc = frame.get("to_pc").and_then(|v| v.as_str());
+    let to_room = frame.get("to_room").and_then(|v| v.as_str());
     let envelope = frame.get("envelope");
 
-    let (to_pc, envelope) = match (to_pc, envelope) {
-        (Some(t), Some(e)) if e.is_object() && !t.is_empty() => (t, e),
+    let (to_pc, _to_room, envelope) = match (to_pc, to_room, envelope) {
+        (Some(pc), Some(room), Some(e)) if !pc.is_empty() && !room.is_empty() && e.is_object() => {
+            (pc, room, e)
+        }
         _ => {
             return PiForwardResult::TransportError(make_transport_error(
                 frame.get("envelope"),
@@ -436,6 +439,7 @@ mod tests {
         let frame = serde_json::json!({
             "type": "pi_envelope",
             "to_pc": "pi_b",
+            "to_room": "main",
             "envelope": {
                 "from": "a:sess",
                 "to": "b:agent",
@@ -457,22 +461,79 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn bad_envelope_when_missing_to_pc() {
-        let registry = Arc::new(PeerRegistry::new(
+    fn make_registry() -> Arc<PeerRegistry> {
+        Arc::new(PeerRegistry::new(
             Arc::new(PresenceManager::new()),
             Arc::new(RoomManager::new()),
             Arc::new(crate::metrics::FirehoseMetrics::new()),
-        ));
+        ))
+    }
+
+    fn valid_frame() -> serde_json::Value {
+        serde_json::json!({
+            "type": "pi_envelope",
+            "to_pc": "pi_b",
+            "to_room": "main",
+            "envelope": {
+                "from": "a:sess",
+                "to": "b:agent",
+                "id": "018f4444-4444-7444-8444-444444444444",
+                "re": null,
+                "body": { "type": "ping", "session_id": "opaque-session" },
+            },
+        })
+    }
+
+    async fn transport_error_reason(frame: serde_json::Value) -> String {
+        let registry = make_registry();
         let store = MeshStore::open_in_memory().unwrap();
         let cache = MeshAuthCache::new();
-        let frame = serde_json::json!({
-            "type": "pi_envelope",
-            "envelope": { "from": "x", "to": "y", "id": "abc", "re": null, "body": {} },
-        });
         match handle_pi_envelope("pi_a", &frame, &registry, &store, &cache).await {
-            PiForwardResult::TransportError(_) => {} // expected
+            PiForwardResult::TransportError(message) => {
+                let Message::Text(text) = message else {
+                    panic!("transport_error must be a text frame");
+                };
+                let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
+                frame["envelope"]["body"]["reason"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            }
             PiForwardResult::Forwarded => panic!("must be transport_error"),
         }
+    }
+
+    #[tokio::test]
+    async fn bad_envelope_when_missing_to_pc() {
+        let mut frame = valid_frame();
+        frame.as_object_mut().unwrap().remove("to_pc");
+        assert_eq!(transport_error_reason(frame).await, "bad_envelope");
+    }
+
+    #[tokio::test]
+    async fn bad_envelope_when_missing_to_room() {
+        let mut frame = valid_frame();
+        frame.as_object_mut().unwrap().remove("to_room");
+        assert_eq!(transport_error_reason(frame).await, "bad_envelope");
+    }
+
+    #[tokio::test]
+    async fn bad_envelope_when_to_room_is_empty() {
+        let mut frame = valid_frame();
+        frame["to_room"] = serde_json::Value::String(String::new());
+        assert_eq!(transport_error_reason(frame).await, "bad_envelope");
+    }
+
+    #[tokio::test]
+    async fn bad_envelope_when_envelope_is_not_object() {
+        let mut frame = valid_frame();
+        frame["envelope"] = serde_json::Value::String("not-an-envelope".to_string());
+        assert_eq!(transport_error_reason(frame).await, "bad_envelope");
+    }
+
+    #[tokio::test]
+    async fn valid_room_target_reaches_authorization_without_reading_body_session_id() {
+        let frame = valid_frame();
+        assert_eq!(transport_error_reason(frame).await, "not_authorized");
     }
 }

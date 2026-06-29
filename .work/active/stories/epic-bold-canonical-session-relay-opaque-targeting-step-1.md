@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-relay-opaque-targeting-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-canonical-session-relay-opaque-targeting
 depends_on: [epic-bold-canonical-session-identity-model]
@@ -65,3 +65,10 @@ Medium. The wrapper contract changes, and sender-side code must provide `to_room
 ## Rollback
 
 Revert the `to_room` extraction and tests; this restores the legacy `to_pc`-only parser but must be paired with re-enabling the old fanout path if later steps already landed.
+
+## Implementation notes
+- Files changed: `relay/src/handlers/pi_forward.rs`, `relay/tests/pi_forward_test.rs`.
+- Tests added: relay unit coverage for missing `to_room`, empty `to_room`, non-object `envelope`, and a valid `to_pc`/`to_room` frame whose `body.session_id` remains irrelevant to relay parsing; integration sender helper now includes `to_room`.
+- Discrepancies from design: none; this step parses and validates `to_room` but intentionally leaves the legacy `forward_to_peer` delivery path for the later room-targeted forwarding story.
+- Adjacent issues parked: none.
+- Verification: `cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed from `relay/`.
