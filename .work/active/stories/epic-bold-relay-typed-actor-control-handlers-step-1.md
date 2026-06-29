@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-control-handlers-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-control-handlers
 depends_on: [epic-bold-relay-typed-actor-frame-dispatch]
@@ -111,3 +111,13 @@ Revert `relay/src/handlers/control.rs` and call the prior raw switch from `handl
 - Discrepancies from design: `epic-bold-relay-typed-actor-frame-dispatch` has not landed a `ConnectionActor`, `ActorDispatch`, or generated `RelayControlFrame` in this checkout, so the actor delegation half could not be wired without inventing a parallel handwritten enum. Implemented the safe step-1 subset against the designed shape: a typed control validation module plus fail-closed peer-list boundary consumed by the current `peer.rs` switch. This avoids blocking the future actor/generated migration and removes the dangerous non-array-as-empty/filter-map behavior now.
 - Adjacent issues parked: none.
 - Verification: `cargo fmt`, `cargo fmt --check`, and `cargo test handlers::control` passed from `relay/`. Full relay `cargo clippy -- -D warnings` and `cargo test` were not run in this slice after the dependency-blocked partial; they remain required when the actor dispatch shell lands.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review with dependency-aware scope. Implementation commit `37136da` inspected. The actor/generated-frame delegation remains explicitly deferred because `ConnectionActor` / generated `RelayControlFrame` are not present yet; the implemented subset is sound for this step: `handlers/control.rs` centralizes peer-list validation, `peer.rs` uses it for subscribe/check paths, malformed non-array/mixed peer lists no longer become subscription-clearing subscribe frames, and peer-list limits remain enforced. Verification run from `relay/`: `cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed.
