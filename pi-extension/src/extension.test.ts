@@ -1315,7 +1315,8 @@ describe("multi-channel broadcast (W2D)", () => {
     await _pairForTest("ownerA__1234567890");
     const onTurnStart = captureEventHandler("turn_start");
     onTurnStart({ type: "turn_start", turnIndex: 0, timestamp: 0 });
-    expect(_getCurrentTurnIdForTest()).toBeNull();
+    const activeTurnId = _getCurrentTurnIdForTest();
+    expect(activeTurnId).toMatch(/^local_/);
     const sendUserMessage = vi.fn();
     _setPiForTest({
       sendUserMessage,
@@ -1335,7 +1336,7 @@ describe("multi-channel broadcast (W2D)", () => {
 
     expect(sendUserMessage).toHaveBeenCalledTimes(1);
     expect(sendUserMessage).toHaveBeenCalledWith("late correction", { deliverAs: "steer" });
-    expect(_getCurrentTurnIdForTest()).toBe("msg-busy-no-mode");
+    expect(_getCurrentTurnIdForTest()).toBe(activeTurnId);
     const sent = relayRef.current!.send.mock.calls.slice(sendsBefore)
       .map((c) => c[0] as string).map(decodeSentCt);
     const echo = sent.find((d) => d.inner.type === "user_message");
@@ -1754,6 +1755,83 @@ describe("user_input mirroring", () => {
       in_reply_to: turnId,
       delta: "hi",
     });
+  });
+
+  test("late owner attach during local/RPC turn receives final reply and working=false", async () => {
+    const peer = "late-owner-peer";
+    _knownPeers.push({
+      name: "Late Phone",
+      remote_epk: peer,
+      paired_at: new Date().toISOString(),
+    });
+    captureHandler("remote-pi");
+    await _connectForTest(makeMockCtx("/tmp/remote-pi-late-attach"));
+    expect(_getState()).toBe("started");
+
+    const onTurnStart = captureEventHandler("turn_start");
+    const onInput = captureEventHandler("input");
+    const onMsgUpdate = captureEventHandler("message_update");
+    const onMsgEnd = captureEventHandler("message_end");
+    const onAgentEnd = captureEventHandler("agent_end");
+    const onTurnEnd = captureEventHandler("turn_end");
+
+    onTurnStart({ type: "turn_start", turnIndex: 0, timestamp: 0 });
+    onInput({ type: "input", text: "local before attach", source: "rpc" });
+    const turnId = _getCurrentTurnIdForTest();
+    expect(turnId).toMatch(/^local_/);
+
+    relayRef.current!.emit("message", JSON.stringify({
+      peer,
+      ct: Buffer.from(JSON.stringify({ type: "ping", id: "late-ping" })).toString("base64"),
+    }));
+    await vi.waitFor(() => expect(_getState()).toBe("paired"), { timeout: 2000 });
+    const sendsBeforeStream = relayRef.current!.send.mock.calls.length;
+    const controlsBeforeFinish = relayRef.current!.sendControl.mock.calls.length;
+
+    onMsgUpdate({
+      type: "message_update",
+      message: {},
+      assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "partial ", partial: {} },
+    });
+    onMsgEnd({
+      type: "message_end",
+      message: { role: "user", content: "local before attach", timestamp: 1700000000000 },
+    });
+    onMsgEnd({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "partial final" }],
+        timestamp: 1700000001000,
+      },
+    });
+    onAgentEnd({ type: "agent_end" });
+    onTurnEnd({ type: "turn_end", turnIndex: 0 });
+    await new Promise<void>((r) => setImmediate(r));
+
+    const sent = relayRef.current!.send.mock.calls.slice(sendsBeforeStream)
+      .map((c) => c[0] as string).map(decodeSentCt);
+    const chunk = sent.find((d) => d.inner.type === "agent_chunk");
+    expect(chunk?.peer).toBe(peer);
+    expect(chunk?.inner).toMatchObject({
+      type: "agent_chunk",
+      in_reply_to: turnId,
+      delta: "partial ",
+    });
+    const done = sent.find((d) => d.inner.type === "agent_done");
+    expect(done?.peer).toBe(peer);
+    expect(done?.inner).toMatchObject({ type: "agent_done", in_reply_to: turnId });
+    const history = sent.find((d) => d.inner.type === "session_history");
+    expect(history?.peer).toBe(peer);
+    expect(history?.inner).toMatchObject({ type: "session_history", in_reply_to: turnId });
+    expect(history?.inner["events"]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "agent_message", text: "partial final" }),
+    ]));
+
+    const workingUpdates = relayRef.current!.sendControl.mock.calls.slice(controlsBeforeFinish)
+      .map((c) => c[0] as { type: string; meta?: { working?: boolean } })
+      .filter((f) => f.type === "room_meta_update");
+    expect(workingUpdates.some((f) => f.meta?.working === false)).toBe(true);
   });
 });
 

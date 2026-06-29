@@ -537,6 +537,8 @@ function _persistModelDefault(provider: string, modelId: string): void {
 // Per-turn messaging state
 let _currentTurnId: string | null = null;
 let _turnActive = false;
+let _finishedTurnIdAwaitingSync: string | null = null;
+const _peersAttachedDuringTurn = new Set<string>();
 
 type QueuedMessage = { id: string; text: string };
 let _queuedMessage: QueuedMessage | null = null;
@@ -655,6 +657,7 @@ function _anyPeerActive(): boolean {
 function _attachPeerChannel(appPeerId: string, channel: PlainPeerChannel): void {
   _activePeers.set(appPeerId, channel);
   _peerShort = appPeerId.slice(0, 8);
+  if (_turnActive) _peersAttachedDuringTurn.add(appPeerId);
 }
 
 /** Detaches a single owner's channel + removes it from the map. Used by
@@ -742,6 +745,8 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
   _peerShort = "";
   _currentTurnId = null;
   _turnActive = false;
+  _finishedTurnIdAwaitingSync = null;
+  _peersAttachedDuringTurn.clear();
   _queuedMessage = null;
 
   _relay?.close();
@@ -792,7 +797,8 @@ function _onRelayClose(): void {
   }
   _activePeers.clear();
   _peerShort = "";
-  _currentTurnId = null;
+  if (!_turnActive) _currentTurnId = null;
+  _peersAttachedDuringTurn.clear();
 
   _relay = null;  // _relayUrl preserved for retry
 
@@ -1045,9 +1051,9 @@ export function _onPeerDisconnect(appPeerId?: string): void {
     return;
   }
 
-  // No owner left. Conservatively clear the turn so the next pair_request
-  // starts cleanly.
-  _currentTurnId = null;
+  // No owner left. Keep an active turn id so a later attach during the same
+  // turn can still receive chunks/done; clear only once no turn is active.
+  if (!_turnActive) _currentTurnId = null;
   _refreshFooter();
   _notify("[remote-pi] All app peers disconnected, listening for reconnect", "info");
   // Auto-listener stays up — same listener catches the reconnect on any peer.
@@ -1359,10 +1365,10 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
       void _handleControl(event.text.slice(CTRL_PREFIX.length).trim());
       return { action: "handled" } as const;
     }
-    if (!_anyPeerActive()) return;
     if (event.source === "extension") return;
-    const turnId = `local_${randomUUID()}`;
+    const turnId = _currentTurnId ?? `local_${randomUUID()}`;
     _currentTurnId = turnId;
+    if (!_anyPeerActive()) return;
     _broadcastToActive({ type: "user_input", id: turnId, text: event.text });
     return undefined;
   });
@@ -1468,10 +1474,13 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     // Buffer is fed by `message_end`; here we only finalize the outbound
     // turn signal to every connected owner. No buffer mutation.
     if (!_currentTurnId) return;
+    const finishedTurnId = _currentTurnId;
     if (_anyPeerActive()) {
-      _broadcastToActive({ type: "agent_done", in_reply_to: _currentTurnId });
+      _broadcastToActive({ type: "agent_done", in_reply_to: finishedTurnId });
     }
     _currentTurnId = null;
+    _finishedTurnIdAwaitingSync = finishedTurnId;
+    _maybeSendLateAttachSessionSync();
     _maybeDrainQueuedMessage();
   });
 
@@ -1481,6 +1490,9 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // broker and drives the app's working indicator.
   pi.on("turn_start", (_event, ctx) => {
     _turnActive = true;
+    _finishedTurnIdAwaitingSync = null;
+    _peersAttachedDuringTurn.clear();
+    if (_currentTurnId === null) _currentTurnId = `local_${randomUUID()}`;
     // Late model hydration: if the model was still unknown at connect (resolved
     // lazily by the SDK), grab it on the first turn and fan it out — so a daemon
     // whose model only materialises at turn 1 still reports it to the app.
@@ -1505,6 +1517,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     if (_relay && _myRoomId) {
       _relay.sendControl({ type: "room_meta_update", room_id: _myRoomId, meta: { working: false } });
     }
+    _maybeSendLateAttachSessionSync();
     _maybeDrainQueuedMessage();
   });
 
@@ -3308,6 +3321,21 @@ function _maybeDrainQueuedMessage(): void {
   void _deliverUserMessage({ type: "user_message", id: queued.id, text: queued.text }, null, "normal");
 }
 
+function _maybeSendLateAttachSessionSync(): void {
+  if (!_finishedTurnIdAwaitingSync || _turnActive) return;
+  const inReplyTo = _finishedTurnIdAwaitingSync;
+  _finishedTurnIdAwaitingSync = null;
+  const targets = [..._peersAttachedDuringTurn];
+  _peersAttachedDuringTurn.clear();
+  if (targets.length === 0) return;
+  const history = _buildSessionHistoryMessage(inReplyTo, undefined);
+  for (const peerId of targets) {
+    const channel = _activePeers.get(peerId);
+    if (!channel) continue;
+    try { channel.send(history); } catch { /* best-effort per late attach */ }
+  }
+}
+
 export function _routeClientMessageFrom(
   sender: PlainPeerChannel,
   msg: ClientMessage,
@@ -3500,24 +3528,31 @@ function _handleSessionSync(
     return;
   }
 
+  sender.send(_buildSessionHistoryMessage(msg.id, msg.limit));
+}
+
+function _buildSessionHistoryMessage(
+  inReplyTo: string,
+  limit: number | undefined,
+): Extract<ServerMessage, { type: "session_history" }> {
   // Mirror semantics: always return the last N events. App SUBSTITUTES its
   // local cache with this response — no delta/since_ts logic.
   const serverLimit = _getSyncLimit();
-  const requested = msg.limit ?? serverLimit;
+  const requested = limit ?? serverLimit;
   const effectiveLimit = Math.min(requested, serverLimit);  // server clamps
 
   const allEvents = _mapAgentMessagesToEvents(_messageBuffer);
   const slice = effectiveLimit > 0 ? allEvents.slice(-effectiveLimit) : [];
   const truncated = allEvents.length > effectiveLimit;
 
-  sender.send({
+  return {
     type: "session_history",
-    in_reply_to: msg.id,
-    session_started_at: _sessionStartedAt,
+    in_reply_to: inReplyTo,
+    session_started_at: _sessionStartedAt ?? 0,
     events: slice,
     eos: true,
     truncated,
-  });
+  };
 }
 
 /**
@@ -3538,6 +3573,8 @@ function _handleSessionSync(
 function _resetSessionForNew(inReplyTo: string): void {
   _messageBuffer = [];
   _queuedMessage = null;
+  _finishedTurnIdAwaitingSync = null;
+  _peersAttachedDuringTurn.clear();
   _broadcastQueuedMessageState();
   _sessionStartedAt = Date.now();
   _broadcastToActive({
