@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-settings-split-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-settings-split
 depends_on: [epic-bold-cockpit-workspace-projection-settings-split-step-1]
@@ -116,3 +116,11 @@ Medium — LSP probing and notification permission paths include async UI code, 
 
 ## Rollback
 Move the three panels and their helpers back into `settings_page.dart`, restore private names, and leave the shared shell/category extraction from Step 1 intact.
+
+## Implementation notes
+- Files changed: `cockpit/lib/app/settings/ui/settings_page.dart`, `cockpit/lib/app/settings/ui/categories/appearance_settings_panel.dart`, `cockpit/lib/app/settings/ui/categories/language_settings_panel.dart`, `cockpit/lib/app/settings/ui/categories/notification_settings_panel.dart`, `cockpit/test/settings/app_preferences_settings_panel_test.dart`.
+- Tests added: `cockpit/test/settings/app_preferences_settings_panel_test.dart` imports the three panels outside `settings_page.dart` as a compile smoke for the extraction.
+- Discrepancies from design: preserved the existing scroll/chrome structure rather than introducing a new `SettingsPanelScroll` helper in this step; the shared settings components from step 1 remain the public chrome boundary.
+- Adjacent issues parked: none.
+- Verification: `flutter test test/settings/app_preferences_settings_panel_test.dart` could not start because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`) even with `HOME=/tmp/pi-dart-home`; direct Dart formatting succeeded using the SDK binary.
+
