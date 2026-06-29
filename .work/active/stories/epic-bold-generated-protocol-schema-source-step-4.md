@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-schema-source-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, cockpit, pi-extension]
 parent: epic-bold-generated-protocol-schema-source
 depends_on: [epic-bold-generated-protocol-schema-source-step-3]
@@ -132,10 +132,10 @@ Model the current compatibility encoding and the target structured command/event
 
 ## Acceptance Criteria
 
-- [ ] Cockpit control verbs and Remote Pi custom event strings are represented in `cockpit-control.schema.json`.
-- [ ] The schema documents the current NUL-prefixed prompt compatibility encoding and the target structured command object.
-- [ ] Fixtures cover relay control, rename, relay-state, name-assigned, pair-code, paired, and mesh-revoked custom events.
-- [ ] No `pi-extension` or `cockpit` runtime code is changed in this step.
+- [x] Cockpit control verbs and Remote Pi custom event strings are represented in `cockpit-control.schema.json`.
+- [x] The schema documents the current NUL-prefixed prompt compatibility encoding and the target structured command object.
+- [x] Fixtures cover relay control, rename, relay-state, name-assigned, pair-code, paired, and mesh-revoked custom events.
+- [x] No `pi-extension` or `cockpit` runtime code is changed in this step.
 
 ## Rollback
 
@@ -148,3 +148,13 @@ Revert `cockpit-control.schema.json` and cockpit fixtures. Runtime behavior rema
 - Added `protocol/fixtures/cockpit/cockpit-control.jsonl` with compatibility prompt commands, structured command examples, custom event payload examples, and the current `role:"custom"` message shape.
 - No `pi-extension` or `cockpit` runtime code changed; source files were read as references only.
 - Verification: parsed every `protocol/**/*.json` and `protocol/**/*.jsonl` fixture with Python `json` successfully. Full schema validation remains deferred to step 5's AJV checker.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane substrate review. Inspected commit `5d8522d`, cockpit-control schema, and fixtures. Verified JSON parse for all protocol JSON/JSONL and ran `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store check`, which validated the cockpit fixture family. Confirmed changed files are schema/fixture/work item only; no `pi-extension` or `cockpit` runtime code changed.
