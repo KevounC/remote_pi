@@ -1,0 +1,88 @@
+---
+id: epic-bold-split-pi-extension-index-sdk-session-projection-module-step-3
+kind: story
+stage: implementing
+tags: [refactor]
+parent: epic-bold-split-pi-extension-index-sdk-session-projection-module
+depends_on: [epic-bold-split-pi-extension-index-sdk-session-projection-module-step-2]
+release_binding: null
+gate_origin: null
+created: 2026-06-29
+updated: 2026-06-29
+---
+
+# Step 3: Move app action routing behind fresh SDK capability guards
+
+## Current State
+```ts
+// pi-extension/src/index.ts
+case "model_set":
+  if (!_pi) {
+    _sessionUnavailable(sender, msg.id, "Pi model API unavailable during session replacement");
+    break;
+  }
+  void handleModelSet(_pi, (_lastEventCtx ?? _lastCtx) as ActionCtx | null, ensureModelRegistry(), sender, msg, _persistModelDefault);
+  break;
+case "thinking_set":
+  if (!_pi) {
+    _sessionUnavailable(sender, msg.id, "Pi thinking API unavailable during session replacement");
+    break;
+  }
+  handleThinkingSet(_pi, sender, msg);
+  break;
+```
+
+Prompt delivery has a fresh `_messageApi` recapture path after app-triggered `session_new`, but `model_set` and `thinking_set` still depend on `_pi`.
+
+## Target State
+```ts
+// pi-extension/src/session/sdk_session_projection.ts
+type FreshActionApi = AgentMessageApi & Partial<ActionPi> & Partial<ActionCtx>;
+
+private currentActionPi(action: "model_set" | "thinking_set"): ActionPi | null {
+  if (!this.actionApi) return null;
+  if (action === "model_set" && typeof this.actionApi.setModel === "function") return this.actionApi as ActionPi;
+  if (action === "thinking_set" && typeof this.actionApi.setThinkingLevel === "function") return this.actionApi as ActionPi;
+  return null;
+}
+
+handleClientMessage(sender: PeerChannel, msg: ClientMessage): void {
+  switch (msg.type) {
+    case "session_new":
+      void handleSessionNew(this.commandCtx, sender, msg, (freshCtx) => this.bindReplacementContext(freshCtx));
+      return;
+    case "model_set": {
+      const pi = this.currentActionPi("model_set");
+      if (!pi) return this.sessionUnavailable(sender, msg.id, "Pi model API unavailable for the current session");
+      void handleModelSet(pi, this.freshActionCtx(), ensureModelRegistry(), sender, msg, this.persistModelDefault);
+      return;
+    }
+    case "thinking_set": {
+      const pi = this.currentActionPi("thinking_set");
+      if (!pi) return this.sessionUnavailable(sender, msg.id, "Pi thinking API unavailable for the current session");
+      handleThinkingSet(pi, sender, msg);
+      return;
+    }
+  }
+}
+```
+
+## Implementation Notes
+- `withSession` recapture must bind fresh command context, event context, message API, action API if present, and session id in one module method.
+- `sendPiMessage` and `wakeAgent` should use the same stale-context clearing discipline: stale SDK object is removed from the binding table and not retried forever.
+- If the SDK does not expose model/thinking setters on replacement contexts, return a clear sender-scoped unavailable error. Do not call a known-stale pre-replacement API.
+- Keep `actions/handlers.ts` dependency-injected; this story changes the caller/adapter, not the action semantics.
+
+## Acceptance Criteria
+- [ ] App `session_new` recaptures fresh capabilities in one module method.
+- [ ] App prompt after `session_new` uses the fresh message API and never calls the stale API.
+- [ ] App `model_set` and `thinking_set` after replacement use a fresh action API when the SDK exposes one, or return an explicit sender-scoped unavailable error without calling stale `_pi`.
+- [ ] `cancel` and `session_compact` prefer the freshest `session_start`/replacement context and clear stale bindings on stale-context exceptions.
+- [ ] Targeted stale-context tests cover prompt, compact/cancel, model, thinking, and list-models paths after `/new`/`/resume`/`/fork`/`/reload` simulation.
+- [ ] `corepack pnpm typecheck` and targeted `corepack pnpm test -- extension actions` pass from `pi-extension/`.
+
+## Risk
+High. This is the main stale-context bug class. The safe failure mode is an explicit sender-scoped unavailable error, not reuse of a stale SDK object.
+
+## Rollback
+Restore app action routing in `index.ts` and the prior `_pi`/`_lastCtx`/`_lastEventCtx` helper paths; keep the module shell unused if necessary.
