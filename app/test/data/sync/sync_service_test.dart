@@ -339,6 +339,64 @@ void main() {
     s.sync.dispose();
   });
 
+  test(
+    'disconnect while online clears working/streaming/cancel state for status '
+    'retrying',
+    () async {
+      final s = await setup();
+
+      await s.sync.setQueuedMessage('draft');
+      await s.sync.sendMessage('hi');
+      await _settle();
+
+      expect(
+        s.sync.queuedText,
+        'draft',
+        reason: 'queued input is in-memory state',
+      );
+      expect(
+        s.sync.isWorking,
+        isTrue,
+        reason: 'online send enters whole-turn working',
+      );
+      expect(s.sync.streaming, isNotNull, reason: 'online send seeds cursor');
+      expect(s.sync.workingReplyTo, isNotNull);
+      expect(
+        s.sync.debugPendingSendTimerCount,
+        1,
+        reason: 'send timeout timer is armed',
+      );
+
+      final status = s.conn.statusStream.firstWhere(
+        (status) => status is StatusRetrying,
+      );
+      await s.ch.close();
+      expect(
+        await status,
+        isA<StatusRetrying>(),
+        reason: 'channel loss triggers retrying',
+      );
+      await _settle();
+
+      expect(s.sync.isWorking, isFalse, reason: 'status drop clears working');
+      expect(s.sync.streaming, isNull, reason: 'streaming cursor is cleared');
+      expect(
+        s.sync.workingReplyTo,
+        isNull,
+        reason: 'stale cancel target cleared',
+      );
+      expect(s.sync.queuedText, isNull, reason: 'queued text is cleared');
+      expect(
+        s.sync.debugPendingSendTimerCount,
+        0,
+        reason: 'disconnect clears pending send backstops',
+      );
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
   test('switching sessions resets the in-memory turn state — working/streaming '
       'do NOT leak into the next chat (plan/32)', () async {
     final s = await setup();

@@ -292,7 +292,8 @@ class SyncService extends Service {
     await _upsert(
       MsgRole.assistant,
       'err_$id',
-      (seq, existing) => existing ??
+      (seq, existing) =>
+          existing ??
           MessageRecord(
             id: 'err_$id',
             seq: seq,
@@ -422,6 +423,12 @@ class SyncService extends Service {
       );
       // ignore: discarded_futures
       _onlineActivated();
+    } else {
+      // Any non-online edge is a reliability boundary: clear the active
+      // room-local stream/working state immediately so the old room doesn't
+      // keep a stale cancel target/cursor while the relay reconnects.
+      _resetTurnState();
+      _setWorking(false);
     }
     _writeRuntime();
   }
