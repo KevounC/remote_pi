@@ -79,10 +79,9 @@ class SyncService extends Service {
 
   // Plan/32 safety net — if the relay never echoes a sent message back, the
   // optimistic `pending:true` bubble would spin forever. After this window we
-  // remove the bubble SILENTLY (no "failed" state, no spinner). The real fix
-  // lives in the relay; this is the app-side backstop. Per-message (`id`)
-  // timers are armed only when a send is actually attempted online, and
-  // cancelled on echo, user-cancel, session switch, and dispose.
+  // replace the bubble with a visible failure row. The real delivery fix lives
+  // in the relay/Pi path; this is the app-side backstop. Per-message (`id`)
+  // timers are cancelled on echo, user-cancel, session switch, and dispose.
   final Duration pendingSendTimeout;
   final Map<String, Timer> _pendingSendTimers = {};
 
@@ -163,6 +162,7 @@ class SyncService extends Service {
     UserMessageStreamingBehavior? streamingBehavior,
   }) async {
     final epk = _activeEpk;
+    final room = _activeRoomId;
     final id = _newId();
     final now = DateTime.now();
     final isSteer = streamingBehavior == UserMessageStreamingBehavior.steer;
@@ -185,16 +185,17 @@ class SyncService extends Service {
         _setWorking(true, preview: _preview(text, image), replyTo: id);
       }
       // Arm the no-echo backstop for this row. The timeout is keyed off the
-      // row's `ts`, NOT online-ness: an offline "held pending" send is reaped
-      // 20s after its ts too, and ANY pending row is re-armed on session load
-      // (see _loadIndex). So a quick session-switch or an app restart still
-      // reaps a stale bubble instead of letting it spin "sending…" forever.
+      // row's `ts`, NOT online-ness: an offline "held pending" send fails
+      // visibly after its ts too, and ANY pending row is re-armed on session
+      // load (see _loadIndex). So a quick session-switch or an app restart
+      // still fails a stale bubble instead of letting it spin "sending…"
+      // forever.
       _armSendTimeout(id, now);
     }
     final ch = _conn.channel;
     if (ch == null) {
       debugPrint(
-        '[msg-send] id=$id (offline → held pending, reaped in '
+        '[msg-send] id=$id (offline → held pending, fails in '
         '${pendingSendTimeout.inSeconds}s)',
       );
       return;
@@ -209,45 +210,99 @@ class SyncService extends Service {
       _emitStreaming(StreamingMessage(inReplyTo: id));
     }
     debugPrint('[msg-send] id=$id text=${_preview(text, image)}');
-    await ch.send(
-      UserMessage(
-        id: id,
-        text: text,
-        streamingBehavior: streamingBehavior,
-        images: image == null
-            ? null
-            : [WireImage(data: image.data, mime: image.mime)],
-      ),
-    );
+    try {
+      await ch.send(
+        UserMessage(
+          id: id,
+          text: text,
+          streamingBehavior: streamingBehavior,
+          images: image == null
+              ? null
+              : [WireImage(data: image.data, mime: image.mime)],
+        ),
+      );
+    } catch (err) {
+      await _failPendingSend(
+        id,
+        code: 'send_error',
+        message:
+            'Message could not be sent to the Pi. Check the connection and try again.',
+        debugDetail: err,
+        expectedEpk: epk,
+        expectedRoom: room,
+      );
+    }
   }
 
-  /// Arm (or re-arm) the silent no-echo backstop for a pending row, keyed by
+  /// Arm (or re-arm) the no-echo backstop for a pending row, keyed by
   /// `id`. The window is the time REMAINING relative to the row's [ts], so a
   /// row loaded from disk already past [pendingSendTimeout] fires immediately
   /// (floored at zero). Idempotent — cancels any existing timer for `id`.
   void _armSendTimeout(String id, DateTime ts) {
+    final epk = _activeEpk;
+    if (epk == null) return;
+    final room = _activeRoomId;
     _pendingSendTimers.remove(id)?.cancel();
     final remaining = pendingSendTimeout - DateTime.now().difference(ts);
     _pendingSendTimers[id] = Timer(
       remaining > Duration.zero ? remaining : Duration.zero,
-      () => _onSendTimeout(id),
+      () => _onSendTimeout(id, epk, room),
     );
   }
 
-  /// No echo arrived within [pendingSendTimeout]: drop the optimistic bubble
-  /// silently and unwind only the turn state that belongs to THIS `id`.
-  void _onSendTimeout(String id) {
-    _pendingSendTimers.remove(id);
+  /// No echo arrived within [pendingSendTimeout]: replace the optimistic
+  /// bubble with a visible failure and unwind only the turn state that belongs
+  /// to THIS `id`.
+  void _onSendTimeout(String id, String epk, String room) {
     // ignore: discarded_futures
-    _removeById(id);
+    _failPendingSend(
+      id,
+      code: 'send_timeout',
+      message:
+          'Message was not confirmed by the Pi. It may not have been delivered.',
+      debugDetail: 'no echo in ${pendingSendTimeout.inSeconds}s',
+      expectedEpk: epk,
+      expectedRoom: room,
+    );
+  }
+
+  Future<void> _failPendingSend(
+    String id, {
+    required String code,
+    required String message,
+    Object? debugDetail,
+    String? expectedEpk,
+    String? expectedRoom,
+  }) async {
+    if (expectedEpk != null &&
+        (_activeEpk != expectedEpk || _activeRoomId != expectedRoom)) {
+      return;
+    }
+    _pendingSendTimers.remove(id)?.cancel();
+    await _removePendingById(id);
+    if (expectedEpk != null &&
+        (_activeEpk != expectedEpk || _activeRoomId != expectedRoom)) {
+      return;
+    }
     // Clear the thinking cursor only if it's seeded for this message.
     if (_streaming?.inReplyTo == id) _emitStreaming(null);
     // Clear working ONLY if this id owns it — never knock down a turn that a
     // different (echoed) message is already driving.
     if (_workingReplyTo == id) _setWorking(false);
+    await _upsert(
+      MsgRole.assistant,
+      'err_$id',
+      (seq, existing) => existing ??
+          MessageRecord(
+            id: 'err_$id',
+            seq: seq,
+            role: MsgRole.assistant,
+            text: '⚠ $code: $message',
+            ts: DateTime.now(),
+          ),
+    );
     debugPrint(
-      '[msg-timeout] id=$id removed (no echo in '
-      '${pendingSendTimeout.inSeconds}s)',
+      '[msg-failed] id=$id code=$code detail=${debugDetail ?? message}',
     );
   }
 
@@ -781,8 +836,8 @@ class SyncService extends Service {
         _idToSeq[_key(r.role, r.id)] = seq;
         _nextSeq = math.max(_nextSeq, seq + 1);
         // Re-arm the no-echo backstop for any pending row this session owns, so
-        // a bubble persisted across an app restart / quick session-switch is
-        // reaped by its `ts` instead of spinning forever (already-stale → fires
+        // a bubble persisted across an app restart / quick session-switch fails
+        // by its `ts` instead of spinning forever (already-stale → fires
         // immediately). Timers were cleared by _resetTurnState before this load.
         if (r.role == MsgRole.user && r.pending) _armSendTimeout(r.id, r.ts);
       }
@@ -811,20 +866,6 @@ class SyncService extends Service {
         final seq = _nextSeq++;
         await box.put(seq, build(seq, null).toJson());
         _idToSeq[mapKey] = seq;
-      }
-    });
-  }
-
-  Future<void> _removeById(String id) {
-    final epk = _activeEpk;
-    if (epk == null) return Future<void>.value();
-    final room = _activeRoomId;
-    return _enqueue(() async {
-      if (_activeEpk != epk || _activeRoomId != room) return;
-      final box = await _boxes.msgsBox(epk, room);
-      for (final role in MsgRole.values) {
-        final seq = _idToSeq.remove(_key(role, id));
-        if (seq != null) await box.delete(seq);
       }
     });
   }

@@ -20,10 +20,17 @@ import 'package:hive/hive.dart';
 class _FakeChannel implements IChannel {
   final _ctrl = StreamController<ServerMessage>.broadcast();
   final List<ClientMessage> sent = [];
+  Object? sendFailure;
+
   @override
   Stream<ServerMessage> get serverMessages => _ctrl.stream;
   @override
-  Future<void> send(ClientMessage msg) async => sent.add(msg);
+  Future<void> send(ClientMessage msg) async {
+    final failure = sendFailure;
+    if (failure != null) throw failure;
+    sent.add(msg);
+  }
+
   @override
   Future<void> close() => _ctrl.close();
   void push(ServerMessage m) => _ctrl.add(m);
@@ -623,12 +630,14 @@ void main() {
   });
 
   // Plan/32 safety net — a sent message whose echo never comes back must not
-  // spin forever; the optimistic bubble is removed SILENTLY after the timeout.
+  // spin forever. It must also not disappear silently: replace the optimistic
+  // bubble with an explicit failure row so the user knows delivery was not
+  // confirmed.
   group('no-echo send timeout', () {
     const short = Duration(milliseconds: 60);
 
     test(
-      '(a) pending bubble is removed silently when no echo arrives',
+      '(a) pending bubble is replaced with a visible error when no echo arrives',
       () async {
         final s = await setup(pendingSendTimeout: short);
         await s.sync.sendMessage('hello');
@@ -642,11 +651,10 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 140));
         await _settle();
 
-        expect(
-          messages(s.epk),
-          isEmpty,
-          reason: 'bubble removed, no failed state',
-        );
+        final rows = messages(s.epk);
+        expect(rows, hasLength(1), reason: 'visible failure replaces bubble');
+        expect(rows.single.role, MsgRole.assistant);
+        expect(rows.single.text, startsWith('⚠ send_timeout:'));
         expect(
           s.sync.isWorking,
           isFalse,
@@ -733,41 +741,45 @@ void main() {
       },
     );
 
-    test('(d) an offline (held-pending) send is reaped too', () async {
-      // No channel ever adopted → sendMessage takes the offline path. Decision:
-      // held-pending is reaped 20s after its ts as well (nothing spins forever).
-      final conn = ConnectionManager(
-        factory: (_, _) async => _FakeChannel(),
-        storage: _FakeStorage(),
-      );
-      final sync = SyncService(conn, LocalBoxes(), pendingSendTimeout: short);
-      final epk = 'epk_offline_${++_counter}';
-      await sync.activate(epk, 'main');
-      await _settle();
+    test(
+      '(d) an offline (held-pending) send becomes a visible error too',
+      () async {
+        // No channel ever adopted → sendMessage takes the offline path.
+        // Decision: held-pending is timed out after its ts as well (nothing
+        // spins forever), but the user still gets a visible failure rather than
+        // a disappearing row.
+        final conn = ConnectionManager(
+          factory: (_, _) async => _FakeChannel(),
+          storage: _FakeStorage(),
+        );
+        final sync = SyncService(conn, LocalBoxes(), pendingSendTimeout: short);
+        final epk = 'epk_offline_${++_counter}';
+        await sync.activate(epk, 'main');
+        await _settle();
 
-      await sync.sendMessage('typed while offline');
-      await _settle();
-      expect(messages(epk), hasLength(1), reason: 'held pending row written');
-      expect(messages(epk).first.pending, isTrue);
-      expect(
-        sync.debugPendingSendTimerCount,
-        1,
-        reason: 'reaper armed offline',
-      );
+        await sync.sendMessage('typed while offline');
+        await _settle();
+        expect(messages(epk), hasLength(1), reason: 'held pending row written');
+        expect(messages(epk).first.pending, isTrue);
+        expect(
+          sync.debugPendingSendTimerCount,
+          1,
+          reason: 'timeout armed offline',
+        );
 
-      await Future<void>.delayed(const Duration(milliseconds: 140));
-      await _settle();
-      expect(
-        messages(epk),
-        isEmpty,
-        reason: 'offline bubble reaped (decision)',
-      );
-      conn.dispose();
-      sync.dispose();
-    });
+        await Future<void>.delayed(const Duration(milliseconds: 140));
+        await _settle();
+        final rows = messages(epk);
+        expect(rows, hasLength(1), reason: 'offline failure remains visible');
+        expect(rows.single.role, MsgRole.assistant);
+        expect(rows.single.text, startsWith('⚠ send_timeout:'));
+        conn.dispose();
+        sync.dispose();
+      },
+    );
 
     test(
-      '(e) returning to a session reaps a bubble already past the window',
+      '(e) returning to a session fails a bubble already past the window',
       () async {
         // Quick exit then return: the live timer is cancelled on switch-away,
         // but _loadIndex re-arms on return using the saved ts → an already-stale
@@ -796,20 +808,38 @@ void main() {
         expect(
           messages(s.epk),
           hasLength(1),
-          reason: 'no live timer reaps it while away',
+          reason: 'no live timer fails it while away',
         );
 
-        // Return → load re-arms by ts → already stale → reaped on arrival.
+        // Return → load re-arms by ts → already stale → fails on arrival.
         await s.sync.activate(s.epk, 'main');
         await _settle();
-        expect(
-          messages(s.epk),
-          isEmpty,
-          reason: 'stale pending reaped on return',
-        );
+        final rows = messages(s.epk);
+        expect(rows, hasLength(1), reason: 'stale pending fails on return');
+        expect(rows.single.role, MsgRole.assistant);
+        expect(rows.single.text, startsWith('⚠ send_timeout:'));
         s.conn.dispose();
         s.sync.dispose();
       },
     );
+
+    test('(f) immediate channel send failures become visible errors', () async {
+      final s = await setup(pendingSendTimeout: short);
+      s.ch.sendFailure = StateError('socket closed');
+
+      await s.sync.sendMessage('hello');
+      await _settle();
+
+      expect(s.ch.sent.whereType<UserMessage>(), isEmpty);
+      final rows = messages(s.epk);
+      expect(rows, hasLength(1));
+      expect(rows.single.role, MsgRole.assistant);
+      expect(rows.single.text, startsWith('⚠ send_error:'));
+      expect(s.sync.isWorking, isFalse);
+      expect(s.sync.streaming, isNull);
+      expect(s.sync.debugPendingSendTimerCount, 0);
+      s.conn.dispose();
+      s.sync.dispose();
+    });
   });
 }
