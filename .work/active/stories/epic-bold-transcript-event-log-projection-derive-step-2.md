@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-1]
@@ -85,3 +85,21 @@ High. This is the hard reconcile rule the store and hydration-replay children de
 ## Rollback
 
 Revert the projection reducer/tests. Existing `SyncService` continues to mutate rows directly.
+
+## Implementation Notes
+Implemented the pure app transcript projection reconcile reducer in `app/lib/domain/transcript/transcript_projection.dart` and added deterministic coverage in `app/test/domain/transcript/transcript_projection_test.dart`.
+
+Pinned behavior:
+- Server-authoritative user/assistant/tool/compaction events form the stable prefix.
+- Still-unconfirmed local submissions remain visible as pending after that prefix.
+- Same-id authoritative confirmation suppresses pending/failed local state.
+- Send timeout marks a local message failed only while no authoritative confirmation exists; late confirmation wins.
+- Tool request/result collapse into one projected row.
+- Streaming deltas finalize on committed assistant message or `assistant_done`.
+- Duplicate replay is idempotent by event/message id.
+- Foreign `sessionId` events are ignored by projection filtering.
+
+`MessageRecord` remains untouched; it is still a projection target for later `SyncService` adapter work, not the source of reconcile rules.
+
+Verification attempted:
+- `flutter test test/domain/transcript/transcript_projection_test.dart` could not start because the installed Flutter tool attempted to update `/opt/flutter/bin/cache/*` and the cache is read-only in this environment (`Read-only file system`). No tests were weakened or skipped in code; this is an environment/toolchain blocker.

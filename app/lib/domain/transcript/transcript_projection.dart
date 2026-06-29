@@ -29,34 +29,71 @@ final class TranscriptProjection {
   final TranscriptTurnView turn;
 }
 
-/// Pure projection contract. Step 1 only establishes the side-by-side seam;
-/// the full optimistic/authoritative reconcile reducer lands in the next story.
+/// Pure transcript projection and optimistic/authoritative reconcile reducer.
+///
+/// The event log is append-only, but this materialized view is rebuildable.
+/// Server-authoritative events (`UserMessageConfirmed`, assistant/tool events,
+/// compaction) form the stable prefix. Local optimistic submissions that have no
+/// authoritative confirmation remain visible after that prefix. A failure marks
+/// the local message failed only while no later confirmation exists; late
+/// confirmation wins and suppresses the failure projection.
 TranscriptProjection deriveTranscriptProjection({
   required String sessionId,
   required Iterable<TranscriptEvent> events,
 }) {
   final scoped = events.where((event) => event.sessionId == sessionId);
-  final messages = <ChatMessage>[];
+  final seenEventIds = <String>{};
+  final ordered = <TranscriptEvent>[];
+  for (final event in scoped) {
+    if (seenEventIds.add(event.eventId)) ordered.add(event);
+  }
+
+  final confirmedUsers = <String, UserMessageConfirmed>{};
+  final submittedUsers = <String, UserMessageSubmitted>{};
+  final failedUsers = <String, UserMessageFailed>{};
+  final authoritativeMessages = <ChatMessage>[];
+  final authoritativeIds = <String>{};
+  final toolIndexes = <String, int>{};
   StreamingMessage? streaming;
   var turn = TranscriptTurnView.idle;
 
-  for (final event in scoped) {
+  void appendAuthoritative(ChatMessage message) {
+    if (authoritativeIds.add(message.id)) authoritativeMessages.add(message);
+  }
+
+  void upsertTool(ToolEvent tool) {
+    final existingIndex = toolIndexes[tool.toolCallId];
+    if (existingIndex == null) {
+      toolIndexes[tool.toolCallId] = authoritativeMessages.length;
+      authoritativeMessages.add(tool);
+      authoritativeIds.add(tool.id);
+      return;
+    }
+    final previous = authoritativeMessages[existingIndex];
+    if (previous is ToolEvent) {
+      authoritativeMessages[existingIndex] = ToolEvent(
+        id: previous.id,
+        toolCallId: previous.toolCallId,
+        tool: previous.tool.isNotEmpty ? previous.tool : tool.tool,
+        args: previous.args,
+        status: tool.status,
+        result: tool.result,
+        error: tool.error,
+      );
+    }
+  }
+
+  for (final event in ordered) {
     switch (event) {
       case UserMessageSubmitted():
-        messages.add(
-          UserMsg(
-            id: event.clientMessageId,
-            text: event.text,
-            status: UserMsgStatus.pending,
-            image: event.image,
-          ),
-        );
+        submittedUsers[event.clientMessageId] = event;
         turn = TranscriptTurnView(
           status: TranscriptTurnStatus.working,
           replyTo: event.clientMessageId,
         );
       case UserMessageConfirmed():
-        messages.add(
+        confirmedUsers[event.clientMessageId] = event;
+        appendAuthoritative(
           UserMsg(
             id: event.clientMessageId,
             text: event.text,
@@ -64,18 +101,14 @@ TranscriptProjection deriveTranscriptProjection({
           ),
         );
       case UserMessageFailed():
-        messages.add(
-          UserMsg(
-            id: event.clientMessageId,
-            text: event.message,
-            status: UserMsgStatus.failed,
-          ),
-        );
-        turn = TranscriptTurnView(
-          status: TranscriptTurnStatus.error,
-          replyTo: event.clientMessageId,
-          error: event.message,
-        );
+        failedUsers[event.clientMessageId] = event;
+        if (!confirmedUsers.containsKey(event.clientMessageId)) {
+          turn = TranscriptTurnView(
+            status: TranscriptTurnStatus.error,
+            replyTo: event.clientMessageId,
+            error: event.message,
+          );
+        }
       case AssistantDeltaReceived():
         streaming = (streaming?.inReplyTo == event.replyTo
                 ? streaming
@@ -86,14 +119,14 @@ TranscriptProjection deriveTranscriptProjection({
           replyTo: event.replyTo,
         );
       case AssistantMessageCommitted():
-        messages.add(AssistantMsg(id: event.messageId, text: event.text));
+        appendAuthoritative(AssistantMsg(id: event.messageId, text: event.text));
         streaming = null;
         turn = TranscriptTurnView.idle;
       case AssistantDoneReceived():
         streaming = null;
         turn = TranscriptTurnView.idle;
       case ToolRequested():
-        messages.add(
+        upsertTool(
           ToolEvent(
             id: event.toolCallId,
             toolCallId: event.toolCallId,
@@ -102,7 +135,7 @@ TranscriptProjection deriveTranscriptProjection({
           ),
         );
       case ToolFinished():
-        messages.add(
+        upsertTool(
           ToolEvent(
             id: event.toolCallId,
             toolCallId: event.toolCallId,
@@ -116,18 +149,33 @@ TranscriptProjection deriveTranscriptProjection({
           ),
         );
       case CompactionRecorded():
-        messages.add(
+        appendAuthoritative(
           CompactionMsg(
             id: event.eventId,
             summary: event.summary,
             tokensBefore: event.tokensBefore,
           ),
         );
+        turn = TranscriptTurnView.idle;
     }
   }
 
+  final localTail = <ChatMessage>[];
+  for (final submitted in submittedUsers.values) {
+    if (confirmedUsers.containsKey(submitted.clientMessageId)) continue;
+    final failed = failedUsers[submitted.clientMessageId];
+    localTail.add(
+      UserMsg(
+        id: submitted.clientMessageId,
+        text: submitted.text,
+        status: failed == null ? UserMsgStatus.pending : UserMsgStatus.failed,
+        image: submitted.image,
+      ),
+    );
+  }
+
   return TranscriptProjection(
-    messages: List.unmodifiable(messages),
+    messages: List.unmodifiable([...authoritativeMessages, ...localTail]),
     streaming: streaming,
     turn: turn,
   );
