@@ -37,15 +37,9 @@ class SyncService extends Service {
   String? _activeEpk;
   String _activeRoomId = 'main';
 
-  // Highest `session_started_at` we currently trust for the active room.
-  // Any incoming SessionHistory older than this is dropped as stale (e.g.
-  // leftover from a just-closed New session).
-  int? _activeSessionStartedAt;
-
-  // Monotonic replacement token for `SessionHistory` gating after clear.
-  // Any history with an older token belongs to a pre-clear session and is
-  // dropped even when no clock-derived floor exists.
-  int _historyGeneration = 0;
+  // Highest `session_started_at` ever accepted for this active session.
+  // Any incoming SessionHistory with a lower value is stale and rejected.
+  int? _acceptedSessionStartedAtHighWater;
 
   // In-memory dedupe + ordering for the active session's msgs box. Rebuilt on
   // [activate]. Key = `<role>:<id>` so a user msg and the assistant reply that
@@ -389,15 +383,13 @@ class SyncService extends Service {
     ch.send(SessionSync(id: _newId()));
   }
 
-  /// Plan/28 — `session_new` acked: wipe the active session's rows + index.
+  /// Plan/28 — `session_new` acked: wipe the active session's rows.
+  /// Keep the persisted `session_started_at` high-water so stale post-clear
+  /// history can still be identified from persisted state.
   Future<void> clearActiveSession() async {
     final epk = _activeEpk;
     if (epk == null) return;
     final room = _activeRoomId;
-    // Bump the expected session history generation so any stale `session_history`
-    // from the previous session is rejected if it arrived after replacement.
-    _historyGeneration += 1;
-    _activeSessionStartedAt = null;
     // Session wiped → any optimistic sends are moot; disarm their backstops.
     _cancelAllSendTimers();
     await _enqueue(() async {
@@ -407,8 +399,6 @@ class SyncService extends Service {
       _idToSeq.clear();
       _nextSeq = 0;
       _indexLoaded = true;
-      final idx = _boxes.sessionsIndexBox();
-      await idx.delete(LocalBoxes.sessionKey(epk, room));
     });
   }
 
@@ -616,7 +606,7 @@ class SyncService extends Service {
 
       case SessionHistory():
         // ignore: discarded_futures
-        _applyHistory(msg, _historyGeneration);
+        _applyHistory(msg);
 
       case ErrorMessage(:final code, :final message):
         if (code.contains('unknown_peer')) {
@@ -678,24 +668,30 @@ class SyncService extends Service {
     );
   }
 
-  Future<void> _applyHistory(SessionHistory h, int historyGeneration) async {
+  Future<void> _applyHistory(SessionHistory h) async {
     final epk = _activeEpk;
     if (epk == null) return;
     final room = _activeRoomId;
     final incomingStartedAt = h.sessionStartedAt;
-    // Drop stale SessionHistory from a pre-clear session replacement.
-    if (historyGeneration != _historyGeneration) return;
+
+    // Reject stale pre-clear replay from older sessions.
+    if (_acceptedSessionStartedAtHighWater != null &&
+        incomingStartedAt < _acceptedSessionStartedAtHighWater!) {
+      return;
+    }
 
     final rows = _convertHistory(h.events);
     final historyIds = {for (final r in rows) _key(r.role, r.id)};
     await _enqueue(() async {
       if (_activeEpk != epk || _activeRoomId != room) return;
-      if (historyGeneration != _historyGeneration) return;
-      if (_activeSessionStartedAt != null &&
-          incomingStartedAt < _activeSessionStartedAt!) {
+      if (_acceptedSessionStartedAtHighWater != null &&
+          incomingStartedAt < _acceptedSessionStartedAtHighWater!) {
         return;
       }
 
+      final shouldAdvanceSessionHighWater =
+          _acceptedSessionStartedAtHighWater == null ||
+          incomingStartedAt > _acceptedSessionStartedAtHighWater!;
       final box = await _boxes.msgsBox(epk, room);
       // Preserve local pending user rows the Pi hasn't echoed yet.
       final preserved = <MessageRecord>[];
@@ -740,10 +736,16 @@ class SyncService extends Service {
           await box.put(i, newJson);
         }
       }
-      _activeSessionStartedAt =
-          incomingStartedAt > (_activeSessionStartedAt ?? -1)
-          ? incomingStartedAt
-          : _activeSessionStartedAt;
+      if (shouldAdvanceSessionHighWater) {
+        _acceptedSessionStartedAtHighWater = incomingStartedAt;
+        _updateIndex(
+          (cur) => cur.copyWith(
+            sessionStartedAt: DateTime.fromMillisecondsSinceEpoch(
+              incomingStartedAt,
+            ),
+          ),
+        );
+      }
       if (_activeEpk == epk && _activeRoomId == room) {
         _idToSeq
           ..clear()
@@ -753,13 +755,6 @@ class SyncService extends Service {
           ]);
         _nextSeq = desired.length;
         _indexLoaded = true;
-        _updateIndex(
-          (cur) => cur.copyWith(
-            sessionStartedAt: DateTime.fromMillisecondsSinceEpoch(
-              incomingStartedAt,
-            ),
-          ),
-        );
       }
     });
   }
@@ -869,7 +864,7 @@ class SyncService extends Service {
       final box = await _boxes.msgsBox(epk, room);
       final idx = _boxes.sessionsIndexBox();
       final indexRaw = idx.get(LocalBoxes.sessionKey(epk, room));
-      _activeSessionStartedAt = indexRaw is Map<String, dynamic>
+      _acceptedSessionStartedAtHighWater = indexRaw is Map<String, dynamic>
           ? SessionIndexRecord.fromJson(
               indexRaw,
             ).sessionStartedAt?.millisecondsSinceEpoch

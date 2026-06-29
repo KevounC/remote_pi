@@ -1,7 +1,7 @@
 ---
 id: story-guard-history-clear-without-prior-start
 kind: story
-stage: implementing
+stage: review
 tags: [app, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [story-guard-stale-session-history-after-new]
@@ -22,12 +22,13 @@ Review of `story-guard-stale-session-history-after-new` found that `clearActiveS
 - [x] Preserve reconnect replay for the current session, including equal `session_started_at` histories that belong to the accepted current session.
 
 ## Implementation notes
-- Replaced the wall-clock floor in `clearActiveSession()` with a monotonic `_historyGeneration` replacement token.
-  - `clearActiveSession()` now always increments `_historyGeneration` and resets `_activeSessionStartedAt` to `null`.
-  - `SessionHistory` is now handled with the token captured from the listener path; stale histories from prior replacement generations are ignored.
-  - The first `SessionHistory` accepted for the current generation establishes `_activeSessionStartedAt` from the Pi-provided value.
-- `_applyHistory` now gates strictly on Pi-derived boundaries: drop only histories older than the accepted `_activeSessionStartedAt`, and accept equal/newer timestamps (updating `_activeSessionStartedAt` when newer).
-- Updated regression coverage in `app/test/data/sync/sync_service_test.dart` to validate no-index replacement behavior, fresh replay below local-clock values, older replay drops after accept, and equal-timestamp replay.
+- Introduced persisted high-water mark `_acceptedSessionStartedAtHighWater` (in-memory alias of `SessionIndexRecord.sessionStartedAt`) and load it in `_loadIndex()`.
+- `clearActiveSession()` now clears only message rows (no longer deletes the session index row) so the high-water survives replacement and can reject stale late history after clear.
+- Removed reliance on receipt-time replacement generation for stale-guarding; `_applyHistory` now uses strict `session_started_at` ordering:
+  - `session_started_at < high_water` → rejected as stale.
+  - `session_started_at == high_water` → accepted replay semantics.
+  - `session_started_at > high_water` → accepted and updates the high-water + persisted index timestamp.
+- Updated `sync_service` regression tests to restore post-clear stale rejection, keep equal/newer semantics, and add a clock-skew-style acceptance test for replay above high-water while still below phone wall-clock.
 
 ## Review findings (2026-06-28)
 

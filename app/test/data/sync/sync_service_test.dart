@@ -703,106 +703,119 @@ void main() {
     s.sync.dispose();
   });
 
-  test('clearActiveSession wipes the rows + index', () async {
-    final s = await setup();
-    s.ch.push(UserInput(id: 'u1', text: 'hi'));
-    await _settle();
-    expect(messages(s.epk), hasLength(1));
+  test(
+    'clearActiveSession wipes the rows while preserving session index metadata',
+    () async {
+      final s = await setup();
+      s.ch.push(UserInput(id: 'u1', text: 'hi'));
+      await _settle();
+      expect(messages(s.epk), hasLength(1));
 
-    await s.sync.clearActiveSession();
-    await _settle();
-    expect(messages(s.epk), isEmpty);
-    expect(index(s.epk), isNull);
-    s.conn.dispose();
-    s.sync.dispose();
-  });
-
-  test('clearActiveSession with no-index session accepts replay after replacement and '
-      'maintains reconnect semantics when current boundary arrives', () async {
-    final s = await setup();
-    expect(messages(s.epk), isEmpty);
-    expect(index(s.epk), isNull);
-
-    await s.sync.clearActiveSession();
-    await _settle();
-    expect(messages(s.epk), isEmpty);
-    expect(index(s.epk), isNull);
-
-    // (a) older replay from the pre-clear channel is expected to settle on the
-    // new replacement token before final history establishes the boundary.
-    final staleStartedAt = DateTime.now().millisecondsSinceEpoch - 120_000;
-    s.ch.push(
-      SessionHistory(
-        inReplyTo: 'sync-stale-empty',
-        sessionStartedAt: staleStartedAt,
-        events: const [
-          UserInputEvt(ts: 1, id: 'stale', text: 'from old session'),
-        ],
-        eos: true,
-      ),
-    );
-    await s.sync.clearActiveSession();
-    await _settle();
-
-    // (b) fresh current replay below the phone's wall clock should be accepted.
-    final currentSessionStartedAt =
-        DateTime.now().millisecondsSinceEpoch - 90_000;
-    s.ch.push(
-      SessionHistory(
-        inReplyTo: 'sync-current',
-        sessionStartedAt: currentSessionStartedAt,
-        events: const [
-          UserInputEvt(ts: 2, id: 'fresh', text: 'from active session'),
-        ],
-        eos: true,
-      ),
-    );
-    await _settle();
-    expect(messages(s.epk).map((r) => r.id), ['fresh']);
-    expect(
-      index(s.epk)?.sessionStartedAt,
-      DateTime.fromMillisecondsSinceEpoch(currentSessionStartedAt),
-    );
-
-    // (c) older than the accepted current session is dropped.
-    s.ch.push(
-      SessionHistory(
-        inReplyTo: 'sync-older',
-        sessionStartedAt: currentSessionStartedAt - 10,
-        events: const [
-          UserInputEvt(
-            ts: 3,
-            id: 'older-after-current',
-            text: 'older than current',
-          ),
-        ],
-        eos: true,
-      ),
-    );
-    await _settle();
-    expect(messages(s.epk).map((r) => r.id), ['fresh']);
-
-    // (d) same boundary replay is accepted to keep reconnect replay semantics.
-    s.ch.push(
-      SessionHistory(
-        inReplyTo: 'sync-current-equal',
-        sessionStartedAt: currentSessionStartedAt,
-        events: const [
-          UserInputEvt(ts: 4, id: 'equal', text: 'reconnect same boundary'),
-        ],
-        eos: true,
-      ),
-    );
-    await _settle();
-    expect(messages(s.epk).map((r) => r.id), ['equal']);
-
-    s.conn.dispose();
-    s.sync.dispose();
-  });
+      await s.sync.clearActiveSession();
+      await _settle();
+      expect(messages(s.epk), isEmpty);
+      expect(index(s.epk), isNotNull);
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
 
   test(
-    'clearActiveSession sets a new history boundary; older replay is superseded by '
-    'newer replay after replace',
+    'clearActiveSession with no-index session accepts replay after clear',
+    () async {
+      final s = await setup();
+      expect(messages(s.epk), isEmpty);
+      expect(index(s.epk), isNull);
+
+      await s.sync.clearActiveSession();
+      await _settle();
+      expect(messages(s.epk), isEmpty);
+      expect(index(s.epk), isNull);
+
+      // (a) first replay after clear establishes the starting boundary.
+      final staleStartedAt = DateTime.now().millisecondsSinceEpoch - 120_000;
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-stale-empty',
+          sessionStartedAt: staleStartedAt,
+          events: const [
+            UserInputEvt(ts: 1, id: 'stale', text: 'from active session'),
+          ],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk).map((r) => r.id), ['stale']);
+      expect(
+        index(s.epk)?.sessionStartedAt,
+        DateTime.fromMillisecondsSinceEpoch(staleStartedAt),
+      );
+
+      // (b) a replacement clear is still supported before the next boundary replay
+      // arrives.
+      await s.sync.clearActiveSession();
+      await _settle();
+      expect(messages(s.epk), isEmpty);
+
+      // (c) fresh current replay below the phone's wall clock is accepted.
+      final currentSessionStartedAt =
+          DateTime.now().millisecondsSinceEpoch - 90_000;
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-current',
+          sessionStartedAt: currentSessionStartedAt,
+          events: const [
+            UserInputEvt(ts: 2, id: 'fresh', text: 'from active session'),
+          ],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk).map((r) => r.id), ['fresh']);
+      expect(
+        index(s.epk)?.sessionStartedAt,
+        DateTime.fromMillisecondsSinceEpoch(currentSessionStartedAt),
+      );
+
+      // (d) older than the accepted current session is dropped.
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-older',
+          sessionStartedAt: currentSessionStartedAt - 10,
+          events: const [
+            UserInputEvt(
+              ts: 3,
+              id: 'older-after-current',
+              text: 'older than current',
+            ),
+          ],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk).map((r) => r.id), ['fresh']);
+
+      // (e) same boundary replay is accepted to keep reconnect replay semantics.
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-current-equal',
+          sessionStartedAt: currentSessionStartedAt,
+          events: const [
+            UserInputEvt(ts: 4, id: 'equal', text: 'reconnect same boundary'),
+          ],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk).map((r) => r.id), ['equal']);
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
+    'clearActiveSession preserves sessionStartedAt high-water and drops stale replay',
     () async {
       final s = await setup();
 
@@ -816,11 +829,18 @@ void main() {
       );
       await _settle();
       expect(messages(s.epk), hasLength(1));
+      expect(
+        index(s.epk)?.sessionStartedAt,
+        DateTime.fromMillisecondsSinceEpoch(1000),
+      );
 
       await s.sync.clearActiveSession();
       await _settle();
       expect(messages(s.epk), isEmpty);
-      expect(index(s.epk), isNull);
+      expect(
+        index(s.epk)?.sessionStartedAt,
+        DateTime.fromMillisecondsSinceEpoch(1000),
+      );
 
       s.ch.push(
         SessionHistory(
@@ -833,6 +853,7 @@ void main() {
         ),
       );
       await _settle();
+      expect(messages(s.epk), isEmpty);
 
       s.ch.push(
         SessionHistory(
@@ -848,6 +869,60 @@ void main() {
       expect(
         index(s.epk)?.sessionStartedAt,
         DateTime.fromMillisecondsSinceEpoch(1001),
+      );
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
+    'accepts replay above high-water even when below the phone clock',
+    () async {
+      final s = await setup();
+      const baselineStartedAt = 1_700_000_000;
+      const skewedStartedAt = 1_700_000_100;
+      final phoneNow = DateTime.now().millisecondsSinceEpoch;
+      expect(phoneNow, greaterThan(skewedStartedAt));
+
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-baseline',
+          sessionStartedAt: baselineStartedAt,
+          events: const [
+            UserInputEvt(ts: 1, id: 'baseline', text: 'baseline row'),
+          ],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(
+        index(s.epk)?.sessionStartedAt,
+        DateTime.fromMillisecondsSinceEpoch(baselineStartedAt),
+      );
+
+      await s.sync.clearActiveSession();
+      await _settle();
+      expect(
+        index(s.epk)?.sessionStartedAt,
+        DateTime.fromMillisecondsSinceEpoch(baselineStartedAt),
+      );
+
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-skew',
+          sessionStartedAt: skewedStartedAt,
+          events: const [
+            UserInputEvt(ts: 2, id: 'skew', text: 'clock-skewed replay'),
+          ],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk).map((r) => r.id), ['skew']);
+      expect(
+        index(s.epk)?.sessionStartedAt,
+        DateTime.fromMillisecondsSinceEpoch(skewedStartedAt),
       );
 
       s.conn.dispose();
