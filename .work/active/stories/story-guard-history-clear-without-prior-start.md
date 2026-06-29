@@ -1,7 +1,7 @@
 ---
 id: story-guard-history-clear-without-prior-start
 kind: story
-stage: review
+stage: done
 tags: [app, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [story-guard-stale-session-history-after-new]
@@ -59,3 +59,20 @@ Review of `story-guard-stale-session-history-after-new` found that `clearActiveS
 **Nits**: none
 
 **Notes**: The prior phone-clock blocker is fixed in the narrow sense that `clearActiveSession()` no longer fabricates a `DateTime.now()` floor, and fresh Pi histories below the phone clock are accepted. However, the generation approach as implemented only protects against writes that were already in flight before a later clear; it does not identify late prior-session histories that arrive after the clear. Verification: `cd /home/agent/forks/remote_pi/app && /opt/flutter/bin/flutter test --concurrency=1 test/data/sync/sync_service_test.dart` passed, but the suite is missing the failing post-clear stale ordering above.
+
+## Review (2026-06-28 #3)
+
+Verdict: Approve
+
+Findings:
+- Blockers: none.
+- Important: none.
+- Nits: none.
+
+Notes:
+- Confirmed v2 replaces receipt-time generation gating with a persisted accepted `session_started_at` high-water, preserves that high-water across `clearActiveSession()`, rejects older post-clear history, and accepts equal/newer replay semantics.
+- Verified no phone-clock floor is used for `SessionHistory` acceptance; the wall clock is not compared with Pi-provided `session_started_at`.
+- Verification:
+  - `cd /home/agent/forks/remote_pi/app && /opt/flutter/bin/flutter test --concurrency=1 test/data/sync/sync_service_test.dart` (pass)
+  - `cd /home/agent/forks/remote_pi/app && /opt/flutter/bin/flutter test --concurrency=1` (pass, 505 tests)
+  - `cd /home/agent/forks/remote_pi/app && /opt/flutter/bin/flutter analyze` (expected pre-existing `deprecated_member_use` at `lib/ui/chat/widgets/input_bar.dart:802`)
