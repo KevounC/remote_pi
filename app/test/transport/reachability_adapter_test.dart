@@ -20,72 +20,92 @@ void main() {
       expect(adapter.missedPings, 0);
     });
 
-    test('retryable failures advance attempt and use contract backoff', () {
-      final adapter = ReachabilityAdapter();
+    test(
+      'retryable failures preserve current attempt until the retry timer fires',
+      () {
+        final adapter = ReachabilityAdapter();
 
-      adapter.onConnectRequested();
-      adapter.onConnectFailedRetryable();
-      expect(adapter.state, ReachabilityState.retrying);
-      expect(adapter.retryAttempt, 1);
-      expect(adapter.nextRetryDelay, reachabilityBackoffForAttempt(1));
-      expect(adapter.waitingForRetry, isTrue);
+        adapter.onConnectRequested();
+        adapter.onConnectFailedRetryable();
+        expect(adapter.state, ReachabilityState.retrying);
+        expect(adapter.retryAttempt, 0);
+        expect(adapter.nextRetryDelay, reachabilityBackoffForAttempt(0));
+        expect(adapter.waitingForRetry, isTrue);
 
-      adapter.onRetryTimerFired();
-      expect(adapter.state, ReachabilityState.connecting);
-      expect(adapter.connectInFlight, isTrue);
+        adapter.onRetryTimerFired();
+        expect(adapter.state, ReachabilityState.connecting);
+        expect(adapter.connectInFlight, isTrue);
+        expect(adapter.retryAttempt, 1);
 
-      adapter.onConnectFailedRetryable();
-      expect(adapter.retryAttempt, 2);
-      expect(adapter.nextRetryDelay, reachabilityBackoffForAttempt(2));
-    });
+        adapter.onConnectFailedRetryable();
+        expect(adapter.retryAttempt, 1);
+        expect(adapter.nextRetryDelay, reachabilityBackoffForAttempt(1));
+      },
+    );
 
-    test('ping misses degrade after the contract threshold without forcing offline', () {
-      final adapter = ReachabilityAdapter()..onConnectSucceeded();
+    test(
+      'ping misses degrade after the contract threshold without forcing offline',
+      () {
+        final adapter = ReachabilityAdapter()..onConnectSucceeded();
 
-      for (var i = 1; i < reachabilityHeartbeat.degradedAfterMissedAppPongs; i++) {
+        for (
+          var i = 1;
+          i < reachabilityHeartbeat.degradedAfterMissedAppPongs;
+          i++
+        ) {
+          adapter.onPingMissed();
+          expect(adapter.state, ReachabilityState.online);
+        }
+
         adapter.onPingMissed();
+        expect(
+          adapter.missedPings,
+          reachabilityHeartbeat.degradedAfterMissedAppPongs,
+        );
+        expect(adapter.state, ReachabilityState.degraded);
+      },
+    );
+
+    test(
+      'fresh app traffic restores online and resets retry and missed-ping counters',
+      () {
+        final adapter = ReachabilityAdapter()
+          ..onConnectRequested()
+          ..onConnectFailedRetryable()
+          ..onRetryTimerFired()
+          ..onTransportClosed()
+          ..onPingMissed();
+
+        expect(adapter.state, ReachabilityState.retrying);
+        expect(adapter.retryAttempt, 1);
+        expect(adapter.missedPings, 1);
+
+        adapter.onAppFrameObserved();
+
         expect(adapter.state, ReachabilityState.online);
-      }
+        expect(adapter.retryAttempt, 0);
+        expect(adapter.missedPings, 0);
+      },
+    );
 
-      adapter.onPingMissed();
-      expect(adapter.missedPings, reachabilityHeartbeat.degradedAfterMissedAppPongs);
-      expect(adapter.state, ReachabilityState.degraded);
-    });
+    test(
+      'stop and reset project offline without transport or timer dependencies',
+      () {
+        final adapter = ReachabilityAdapter()
+          ..onConnectRequested()
+          ..onConnectFailedRetryable();
 
-    test('fresh app traffic restores online and resets retry and missed-ping counters', () {
-      final adapter = ReachabilityAdapter()
-        ..onConnectRequested()
-        ..onConnectFailedRetryable()
-        ..onRetryTimerFired()
-        ..onTransportClosed()
-        ..onPingMissed();
+        adapter.onStopRequested();
+        expect(adapter.state, ReachabilityState.offline);
+        expect(adapter.connectInFlight, isFalse);
+        expect(adapter.retryAttempt, 0);
 
-      expect(adapter.state, ReachabilityState.retrying);
-      expect(adapter.retryAttempt, 1);
-      expect(adapter.missedPings, 1);
-
-      adapter.onAppFrameObserved();
-
-      expect(adapter.state, ReachabilityState.online);
-      expect(adapter.retryAttempt, 0);
-      expect(adapter.missedPings, 0);
-    });
-
-    test('stop and reset project offline without transport or timer dependencies', () {
-      final adapter = ReachabilityAdapter()
-        ..onConnectRequested()
-        ..onConnectFailedRetryable();
-
-      adapter.onStopRequested();
-      expect(adapter.state, ReachabilityState.offline);
-      expect(adapter.connectInFlight, isFalse);
-      expect(adapter.retryAttempt, 1);
-
-      adapter.reset();
-      expect(adapter.state, ReachabilityState.offline);
-      expect(adapter.retryAttempt, 0);
-      expect(adapter.missedPings, 0);
-      expect(adapter.connectInFlight, isFalse);
-    });
+        adapter.reset();
+        expect(adapter.state, ReachabilityState.offline);
+        expect(adapter.retryAttempt, 0);
+        expect(adapter.missedPings, 0);
+        expect(adapter.connectInFlight, isFalse);
+      },
+    );
   });
 }

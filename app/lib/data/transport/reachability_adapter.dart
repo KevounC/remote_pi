@@ -33,7 +33,6 @@ final class ReachabilityAdapter {
 
   void onConnectFailedRetryable() {
     _state = ReachabilityState.retrying;
-    _retryAttempt += 1;
     _connectInFlight = false;
   }
 
@@ -57,6 +56,7 @@ final class ReachabilityAdapter {
   }
 
   void onRetryTimerFired() {
+    _retryAttempt += 1;
     _state = ReachabilityState.connecting;
     _connectInFlight = true;
   }

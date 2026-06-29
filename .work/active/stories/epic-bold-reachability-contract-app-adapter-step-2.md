@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-app-adapter-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-reachability-contract-app-adapter
 depends_on: [epic-bold-reachability-contract-app-adapter-step-1]
@@ -116,3 +116,10 @@ risk for hidden ordering regressions (especially with in-flight switch/boot race
 
 Revert `ConnectionManager` transition rewrites and restore local in-class state
 mutation while leaving the adapter file unused.
+
+## Implementation notes
+- Files changed: `app/lib/data/transport/connection_manager.dart`, `app/lib/data/transport/reachability_adapter.dart`, `app/test/transport/reachability_adapter_test.dart`.
+- Tests added: adjusted adapter retry semantics test to pin the existing public `StatusRetrying.attempt=0` first-failure behavior.
+- Discrepancies from design: Step 1's adapter incremented retry attempts on failure, but this story's acceptance criteria require preserving the existing `ConnectionManager` sequence where the first retry emits attempt `0` and the counter advances when the retry timer fires. The adapter was aligned with that public behavior while keeping retry delays sourced from the reachability contract.
+- Adjacent issues parked: none.
+- Verification: pending full app verification in this run after the remaining app story integrations.

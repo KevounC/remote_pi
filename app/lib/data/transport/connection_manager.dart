@@ -11,28 +11,30 @@
 //                              ↓
 //                          connect() → [connecting] → …
 //
-// Ping: every 25 s. `_missedPings` increments per tick BEFORE sending the
-// next ping; inbound traffic (handled by the channel listener) resets the
-// counter back to 0. Two consecutive misses (~50s of silence) → retrying.
+// Ping: every 25 s. The reachability adapter increments missed pings per
+// tick BEFORE sending the next ping; inbound traffic (handled by the channel
+// listener) resets the counter back to 0. Repeated silence marks the active
+// room offline while the relay socket remains up.
 //
 // Post plan offline-loop (4 patches):
 //
 //  A) `_channelSub` is stored and cancelled on every transition. The old
 //     channel's `onDone` (triggered by the relay killing it on duplicate
 //     auth) can no longer leak into a retry storm.
-//  B) `_retryAttempt` is no longer reset on factory success — only when
+//  B) Retry attempt state is no longer reset on factory success — only when
 //     the channel listener receives real inbound traffic. With the Pi down
 //     the WS keeps re-authenticating against the relay; without this fix
 //     the backoff stayed pinned at 1s.
-//  C) `_startPing` increments `_missedPings` per tick before sending the
-//     ping. Inbound (`_watchChannel` listener) is the only path that
-//     zeroes it; with the Pi offline two ticks elapse and we transition
-//     to retrying without a leaky-bucket race.
+//  C) `_startPing` delegates missed-ping counting to the reachability adapter
+//     before sending the ping. Inbound (`_watchChannel` listener) is the only
+//     path that zeroes it; with the Pi offline the active room is marked
+//     offline without a leaky-bucket race.
 
 import 'dart:async';
 
 import 'package:app/data/transport/channel.dart';
 import 'package:app/data/transport/epk_encoding.dart';
+import 'package:app/data/transport/reachability_adapter.dart';
 import 'package:app/domain/contracts/service.dart';
 import 'package:app/pairing/storage.dart';
 import 'package:app/protocol/protocol.dart';
@@ -69,15 +71,6 @@ class StatusOffline extends ConnectionStatus {
   final bool canRetry;
   const StatusOffline({required this.reason, this.canRetry = true});
 }
-
-// ---------------------------------------------------------------------------
-// Backoff sequence (seconds)
-// ---------------------------------------------------------------------------
-
-const _kBackoff = [1, 2, 5, 10, 30];
-
-Duration _backoffFor(int attempt) =>
-    Duration(seconds: _kBackoff[attempt.clamp(0, _kBackoff.length - 1)]);
 
 // ---------------------------------------------------------------------------
 // Factory typedef — injectable for tests
@@ -143,11 +136,7 @@ class ConnectionManager extends Service {
   StreamSubscription<ControlInbound>? _controlSub;
   // List currently subscribed for presence (so reconnect can replay it).
   List<String> _subscribedEpks = const [];
-  int _missedPings = 0;
-  int _retryAttempt = 0;
-  // Tracks the last-running connect token so the watchdog can tell
-  // whether a connect is in flight (without poking at the live token).
-  bool _connectInFlight = false;
+  final ReachabilityAdapter _reachability = ReachabilityAdapter();
 
   // Debounce timers — relay's control-frame firehose (peer_online +
   // presence + rooms snapshots, often dozens per second when multiple
@@ -180,7 +169,7 @@ class ConnectionManager extends Service {
       final peer = _activePeer;
       if (peer == null) return;
       if (_status is StatusOnline) return;
-      if (_connectInFlight) return;
+      if (_reachability.connectInFlight) return;
       if (_retryTimer != null) return;
       // We SHOULD be reconnecting but nothing's scheduled and no
       // attempt is in flight. Kick the retry chain.
@@ -441,8 +430,7 @@ class ConnectionManager extends Service {
         } catch (_) {}
       });
     }
-    _retryAttempt = 0;
-    _missedPings = 0;
+    _reachability.onConnectSucceeded();
     _activePeer = peer;
     _emit(StatusOnline(channel));
     _startPing(peer, channel);
@@ -470,7 +458,9 @@ class ConnectionManager extends Service {
     if (_status is StatusOnline) {
       await (_status as StatusOnline).channel.close();
     }
+    _reachability.onStopRequested();
     if (emitNoPeer) {
+      _reachability.reset();
       _activePeer = null;
       _emit(const StatusNoPeer());
     }
@@ -493,6 +483,7 @@ class ConnectionManager extends Service {
     _channelSub = null;
     _controlSub?.cancel();
     _controlSub = null;
+    _reachability.onStopRequested();
     _statusController.close();
     _presenceController.close();
     if (!_roomsController.isClosed) {
@@ -513,7 +504,7 @@ class ConnectionManager extends Service {
 
     final token = CancelToken();
     _connectCancel = token;
-    _connectInFlight = true;
+    _reachability.onConnectRequested();
     _activePeer = peer;
     _activeRoomExplicitlySet = false;
     // Plan 17 fix — set the destination room from the persisted
@@ -535,7 +526,7 @@ class ConnectionManager extends Service {
         await ch.close();
         return;
       }
-      _missedPings = 0;
+      _reachability.onConnectSucceeded();
       // Push down the active room to the WS so the outer envelope
       // carries it from frame 1 (factory creates a fresh WsTransport
       // every reconnect — default _activeRoom='main' unless we set).
@@ -547,10 +538,6 @@ class ConnectionManager extends Service {
       _replaySubscriptions();
     } catch (e) {
       if (!token.isCancelled) _scheduleRetry(peer);
-    } finally {
-      // Only clear the flight flag if THIS call is still the active
-      // attempt — a newer _connect may have superseded us.
-      if (identical(_connectCancel, token)) _connectInFlight = false;
     }
   }
 
@@ -1107,11 +1094,7 @@ class ConnectionManager extends Service {
       (msg) {
         // Real inbound — the Pi is alive and reachable. Safe to reset
         // both the ping miss counter and the retry backoff.
-        final wasMissed = _missedPings;
-        if (wasMissed > 0) {}
-        if (_retryAttempt != 0) {}
-        _missedPings = 0;
-        _retryAttempt = 0;
+        _reachability.onAppFrameObserved();
         if (msg is PairOk) {
           _learnSessionFromPairOk(peer, msg);
         }
@@ -1132,18 +1115,23 @@ class ConnectionManager extends Service {
       return;
     }
     _cancelPing();
+    _reachability.onTransportClosed();
     _scheduleRetry(peer);
   }
 
   void _scheduleRetry(PeerRecord peer) {
-    final delay = _backoffFor(_retryAttempt);
-    _emit(StatusRetrying(nextRetry: delay, attempt: _retryAttempt));
+    if (!_reachability.waitingForRetry) {
+      _reachability.onConnectFailedRetryable();
+    }
+    final delay = _reachability.nextRetryDelay;
+    final attempt = _reachability.retryAttempt;
+    _emit(StatusRetrying(nextRetry: delay, attempt: attempt));
     // Cancel any previous timer before scheduling — prevents the
     // "two timers firing back-to-back" footgun.
     _retryTimer?.cancel();
     _retryTimer = Timer(delay, () {
       _retryTimer = null;
-      _retryAttempt++;
+      _reachability.onRetryTimerFired();
       _connect(peer);
     });
   }
@@ -1170,11 +1158,11 @@ class ConnectionManager extends Service {
       // below (ping SEND fails) or via the channel listener's
       // onError / onDone, both of which still trigger
       // `_onChannelLost`.
-      _missedPings++;
-      if (_missedPings == 3) {
+      _reachability.onPingMissed();
+      if (_reachability.missedPings == 3) {
         _markActiveRoomOffline();
         // No `return` — keep firing pings. When Pi comes back, the
-        // inbound Pong (or any other frame) resets _missedPings via
+        // inbound Pong (or any other frame) resets missed pings via
         // _watchChannel, and `room_announced` repopulates
         // _liveRoomIds → tile + AppBar flip back to green
         // automatically.
@@ -1213,7 +1201,6 @@ class ConnectionManager extends Service {
   void _cancelPing() {
     _pingTimer?.cancel();
     _pingTimer = null;
-    _missedPings = 0;
   }
 
   void _emit(ConnectionStatus s) {
