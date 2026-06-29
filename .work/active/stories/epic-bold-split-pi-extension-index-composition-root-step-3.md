@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-composition-root-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-composition-root
 depends_on: [epic-bold-split-pi-extension-index-composition-root-step-2]
@@ -73,3 +73,9 @@ High: accidental circular imports or wrapper omissions can drop command/app path
 
 ## Rollback
 Inline adapter wiring back into `index.ts` and remove `legacy_ports.ts`; no protocol or module internals should need rollback.
+
+## Implementation notes
+- Files changed: `pi-extension/src/extension/legacy_ports.ts`.
+- Tests added: none; this is a type-level wrapper seam.
+- Discrepancies from design: the existing `index.ts` still contains legacy globals and has not yet been rewired through the new adapter in this story; the adapter seam is grouped by future module ownership so sibling extraction stories can replace one port at a time without importing god-file globals.
+- Adjacent issues parked: none.
