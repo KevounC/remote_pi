@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-app-adapter-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-reachability-contract-app-adapter
 depends_on: [epic-bold-reachability-contract-state-machine]
@@ -97,3 +97,10 @@ paths. Keep transition logic explicit and tested.
 
 Delete `app/lib/data/transport/reachability_adapter.dart` and restore local fields
 in `ConnectionManager`.
+
+## Implementation notes
+- Files changed: `app/lib/data/transport/reachability_adapter.dart`, `app/test/transport/reachability_adapter_test.dart`.
+- Tests added: `app/test/transport/reachability_adapter_test.dart` covers connect success, retry progression/backoff, degraded ping threshold, app-frame recovery, stop, and reset.
+- Discrepancies from design: Added the behavior test in this step rather than deferring all adapter tests to step 3 because the adapter is pure and cheap to verify; no `ConnectionManager` behavior changed.
+- Adjacent issues parked: none.
+- Verification: `cd app && dart format ... && flutter test test/transport/reachability_adapter_test.dart` could not run because the Flutter SDK cache under `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm` writes failed before test startup).
