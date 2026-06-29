@@ -293,6 +293,7 @@ export function handleListModels(
   } catch (e) {
     sender.send({
       type: "error",
+      session_id: msg.session_id,
       in_reply_to: msg.id,
       code: "internal_error",
       message: e instanceof Error ? e.message : String(e),

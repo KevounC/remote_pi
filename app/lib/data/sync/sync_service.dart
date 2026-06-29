@@ -216,10 +216,23 @@ class SyncService extends Service {
       _emitStreaming(StreamingMessage(inReplyTo: id));
     }
     debugPrint('[msg-send] id=$id text=${_preview(text, image)}');
+    final sessionId = _activeSessionId;
+    if (sessionId == null || sessionId.isEmpty) {
+      await _failPendingSend(
+        id,
+        code: 'session_unavailable',
+        message:
+            'Session identity is not available yet. Reconnect and try again.',
+        expectedEpk: epk,
+        expectedRoom: room,
+      );
+      return;
+    }
     try {
       await ch.send(
         UserMessage(
           id: id,
+          sessionId: sessionId,
           text: text,
           streamingBehavior: streamingBehavior,
           images: image == null
@@ -324,18 +337,26 @@ class SyncService extends Service {
   @visibleForTesting
   int get debugPendingSendTimerCount => _pendingSendTimers.length;
 
+  String? get _activeSessionId => _conn.activeSessionId;
+
   Future<void> setQueuedMessage(String text) async {
     final ch = _conn.channel;
     if (ch == null) return;
     _setQueuedText(text);
-    await ch.send(QueuedMessageSet(id: _newId(), text: text));
+    final sessionId = _activeSessionId;
+    if (sessionId == null || sessionId.isEmpty) return;
+    await ch.send(
+      QueuedMessageSet(id: _newId(), sessionId: sessionId, text: text),
+    );
   }
 
   Future<void> clearQueuedMessage() async {
     final ch = _conn.channel;
     _setQueuedText(null);
     if (ch == null) return;
-    await ch.send(QueuedMessageClear(id: _newId()));
+    final sessionId = _activeSessionId;
+    if (sessionId == null || sessionId.isEmpty) return;
+    await ch.send(QueuedMessageClear(id: _newId(), sessionId: sessionId));
   }
 
   Future<void> cancel(String targetId) async {
@@ -343,14 +364,25 @@ class SyncService extends Service {
     _pendingSendTimers.remove(targetId)?.cancel();
     final ch = _conn.channel;
     if (ch == null) return;
-    await ch.send(Cancel(id: _newId(), targetId: targetId));
+    final sessionId = _activeSessionId;
+    if (sessionId == null || sessionId.isEmpty) return;
+    await ch.send(
+      Cancel(id: _newId(), sessionId: sessionId, targetId: targetId),
+    );
   }
 
   Future<void> approveTool(String toolCallId, ApproveDecision decision) async {
     final ch = _conn.channel;
     if (ch == null) return;
+    final sessionId = _activeSessionId;
+    if (sessionId == null || sessionId.isEmpty) return;
     await ch.send(
-      ApproveTool(id: _newId(), toolCallId: toolCallId, decision: decision),
+      ApproveTool(
+        id: _newId(),
+        sessionId: sessionId,
+        toolCallId: toolCallId,
+        decision: decision,
+      ),
     );
     await _upsert(MsgRole.tool, toolCallId, (seq, existing) {
       final base =
@@ -380,7 +412,12 @@ class SyncService extends Service {
       return;
     }
     _pendingSyncRequest = false;
-    ch.send(SessionSync(id: _newId()));
+    final sessionId = _activeSessionId;
+    if (sessionId == null || sessionId.isEmpty) {
+      _pendingSyncRequest = true;
+      return;
+    }
+    ch.send(SessionSync(id: _newId(), sessionId: sessionId));
   }
 
   /// Plan/28 — `session_new` acked: wipe the active session's rows.
@@ -460,6 +497,15 @@ class SyncService extends Service {
     // (`_activeEpk == null`, cold boot before `activate`) must still flow, and
     // direct test calls without an origin aren't gated.
     if (originEpk != null && _activeEpk != null && originEpk != _activeEpk) {
+      return;
+    }
+    final messageSessionId = sessionIdOfServerMessage(msg);
+    final activeSessionId = _activeSessionId;
+    if (messageSessionId != null &&
+        messageSessionId.isNotEmpty &&
+        activeSessionId != null &&
+        activeSessionId.isNotEmpty &&
+        messageSessionId != activeSessionId) {
       return;
     }
     switch (msg) {

@@ -40,7 +40,9 @@ sealed class ControlInbound {
         return RoomAnnounced(
           peer: j['peer'] as String,
           roomId: j['room_id'] as String,
-          sessionId: (j['session_id'] as String?) ?? (metaJson?['session_id'] as String?),
+          sessionId:
+              (j['session_id'] as String?) ??
+              (metaJson?['session_id'] as String?),
           name: j['name'] as String?,
           cwd: j['cwd'] as String?,
           startedAt: (j['started_at'] as num).toInt(),
@@ -436,6 +438,60 @@ class UnsupportedTypeException implements Exception {
 // --- ClientMessage (app → extension) ---
 // MVP: 1 pairing = 1 Pi session — no session management messages.
 
+const sessionScopedClientTypes = <String>{
+  'user_message',
+  'queued_message_set',
+  'queued_message_clear',
+  'approve_tool',
+  'cancel',
+  'session_sync',
+  'session_new',
+  'session_compact',
+  'model_set',
+  'thinking_set',
+  'list_models',
+};
+
+const sessionScopedServerTypes = <String>{
+  'user_input',
+  'user_message',
+  'queued_message_state',
+  'agent_chunk',
+  'agent_done',
+  'agent_message',
+  'compaction',
+  'tool_request',
+  'tool_result',
+  'error',
+  'cancelled',
+  'session_history',
+};
+
+bool isSessionScopedClientType(String type) =>
+    sessionScopedClientTypes.contains(type);
+
+bool isSessionScopedServerType(String type) =>
+    sessionScopedServerTypes.contains(type);
+
+String _sessionIdFromJson(Map<String, dynamic> j) =>
+    (j['session_id'] as String?) ?? '';
+
+String? sessionIdOfServerMessage(ServerMessage message) => switch (message) {
+  UserInput(:final sessionId) => sessionId,
+  QueuedMessageState(:final sessionId) => sessionId,
+  AgentChunk(:final sessionId) => sessionId,
+  AgentDone(:final sessionId) => sessionId,
+  AgentMessage(:final sessionId) => sessionId,
+  Compaction(:final sessionId) => sessionId,
+  ToolRequest(:final sessionId) => sessionId,
+  ToolResult(:final sessionId) => sessionId,
+  ErrorMessage(:final sessionId) => sessionId,
+  Cancelled(:final sessionId) => sessionId,
+  SessionHistory(:final sessionId) => sessionId,
+  PairOk(:final sessionId) => sessionId.isEmpty ? null : sessionId,
+  _ => null,
+};
+
 sealed class ClientMessage {
   Map<String, dynamic> toJson();
 }
@@ -481,6 +537,7 @@ enum UserMessageStreamingBehavior {
 
 class UserMessage extends ClientMessage {
   final String id;
+  final String sessionId;
   final String text;
 
   /// Optional steering behavior for this message. Omitted when null for
@@ -494,6 +551,7 @@ class UserMessage extends ClientMessage {
 
   UserMessage({
     required this.id,
+    required this.sessionId,
     required this.text,
     this.streamingBehavior,
     this.images,
@@ -503,6 +561,7 @@ class UserMessage extends ClientMessage {
   Map<String, dynamic> toJson() => {
     'type': 'user_message',
     'id': id,
+    'session_id': sessionId,
     'text': text,
     if (streamingBehavior != null)
       'streaming_behavior': streamingBehavior!.wireValue,
@@ -513,31 +572,44 @@ class UserMessage extends ClientMessage {
 
 class QueuedMessageSet extends ClientMessage {
   final String id;
+  final String sessionId;
   final String text;
-  QueuedMessageSet({required this.id, required this.text});
+  QueuedMessageSet({
+    required this.id,
+    required this.sessionId,
+    required this.text,
+  });
 
   @override
   Map<String, dynamic> toJson() => {
     'type': 'queued_message_set',
     'id': id,
+    'session_id': sessionId,
     'text': text,
   };
 }
 
 class QueuedMessageClear extends ClientMessage {
   final String id;
-  QueuedMessageClear({required this.id});
+  final String sessionId;
+  QueuedMessageClear({required this.id, required this.sessionId});
 
   @override
-  Map<String, dynamic> toJson() => {'type': 'queued_message_clear', 'id': id};
+  Map<String, dynamic> toJson() => {
+    'type': 'queued_message_clear',
+    'id': id,
+    'session_id': sessionId,
+  };
 }
 
 class ApproveTool extends ClientMessage {
   final String id;
+  final String sessionId;
   final String toolCallId;
   final ApproveDecision decision;
   ApproveTool({
     required this.id,
+    required this.sessionId,
     required this.toolCallId,
     required this.decision,
   });
@@ -546,6 +618,7 @@ class ApproveTool extends ClientMessage {
   Map<String, dynamic> toJson() => {
     'type': 'approve_tool',
     'id': id,
+    'session_id': sessionId,
     'tool_call_id': toolCallId,
     'decision': decision.name,
   };
@@ -553,13 +626,15 @@ class ApproveTool extends ClientMessage {
 
 class Cancel extends ClientMessage {
   final String id;
+  final String sessionId;
   final String targetId;
-  Cancel({required this.id, required this.targetId});
+  Cancel({required this.id, required this.sessionId, required this.targetId});
 
   @override
   Map<String, dynamic> toJson() => {
     'type': 'cancel',
     'id': id,
+    'session_id': sessionId,
     'target_id': targetId,
   };
 }
@@ -597,13 +672,15 @@ class PairRequest extends ClientMessage {
 /// events and replaces local state with whatever Pi returns.
 class SessionSync extends ClientMessage {
   final String id;
+  final String sessionId;
   final int? limit;
-  SessionSync({required this.id, this.limit});
+  SessionSync({required this.id, required this.sessionId, this.limit});
 
   @override
   Map<String, dynamic> toJson() => {
     'type': 'session_sync',
     'id': id,
+    'session_id': sessionId,
     if (limit != null) 'limit': limit,
   };
 }
@@ -725,30 +802,47 @@ class WireModel {
 
 class SessionCompact extends ClientMessage {
   final String id;
-  SessionCompact({required this.id});
+  final String sessionId;
+  SessionCompact({required this.id, required this.sessionId});
 
   @override
-  Map<String, dynamic> toJson() => {'type': 'session_compact', 'id': id};
+  Map<String, dynamic> toJson() => {
+    'type': 'session_compact',
+    'id': id,
+    'session_id': sessionId,
+  };
 }
 
 class SessionNew extends ClientMessage {
   final String id;
-  SessionNew({required this.id});
+  final String sessionId;
+  SessionNew({required this.id, required this.sessionId});
 
   @override
-  Map<String, dynamic> toJson() => {'type': 'session_new', 'id': id};
+  Map<String, dynamic> toJson() => {
+    'type': 'session_new',
+    'id': id,
+    'session_id': sessionId,
+  };
 }
 
 class ModelSet extends ClientMessage {
   final String id;
+  final String sessionId;
   final String provider;
   final String modelId;
-  ModelSet({required this.id, required this.provider, required this.modelId});
+  ModelSet({
+    required this.id,
+    required this.sessionId,
+    required this.provider,
+    required this.modelId,
+  });
 
   @override
   Map<String, dynamic> toJson() => {
     'type': 'model_set',
     'id': id,
+    'session_id': sessionId,
     'provider': provider,
     'model_id': modelId,
   };
@@ -756,27 +850,34 @@ class ModelSet extends ClientMessage {
 
 class ThinkingSet extends ClientMessage {
   final String id;
+  final String sessionId;
   final ThinkingLevel level;
-  ThinkingSet({required this.id, required this.level});
+  ThinkingSet({required this.id, required this.sessionId, required this.level});
 
   @override
   Map<String, dynamic> toJson() => {
     'type': 'thinking_set',
     'id': id,
+    'session_id': sessionId,
     'level': level.wire,
   };
 }
 
 class ListModels extends ClientMessage {
   final String id;
-  ListModels({required this.id});
+  final String sessionId;
+  ListModels({required this.id, required this.sessionId});
 
   @override
-  Map<String, dynamic> toJson() => {'type': 'list_models', 'id': id};
+  Map<String, dynamic> toJson() => {
+    'type': 'list_models',
+    'id': id,
+    'session_id': sessionId,
+  };
 }
 
 // --- ServerMessage (extension → app) ---
-// 1 pairing = 1 session: no session_id on any message.
+// Session-scoped messages carry `session_id`; pair/control messages do not.
 // Sealed: all subtypes in this file — switch exhaustiveness enforced by compiler.
 
 sealed class ServerMessage {
@@ -817,22 +918,30 @@ sealed class ServerMessage {
 }
 
 class AgentChunk extends ServerMessage {
+  final String sessionId;
   final String inReplyTo;
   final String delta;
-  AgentChunk({required this.inReplyTo, required this.delta});
+  AgentChunk({
+    this.sessionId = '',
+    required this.inReplyTo,
+    required this.delta,
+  });
 
   factory AgentChunk.fromJson(Map<String, dynamic> j) => AgentChunk(
+    sessionId: _sessionIdFromJson(j),
     inReplyTo: j['in_reply_to'] as String,
     delta: j['delta'] as String,
   );
 }
 
 class AgentDone extends ServerMessage {
+  final String sessionId;
   final String inReplyTo;
   final Usage? usage;
-  AgentDone({required this.inReplyTo, this.usage});
+  AgentDone({this.sessionId = '', required this.inReplyTo, this.usage});
 
   factory AgentDone.fromJson(Map<String, dynamic> j) => AgentDone(
+    sessionId: _sessionIdFromJson(j),
     inReplyTo: j['in_reply_to'] as String,
     usage: j['usage'] != null
         ? Usage.fromJson(j['usage'] as Map<String, dynamic>)
@@ -841,16 +950,19 @@ class AgentDone extends ServerMessage {
 }
 
 class ToolRequest extends ServerMessage {
+  final String sessionId;
   final String toolCallId;
   final String tool;
   final dynamic args;
   ToolRequest({
+    this.sessionId = '',
     required this.toolCallId,
     required this.tool,
     required this.args,
   });
 
   factory ToolRequest.fromJson(Map<String, dynamic> j) => ToolRequest(
+    sessionId: _sessionIdFromJson(j),
     toolCallId: j['tool_call_id'] as String,
     tool: j['tool'] as String,
     args: j['args'],
@@ -858,12 +970,19 @@ class ToolRequest extends ServerMessage {
 }
 
 class ToolResult extends ServerMessage {
+  final String sessionId;
   final String toolCallId;
   final dynamic result;
   final String? error;
-  ToolResult({required this.toolCallId, this.result, this.error});
+  ToolResult({
+    this.sessionId = '',
+    required this.toolCallId,
+    this.result,
+    this.error,
+  });
 
   factory ToolResult.fromJson(Map<String, dynamic> j) => ToolResult(
+    sessionId: _sessionIdFromJson(j),
     toolCallId: j['tool_call_id'] as String,
     result: j['result'],
     error: j['error'] as String?,
@@ -871,12 +990,19 @@ class ToolResult extends ServerMessage {
 }
 
 class ErrorMessage extends ServerMessage {
+  final String sessionId;
   final String? inReplyTo;
   final String code;
   final String message;
-  ErrorMessage({this.inReplyTo, required this.code, required this.message});
+  ErrorMessage({
+    this.sessionId = '',
+    this.inReplyTo,
+    required this.code,
+    required this.message,
+  });
 
   factory ErrorMessage.fromJson(Map<String, dynamic> j) => ErrorMessage(
+    sessionId: _sessionIdFromJson(j),
     inReplyTo: j['in_reply_to'] as String?,
     code: j['code'] as String,
     message: j['message'] as String,
@@ -884,11 +1010,17 @@ class ErrorMessage extends ServerMessage {
 }
 
 class Cancelled extends ServerMessage {
+  final String sessionId;
   final String inReplyTo;
   final String targetId;
-  Cancelled({required this.inReplyTo, required this.targetId});
+  Cancelled({
+    this.sessionId = '',
+    required this.inReplyTo,
+    required this.targetId,
+  });
 
   factory Cancelled.fromJson(Map<String, dynamic> j) => Cancelled(
+    sessionId: _sessionIdFromJson(j),
     inReplyTo: j['in_reply_to'] as String,
     targetId: j['target_id'] as String,
   );
@@ -958,7 +1090,7 @@ class PairOk extends ServerMessage {
   final PiHarness? harness;
 
   /// Opaque Pi SDK session discriminator for bootstrap attribution.
-  final String? sessionId;
+  final String sessionId;
 
   /// Plan/27 Wave A — hostname hint for the post-pair nickname modal.
   /// The pi-extension reports its OS hostname so the modal can
@@ -970,7 +1102,7 @@ class PairOk extends ServerMessage {
     required this.sessionName,
     required this.sessionStartedAt,
     required this.roomId,
-    this.sessionId,
+    this.sessionId = '',
     this.harness,
     this.hostname,
   });
@@ -990,7 +1122,7 @@ class PairOk extends ServerMessage {
       // Callers that need to distinguish "Pi said main" from "Pi
       // omitted room" should peek at the raw JSON instead.
       roomId: (j['room_id'] as String?) ?? 'main',
-      sessionId: j['session_id'] as String?,
+      sessionId: _sessionIdFromJson(j),
       harness: harnessJson is Map<String, dynamic>
           ? PiHarness.fromJson(harnessJson)
           : null,
@@ -1013,16 +1145,22 @@ WireImage? _firstImage(dynamic raw) {
 }
 
 class QueuedMessageState extends ServerMessage {
+  final String sessionId;
   final String? id;
   final String? text;
-  QueuedMessageState({this.id, this.text});
+  QueuedMessageState({this.sessionId = '', this.id, this.text});
 
   factory QueuedMessageState.fromJson(Map<String, dynamic> j) =>
-      QueuedMessageState(id: j['id'] as String?, text: j['text'] as String?);
+      QueuedMessageState(
+        sessionId: _sessionIdFromJson(j),
+        id: j['id'] as String?,
+        text: j['text'] as String?,
+      );
 }
 
 class UserInput extends ServerMessage {
   final String id;
+  final String sessionId;
   final String text;
 
   /// Present when the message was sent with `streaming_behavior` (currently used
@@ -1034,6 +1172,7 @@ class UserInput extends ServerMessage {
 
   UserInput({
     required this.id,
+    this.sessionId = '',
     required this.text,
     this.streamingBehavior,
     this.image,
@@ -1041,6 +1180,7 @@ class UserInput extends ServerMessage {
 
   factory UserInput.fromJson(Map<String, dynamic> j) => UserInput(
     id: j['id'] as String,
+    sessionId: _sessionIdFromJson(j),
     text: j['text'] as String,
     streamingBehavior: UserMessageStreamingBehavior.fromWire(
       j['streaming_behavior'] as String?,
@@ -1054,12 +1194,19 @@ class UserInput extends ServerMessage {
 /// `agent_done`. May also arrive standalone for backfill — treated as a
 /// final assistant message for the given `inReplyTo`.
 class AgentMessage extends ServerMessage {
+  final String sessionId;
   final String inReplyTo;
   final String text;
   final Usage? usage;
-  AgentMessage({required this.inReplyTo, required this.text, this.usage});
+  AgentMessage({
+    this.sessionId = '',
+    required this.inReplyTo,
+    required this.text,
+    this.usage,
+  });
 
   factory AgentMessage.fromJson(Map<String, dynamic> j) => AgentMessage(
+    sessionId: _sessionIdFromJson(j),
     inReplyTo: j['in_reply_to'] as String,
     text: j['text'] as String,
     usage: j['usage'] != null
@@ -1072,12 +1219,19 @@ class AgentMessage extends ServerMessage {
 /// Rendered as a system bubble in the chat (✓ Contexto compactado + summary +
 /// the token count that was reclaimed). `ts` is optional (epoch millis).
 class Compaction extends ServerMessage {
+  final String sessionId;
   final String summary;
   final int? tokensBefore;
   final int? ts;
-  Compaction({required this.summary, this.tokensBefore, this.ts});
+  Compaction({
+    this.sessionId = '',
+    required this.summary,
+    this.tokensBefore,
+    this.ts,
+  });
 
   factory Compaction.fromJson(Map<String, dynamic> j) => Compaction(
+    sessionId: _sessionIdFromJson(j),
     summary: (j['summary'] as String?) ?? '',
     tokensBefore: (j['tokens_before'] as num?)?.toInt(),
     ts: (j['ts'] as num?)?.toInt(),
@@ -1093,12 +1247,14 @@ class Compaction extends ServerMessage {
 /// than the requested `limit` and dropped the oldest — surfaced to
 /// logs only (no UI affordance per plan/16 D1=B).
 class SessionHistory extends ServerMessage {
+  final String sessionId;
   final String inReplyTo;
   final int sessionStartedAt;
   final List<SessionHistoryEvent> events;
   final bool eos;
   final bool truncated;
   SessionHistory({
+    this.sessionId = '',
     required this.inReplyTo,
     required this.sessionStartedAt,
     required this.events,
@@ -1107,6 +1263,7 @@ class SessionHistory extends ServerMessage {
   });
 
   factory SessionHistory.fromJson(Map<String, dynamic> j) => SessionHistory(
+    sessionId: _sessionIdFromJson(j),
     inReplyTo: j['in_reply_to'] as String,
     sessionStartedAt: (j['session_started_at'] as num).toInt(),
     events: (j['events'] as List<dynamic>)

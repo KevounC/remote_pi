@@ -340,12 +340,12 @@ function _forgetStaleMessageApi(api: AgentMessageApi): void {
 }
 
 function _sessionUnavailable(sender: PlainPeerChannel, inReplyTo: string, detail = "Pi session is replacing or not bound yet"): void {
-  sender.send({
+  sender.send(_withCurrentSession({
     type: "error",
     code: "internal_error",
     in_reply_to: inReplyTo,
     message: detail,
-  });
+  }));
 }
 
 function _sendPiMessage(
@@ -501,6 +501,10 @@ export function _setRemoteSessionIdForTest(id: string | null): void {
 
 function _currentRemoteSessionId(ctx?: unknown): string {
   return _remoteSessionIssuer.currentOrCapture(ctx ?? _lastEventCtx ?? _lastCtx ?? undefined);
+}
+
+function _withCurrentSession<T extends object>(msg: T): T & { session_id: string } {
+  return { ...msg, session_id: _currentRemoteSessionId() };
 }
 
 function _captureRemoteSession(ctx: unknown): string {
@@ -659,9 +663,9 @@ function _broadcastToActive(msg: ServerMessage): void {
 }
 
 function _queuedMessageState(): Extract<ServerMessage, { type: "queued_message_state" }> {
-  return _queuedMessage
+  return _withCurrentSession(_queuedMessage
     ? { type: "queued_message_state", id: _queuedMessage.id, text: _queuedMessage.text }
-    : { type: "queued_message_state" };
+    : { type: "queued_message_state" });
 }
 
 function _broadcastQueuedMessageState(): void {
@@ -1197,11 +1201,11 @@ function _installAutoListener(relay: RelayClient): () => void {
     // (peer was revoked / never paired). pair_request from unknown peer was
     // already handled above as a legitimate path. We never log inner contents,
     // only inner.type.
-    const errReply: ServerMessage = {
+    const errReply: ServerMessage = _withCurrentSession({
       type: "error",
       code: "unknown_peer",
       message: "Peer not paired — re-scan QR",
-    };
+    });
     const errCt = Buffer.from(JSON.stringify(errReply)).toString("base64");
     relay.send(JSON.stringify({ peer: appPeerId, ct: errCt }));
   };
@@ -1394,7 +1398,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     const turnId = _currentTurnId ?? `local_${randomUUID()}`;
     _currentTurnId = turnId;
     if (!_anyPeerActive()) return;
-    _broadcastToActive({ type: "user_input", id: turnId, text: event.text });
+    _broadcastToActive(_withCurrentSession({ type: "user_input", id: turnId, text: event.text }));
     return undefined;
   });
 
@@ -1434,7 +1438,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     if (!_anyPeerActive() || !_currentTurnId) return;
     const ae = event.assistantMessageEvent;
     if (ae.type === "text_delta") {
-      _broadcastToActive({ type: "agent_chunk", in_reply_to: _currentTurnId, delta: ae.delta });
+      _broadcastToActive(_withCurrentSession({ type: "agent_chunk", in_reply_to: _currentTurnId, delta: ae.delta }));
     }
   });
 
@@ -1444,12 +1448,12 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // they render a "Tool running… done" timeline in each paired app.
   pi.on("tool_execution_start", (event) => {
     if (!_anyPeerActive()) return;
-    _broadcastToActive({
+    _broadcastToActive(_withCurrentSession({
       type: "tool_request",
       tool_call_id: event.toolCallId,
       tool: event.toolName,
       args: _enrichToolArgs(event.toolName, event.args),
-    });
+    }));
   });
 
   pi.on("tool_execution_end", (event) => {
@@ -1460,8 +1464,8 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     // the object unstringified — both diverging from re-sync.
     const text = _stringifyToolResult(event.result);
     const msg: ServerMessage = event.isError
-      ? { type: "tool_result", tool_call_id: event.toolCallId, error: text }
-      : { type: "tool_result", tool_call_id: event.toolCallId, result: text };
+      ? _withCurrentSession({ type: "tool_result", tool_call_id: event.toolCallId, error: text })
+      : _withCurrentSession({ type: "tool_result", tool_call_id: event.toolCallId, result: text });
     _broadcastToActive(msg);
   });
 
@@ -1488,9 +1492,9 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
       const message = typeof m.errorMessage === "string" && m.errorMessage
         ? m.errorMessage
         : "Provider error";
-      const errMsg: ServerMessage = _currentTurnId
+      const errMsg: ServerMessage = _withCurrentSession(_currentTurnId
         ? { type: "error", in_reply_to: _currentTurnId, code: "provider_error", message }
-        : { type: "error", code: "provider_error", message };
+        : { type: "error", code: "provider_error", message });
       _broadcastToActive(errMsg);
     }
   });
@@ -1501,7 +1505,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     if (!_currentTurnId) return;
     const finishedTurnId = _currentTurnId;
     if (_anyPeerActive()) {
-      _broadcastToActive({ type: "agent_done", in_reply_to: finishedTurnId });
+      _broadcastToActive(_withCurrentSession({ type: "agent_done", in_reply_to: finishedTurnId }));
     }
     _currentTurnId = null;
     _finishedTurnIdAwaitingSync = finishedTurnId;
@@ -1562,7 +1566,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     // marker the mapper turns into a `compaction` event — survives session_sync.
     _messageBuffer.push({ role: "compaction", content: summary, timestamp: ts, tokensBefore });
     // (1) Live result to every connected owner.
-    _broadcastToActive({ type: "compaction", summary, tokens_before: tokensBefore, ts });
+    _broadcastToActive(_withCurrentSession({ type: "compaction", summary, tokens_before: tokensBefore, ts }));
     // (3) Working ends.
     _publishWorking(false);
   });
@@ -3070,15 +3074,15 @@ function _deliverMeshMessageToAgent(
 ): void {
   const bodyText = typeof env.body === "string" ? env.body : JSON.stringify(env.body);
   const toolCallId = `mesh_${env.id}`;
-  _broadcastToActive({
+  _broadcastToActive(_withCurrentSession({
     type: "tool_request",
     tool_call_id: toolCallId,
     tool: "agent-network",
     args: env.re
       ? { from: env.from, re: env.re, message: bodyText }
       : { from: env.from, message: bodyText },
-  });
-  _broadcastToActive({ type: "tool_result", tool_call_id: toolCallId, result: { from: env.from, message: bodyText } });
+  }));
+  _broadcastToActive(_withCurrentSession({ type: "tool_result", tool_call_id: toolCallId, result: { from: env.from, message: bodyText } }));
 
   const label = `agent-network message from "${env.from}"`;
   if (!_pi) {
@@ -3282,12 +3286,12 @@ function _abortCurrentTurn(
 type UserClientMessage = Extract<ClientMessage, { type: "user_message" }>;
 
 function _sendDeliveryError(sender: PlainPeerChannel | null, inReplyTo: string, detail: string): void {
-  const error: ServerMessage = {
+  const error: ServerMessage = _withCurrentSession({
     type: "error",
     code: "internal_error",
     in_reply_to: inReplyTo,
     message: `Agent rejected incoming message: ${detail}`,
-  };
+  });
   if (sender) sender.send(error);
   else _broadcastToActive(error);
 }
@@ -3330,13 +3334,13 @@ async function _deliverUserMessage(
     _sendDeliveryError(sender, msg.id, wake.detail);
     return;
   }
-  const echo: ServerMessage = {
+  const echo: ServerMessage = _withCurrentSession({
     type: "user_message",
     id: msg.id,
     text: msg.text,
     ...(msg.images && msg.images.length > 0 ? { images: msg.images } : {}),
     ...(shouldSteer ? { streaming_behavior: "steer" as const } : {}),
-  };
+  });
   _broadcastToActive(echo);
 }
 
@@ -3345,7 +3349,7 @@ function _maybeDrainQueuedMessage(): void {
   const queued = _queuedMessage;
   _queuedMessage = null;
   _broadcastQueuedMessageState();
-  void _deliverUserMessage({ type: "user_message", id: queued.id, text: queued.text }, null, "normal");
+  void _deliverUserMessage(_withCurrentSession({ type: "user_message", id: queued.id, text: queued.text }), null, "normal");
 }
 
 function _maybeSendLateAttachSessionSync(): void {
@@ -3378,22 +3382,22 @@ export function _routeClientMessageFrom(
     try {
       const aborted = _abortCurrentTurn(ctx);
       if (!aborted) {
-        sender.send({
+        sender.send(_withCurrentSession({
           type: "error",
           code: "internal_error",
           in_reply_to: msg.id,
           message: "No active Pi context to abort",
-        });
+        }));
         return;
       }
-      sender.send({ type: "cancelled", in_reply_to: msg.id, target_id: msg.target_id });
+      sender.send(_withCurrentSession({ type: "cancelled", in_reply_to: msg.id, target_id: msg.target_id }));
     } catch (err) {
-      sender.send({
+      sender.send(_withCurrentSession({
         type: "error",
         code: "internal_error",
         in_reply_to: msg.id,
         message: `Abort failed: ${String(err)}`,
-      });
+      }));
     }
     return;
   }
@@ -3545,14 +3549,14 @@ function _handleSessionSync(
   sender.send(_queuedMessageState());
 
   if (_sessionStartedAt === null) {
-    sender.send({
+    sender.send(_withCurrentSession({
       type: "session_history",
       in_reply_to: msg.id,
       session_started_at: 0,
       events: [],
       eos: true,
       truncated: false,
-    });
+    }));
     return;
   }
 
@@ -3573,14 +3577,14 @@ function _buildSessionHistoryMessage(
   const slice = effectiveLimit > 0 ? allEvents.slice(-effectiveLimit) : [];
   const truncated = allEvents.length > effectiveLimit;
 
-  return {
+  return _withCurrentSession({
     type: "session_history",
     in_reply_to: inReplyTo,
     session_started_at: _sessionStartedAt ?? 0,
     events: slice,
     eos: true,
     truncated,
-  };
+  });
 }
 
 /**
@@ -3605,14 +3609,14 @@ function _resetSessionForNew(inReplyTo: string): void {
   _peersAttachedDuringTurn.clear();
   _broadcastQueuedMessageState();
   _sessionStartedAt = Date.now();
-  _broadcastToActive({
+  _broadcastToActive(_withCurrentSession({
     type: "session_history",
     in_reply_to: inReplyTo,
     session_started_at: _sessionStartedAt,
     events: [],
     eos: true,
     truncated: false,
-  });
+  }));
 }
 
 type ToolArgs = Record<string, unknown>;

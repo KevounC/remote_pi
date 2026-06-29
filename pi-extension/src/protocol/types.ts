@@ -1,3 +1,5 @@
+import type { RemoteSessionId } from "./session_scope.js";
+
 export type PairErrorCode =
   | "token_expired"
   | "token_consumed"
@@ -13,25 +15,26 @@ export type ClientMessage =
   | {
       type: "user_message";
       id: string;
+      session_id: RemoteSessionId;
       text: string;
       images?: WireImage[];
       streaming_behavior?: StreamingBehavior;
     }
-  | { type: "queued_message_set"; id: string; text: string }
-  | { type: "queued_message_clear"; id: string }
-  | { type: "approve_tool"; id: string; tool_call_id: string; decision: "allow" | "deny" }
-  | { type: "cancel"; id: string; target_id: string }
+  | { type: "queued_message_set"; id: string; session_id: RemoteSessionId; text: string }
+  | { type: "queued_message_clear"; id: string; session_id: RemoteSessionId }
+  | { type: "approve_tool"; id: string; session_id: RemoteSessionId; tool_call_id: string; decision: "allow" | "deny" }
+  | { type: "cancel"; id: string; session_id: RemoteSessionId; target_id: string }
   | { type: "ping"; id: string }
-  | { type: "session_sync"; id: string; limit?: number }
+  | { type: "session_sync"; id: string; session_id: RemoteSessionId; limit?: number }
   // Plan/28 — Typed app actions on the paired Pi session. Each carries a
   // structured payload (no string parsing) and gets either `action_ok` or
   // `action_error` back. Visible side-effects (chat output, model change
   // broadcasts, compaction notice) still flow through the normal channels.
-  | { type: "session_new"; id: string }
-  | { type: "session_compact"; id: string }
-  | { type: "model_set"; id: string; provider: string; model_id: string }
-  | { type: "thinking_set"; id: string; level: ThinkingLevel }
-  | { type: "list_models"; id: string };
+  | { type: "session_new"; id: string; session_id: RemoteSessionId }
+  | { type: "session_compact"; id: string; session_id: RemoteSessionId }
+  | { type: "model_set"; id: string; session_id: RemoteSessionId; provider: string; model_id: string }
+  | { type: "thinking_set"; id: string; session_id: RemoteSessionId; level: ThinkingLevel }
+  | { type: "list_models"; id: string; session_id: RemoteSessionId };
 
 /**
  * Plan/30 — one inline image attachment on a `user_message`. Mirrors the
@@ -56,7 +59,8 @@ export type KnownErrorCode =
   | "too_large"
   | "rate_limited"
   | "timeout"
-  | "internal_error";
+  | "internal_error"
+  | "session_mismatch";
 
 // aberto para forward-compat — receivers toleram codes desconhecidos
 export type ErrorCode = KnownErrorCode | (string & {});
@@ -96,7 +100,7 @@ export type ServerMessage =
       in_reply_to: string;
       session_name: string;
       session_started_at: number;
-      session_id: string;
+      session_id: RemoteSessionId;
       room_id: string;
       /**
        * Plan/27 Wave A: identifies the host coding agent driving this
@@ -116,7 +120,7 @@ export type ServerMessage =
       hostname?: string;
     }
   | { type: "pair_error"; in_reply_to: string; code: PairErrorCode; message: string }
-  | { type: "user_input"; id: string; text: string; streaming_behavior?: StreamingBehavior }
+  | { type: "user_input"; id: string; session_id: RemoteSessionId; text: string; streaming_behavior?: StreamingBehavior }
   // Echo of an app-originated user_message, broadcast by the Pi to every
   // connected owner (including the sender). Source-of-truth model: each
   // app waits for this echo to render the message it sent, so all owners
@@ -128,26 +132,28 @@ export type ServerMessage =
   | {
       type: "user_message";
       id: string;
+      session_id: RemoteSessionId;
       text: string;
       images?: WireImage[];
       streaming_behavior?: StreamingBehavior;
     }
-  | { type: "queued_message_state"; id?: string; text?: string }
-  | { type: "agent_chunk"; in_reply_to: string; delta: string }
-  | { type: "agent_done"; in_reply_to: string; usage?: Usage }
-  | { type: "agent_message"; in_reply_to: string; text: string; usage?: Usage }
+  | { type: "queued_message_state"; session_id: RemoteSessionId; id?: string; text?: string }
+  | { type: "agent_chunk"; session_id: RemoteSessionId; in_reply_to: string; delta: string }
+  | { type: "agent_done"; session_id: RemoteSessionId; in_reply_to: string; usage?: Usage }
+  | { type: "agent_message"; session_id: RemoteSessionId; in_reply_to: string; text: string; usage?: Usage }
   // Plan/32: pushed after a context compaction (live, and replayed on history
   // re-sync). `tokens_before` is the pre-compaction token count.
-  | { type: "compaction"; summary: string; tokens_before: number; ts?: number }
-  | { type: "tool_request"; tool_call_id: string; tool: string; args: Record<string, unknown> }
-  | { type: "tool_result"; tool_call_id: string; result?: unknown; error?: string }
-  | { type: "error"; in_reply_to?: string; code: ErrorCode; message: string }
-  | { type: "cancelled"; in_reply_to: string; target_id: string }
+  | { type: "compaction"; session_id: RemoteSessionId; summary: string; tokens_before: number; ts?: number }
+  | { type: "tool_request"; session_id: RemoteSessionId; tool_call_id: string; tool: string; args: Record<string, unknown> }
+  | { type: "tool_result"; session_id: RemoteSessionId; tool_call_id: string; result?: unknown; error?: string }
+  | { type: "error"; session_id: RemoteSessionId; in_reply_to?: string; code: ErrorCode; message: string }
+  | { type: "cancelled"; session_id: RemoteSessionId; in_reply_to: string; target_id: string }
   | { type: "pong"; in_reply_to: string }
   | { type: "bye"; reason: ByeReason }
   | {
       type: "session_history";
       in_reply_to: string;
+      session_id: RemoteSessionId;
       session_started_at: number;
       events: SessionHistoryEvent[];
       eos: boolean;

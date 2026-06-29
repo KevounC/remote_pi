@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-identity-model-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-canonical-session-identity-model
 depends_on: [epic-bold-canonical-session-identity-model-step-1]
@@ -59,12 +59,25 @@ Every session-scoped message carries required `session_id: RemoteSessionId`. `pa
 - Error code `session_mismatch` is added to known error codes but receivers still tolerate unknown error strings.
 
 ## Acceptance Criteria
-- [ ] TS and Dart have a single registry/list of session-scoped message types.
-- [ ] All session-scoped `ClientMessage` and `ServerMessage` variants carry required `session_id`.
-- [ ] `pair_ok` carries `session_id`; `pair_request` does not.
-- [ ] Tests fail if a new session-scoped type is added without the field/validator.
-- [ ] Generated-protocol sibling can lift the registry/field semantics without changing the chosen meaning.
-- [ ] `corepack pnpm typecheck` and `flutter analyze` pass or are reported with environment blockers.
+- [x] TS and Dart have a single registry/list of session-scoped message types.
+- [x] All session-scoped `ClientMessage` and `ServerMessage` variants carry required `session_id`.
+- [x] `pair_ok` carries `session_id`; `pair_request` does not.
+- [x] Tests fail if a new session-scoped type is added without the field/validator.
+- [x] Generated-protocol sibling can lift the registry/field semantics without changing the chosen meaning.
+- [x] `corepack pnpm typecheck` and `flutter analyze` pass or are reported with environment blockers.
+
+## Implementation Notes
+- Added `pi-extension/src/protocol/session_scope.ts` as the temporary handwritten source of truth for session-scoped client/server wire type sets until generated protocol output replaces the mirrors.
+- Threaded `session_id` through TS protocol types, outgoing Pi session events, app protocol DTOs, app command sends, and app incoming session filtering. `pair_ok` now bootstraps the app-side active room session id; `pair_request`, pings, pairing errors, bye, and action replies remain non-session-scoped.
+- Kept the design migration-friendly: the registry shape matches the intended generated schema semantics and does not introduce patchbay-specific routing assumptions.
+
+## Verification
+- `cd pi-extension && corepack pnpm typecheck` passed.
+- `cd pi-extension && corepack pnpm vitest run src/protocol/codec.test.ts src/protocol/session_scope.test.ts src/session/remote_session.test.ts` passed.
+- `cd pi-extension && corepack pnpm test` was attempted; it still fails in this sandbox on pre-existing/local-environment UDS lock and leader-election tests (`listen EPERM`, lock acquisition failures). A codec fixture failure exposed by this story was fixed and covered by the targeted protocol run above.
+- `cd app && HOME=/tmp /opt/flutter/bin/cache/dart-sdk/bin/dart analyze` completed with only the existing `axisAlignment` deprecation info in `lib/ui/chat/widgets/input_bar.dart`.
+- `cd app && HOME=/tmp /opt/flutter/bin/flutter test` could not run because the Flutter install attempts to write `/opt/flutter/bin/cache/engine.*` on a read-only filesystem.
+- `cd app && HOME=/tmp /opt/flutter/bin/cache/dart-sdk/bin/dart test --no-pub ...` could not run because build hooks attempted to reach `pub.dev` and the proxy returned 403.
 
 ## Risk
 Medium. This is a clean-room fork-private breaking wire change. Existing legacy no-session peers will fail closed once validation lands.

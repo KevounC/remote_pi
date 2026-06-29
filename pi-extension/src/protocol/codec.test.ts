@@ -11,6 +11,7 @@ const SERVER_TYPE_FILES = new Set([
   "pair_ok.jsonl",
   "pair_error.jsonl",
   "user_input.jsonl",
+  "user_message.jsonl",
   "agent_stream.jsonl",
   "agent_message.jsonl",
   "tool_request.jsonl",
@@ -101,7 +102,7 @@ describe("encodeClient roundtrip", () => {
   });
 
   test("user_message", () => {
-    const msg = { type: "user_message" as const, id: "018f9c2a", text: "hello" };
+    const msg = { type: "user_message" as const, id: "018f9c2a", session_id: "session-1", text: "hello" };
     expect(JSON.parse(encodeClient(msg).trim())).toEqual(msg);
   });
 
@@ -109,6 +110,7 @@ describe("encodeClient roundtrip", () => {
     const msg = {
       type: "user_message" as const,
       id: "018f9c2a",
+      session_id: "session-1",
       text: "refine this",
       streaming_behavior: "steer" as const,
     };

@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { RemoteSessionId } from "../protocol/session_scope.js";
 import type { ThinkingLevel } from "../protocol/types.js";
 
-export type RemoteSessionId = string;
+export type { RemoteSessionId };
 
 export interface RemoteSession {
   sessionId: RemoteSessionId;

@@ -1,21 +1,5 @@
+import { isServerMessageType } from "./session_scope.js";
 import type { ClientMessage, ServerMessage } from "./types.js";
-
-const SERVER_TYPES = new Set<ServerMessage["type"]>([
-  "pair_ok",
-  "pair_error",
-  "user_input",
-  "queued_message_state",
-  "agent_chunk",
-  "agent_done",
-  "agent_message",
-  "tool_request",
-  "tool_result",
-  "error",
-  "cancelled",
-  "pong",
-  "bye",
-  "session_history",
-]);
 
 export class DecodeError extends Error {
   constructor(
@@ -46,7 +30,7 @@ export function decodeServer(line: string): ServerMessage {
     throw new DecodeError("invalid_message", "missing 'type'");
   }
   const t = (obj as Record<string, unknown>).type as string;
-  if (!SERVER_TYPES.has(t as ServerMessage["type"])) {
+  if (!isServerMessageType(t)) {
     throw new DecodeError("unsupported_type", `unknown type: ${t}`);
   }
   return obj as ServerMessage;

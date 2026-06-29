@@ -73,7 +73,9 @@ class PlainPeerChannel implements IChannel, IControlLink {
 
   @override
   Future<void> send(ClientMessage msg) async {
-    final bytes = Uint8List.fromList(utf8.encode(encodeClient(msg).trimRight()));
+    final bytes = Uint8List.fromList(
+      utf8.encode(encodeClient(msg).trimRight()),
+    );
     await _transport.send(bytes);
   }
 
@@ -104,7 +106,11 @@ class PlainPeerChannel implements IChannel, IControlLink {
       // Forward-compat: surface unknown server types as ErrorMessage.
       if (!_controller.isClosed) {
         _controller.add(
-          ErrorMessage(code: 'unsupported_type', message: 'unknown server type'),
+          ErrorMessage(
+            sessionId: '',
+            code: 'unsupported_type',
+            message: 'unknown server type',
+          ),
         );
       }
     } catch (_) {

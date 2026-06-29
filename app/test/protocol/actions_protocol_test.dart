@@ -11,22 +11,26 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('ClientMessage — typed actions', () {
     test('SessionCompact encodes as session_compact', () {
-      final j = SessionCompact(id: 'r1').toJson();
-      expect(j, {'type': 'session_compact', 'id': 'r1'});
+      final j = SessionCompact(id: 'r1', sessionId: 's1').toJson();
+      expect(j, {'type': 'session_compact', 'id': 'r1', 'session_id': 's1'});
     });
 
     test('SessionNew encodes as session_new', () {
-      final j = SessionNew(id: 'r2').toJson();
-      expect(j, {'type': 'session_new', 'id': 'r2'});
+      final j = SessionNew(id: 'r2', sessionId: 's1').toJson();
+      expect(j, {'type': 'session_new', 'id': 'r2', 'session_id': 's1'});
     });
 
     test('ModelSet encodes provider + model_id', () {
-      final j =
-          ModelSet(id: 'r3', provider: 'anthropic', modelId: 'claude-opus-4-7')
-              .toJson();
+      final j = ModelSet(
+        id: 'r3',
+        sessionId: 's1',
+        provider: 'anthropic',
+        modelId: 'claude-opus-4-7',
+      ).toJson();
       expect(j, {
         'type': 'model_set',
         'id': 'r3',
+        'session_id': 's1',
         'provider': 'anthropic',
         'model_id': 'claude-opus-4-7',
       });
@@ -34,18 +38,39 @@ void main() {
 
     test('ThinkingSet encodes level wire value', () {
       expect(
-        ThinkingSet(id: 'r4', level: ThinkingLevel.minimal).toJson(),
-        {'type': 'thinking_set', 'id': 'r4', 'level': 'minimal'},
+        ThinkingSet(
+          id: 'r4',
+          sessionId: 's1',
+          level: ThinkingLevel.minimal,
+        ).toJson(),
+        {
+          'type': 'thinking_set',
+          'id': 'r4',
+          'session_id': 's1',
+          'level': 'minimal',
+        },
       );
       expect(
-        ThinkingSet(id: 'r5', level: ThinkingLevel.xhigh).toJson(),
-        {'type': 'thinking_set', 'id': 'r5', 'level': 'xhigh'},
+        ThinkingSet(
+          id: 'r5',
+          sessionId: 's1',
+          level: ThinkingLevel.xhigh,
+        ).toJson(),
+        {
+          'type': 'thinking_set',
+          'id': 'r5',
+          'session_id': 's1',
+          'level': 'xhigh',
+        },
       );
     });
 
     test('ListModels encodes as list_models', () {
-      expect(ListModels(id: 'r6').toJson(),
-          {'type': 'list_models', 'id': 'r6'});
+      expect(ListModels(id: 'r6', sessionId: 's1').toJson(), {
+        'type': 'list_models',
+        'id': 'r6',
+        'session_id': 's1',
+      });
     });
   });
 
@@ -73,10 +98,7 @@ void main() {
   group('ActionName — wire round-trip', () {
     test('parses each known action', () {
       expect(ActionName.fromWire('session_new'), ActionName.sessionNew);
-      expect(
-        ActionName.fromWire('session_compact'),
-        ActionName.sessionCompact,
-      );
+      expect(ActionName.fromWire('session_compact'), ActionName.sessionCompact);
       expect(ActionName.fromWire('model_set'), ActionName.modelSet);
       expect(ActionName.fromWire('thinking_set'), ActionName.thinkingSet);
     });

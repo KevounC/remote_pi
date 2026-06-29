@@ -236,6 +236,16 @@ class ConnectionManager extends Service {
   /// Active destination room (the Pi-side room id). 'main' = default.
   String get activeRoomId => _activeRoomId;
 
+  /// Opaque Pi SDK session discriminator for the active `(peer, room)`.
+  String? get activeSessionId {
+    final epk = _activePeer?.remoteEpk;
+    if (epk == null) return null;
+    for (final room in roomsFor(epk)) {
+      if (room.roomId == _activeRoomId) return room.sessionId;
+    }
+    return null;
+  }
+
   /// Switch the destination room WITHOUT closing the current WS. The
   /// outer envelope's `room` field on subsequent sends will carry this
   /// value. Use when the user taps a different Pi cwd on Home.
@@ -899,6 +909,38 @@ class ConnectionManager extends Service {
     _persistRoomsForPeer(key);
   }
 
+  void _learnSessionFromPairOk(PeerRecord peer, PairOk msg) {
+    final key = toStandardB64(peer.remoteEpk);
+    final list = _roomsByPeer[key] ?? <RoomInfo>[];
+    final idx = list.indexWhere((r) => r.roomId == msg.roomId);
+    final current = idx >= 0 ? list[idx] : null;
+    final next = RoomInfo(
+      roomId: msg.roomId,
+      sessionId: msg.sessionId.isEmpty ? current?.sessionId : msg.sessionId,
+      name: current?.name ?? msg.sessionName,
+      cwd: current?.cwd,
+      startedAt: msg.sessionStartedAt == 0
+          ? (current?.startedAt ?? DateTime.now().millisecondsSinceEpoch)
+          : msg.sessionStartedAt,
+      model: current?.model,
+      thinking: current?.thinking,
+      working: current?.working ?? false,
+    );
+    final liveAlready = _liveRoomIds[key]?.contains(msg.roomId) ?? false;
+    if (current == next && liveAlready) return;
+    if (idx >= 0) {
+      list[idx] = next;
+    } else {
+      list.add(next);
+    }
+    _roomsByPeer[key] = list;
+    (_liveRoomIds[key] ??= <String>{}).add(msg.roomId);
+    // ignore: unawaited_futures
+    _persistRoomsForPeer(key);
+    _maybeAdoptLegacyRoom(key, msg.roomId);
+    _scheduleRoomsEmit();
+  }
+
   /// Plan-17 follow-up — hydrate `_roomsByPeer` from disk on boot so
   /// Home tiles persist across cold starts even before the relay
   /// pushes a fresh snapshot. Idempotent.
@@ -1070,6 +1112,9 @@ class ConnectionManager extends Service {
         if (_retryAttempt != 0) {}
         _missedPings = 0;
         _retryAttempt = 0;
+        if (msg is PairOk) {
+          _learnSessionFromPairOk(peer, msg);
+        }
       },
       onError: (_) => _onChannelLost(peer, ch),
       onDone: () => _onChannelLost(peer, ch),

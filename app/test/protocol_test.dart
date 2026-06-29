@@ -288,12 +288,17 @@ void main() {
 
   group('encodeClient', () {
     test('UserMessage roundtrip', () {
-      final msg = UserMessage(id: 'test-id-1', text: 'hello world');
+      final msg = UserMessage(
+        id: 'test-id-1',
+        sessionId: 's1',
+        text: 'hello world',
+      );
       final line = encodeClient(msg);
       expect(line, endsWith('\n'));
       final decoded = jsonDecode(line.trim()) as Map<String, dynamic>;
       expect(decoded['type'], 'user_message');
       expect(decoded['id'], 'test-id-1');
+      expect(decoded['session_id'], 's1');
       expect(decoded['text'], 'hello world');
       expect(decoded.containsKey('streaming_behavior'), isFalse);
     });
@@ -301,6 +306,7 @@ void main() {
     test('UserMessage with steer behavior includes streaming_behavior', () {
       final msg = UserMessage(
         id: 'test-id-steer',
+        sessionId: 's1',
         text: 'refine this',
         streamingBehavior: UserMessageStreamingBehavior.steer,
       );
@@ -312,12 +318,14 @@ void main() {
     test('ApproveTool encodes decision as string', () {
       final msg = ApproveTool(
         id: 'x',
+        sessionId: 's1',
         toolCallId: 'tc_1',
         decision: ApproveDecision.allow,
       );
       final decoded =
           jsonDecode(encodeClient(msg).trim()) as Map<String, dynamic>;
       expect(decoded['decision'], 'allow');
+      expect(decoded['session_id'], 's1');
       expect(decoded['tool_call_id'], 'tc_1');
     });
 
@@ -330,10 +338,11 @@ void main() {
     });
 
     test('Cancel encodes target_id', () {
-      final msg = Cancel(id: 'c1', targetId: 'target-x');
+      final msg = Cancel(id: 'c1', sessionId: 's1', targetId: 'target-x');
       final decoded =
           jsonDecode(encodeClient(msg).trim()) as Map<String, dynamic>;
       expect(decoded['type'], 'cancel');
+      expect(decoded['session_id'], 's1');
       expect(decoded['target_id'], 'target-x');
     });
   });
@@ -341,7 +350,7 @@ void main() {
   // Plan/30 — image attachments on user_message + WireModel.vision.
   group('image attachments (plan 30)', () {
     test('UserMessage without images omits the field (retro-compat)', () {
-      final msg = UserMessage(id: 'u1', text: 'hi');
+      final msg = UserMessage(id: 'u1', sessionId: 's1', text: 'hi');
       final decoded =
           jsonDecode(encodeClient(msg).trim()) as Map<String, dynamic>;
       expect(decoded.containsKey('images'), isFalse);
@@ -350,6 +359,7 @@ void main() {
     test('UserMessage with one image encodes an images array', () {
       final msg = UserMessage(
         id: 'u2',
+        sessionId: 's1',
         text: 'look',
         images: const [WireImage(data: 'QUJD', mime: 'image/jpeg')],
       );

@@ -50,11 +50,14 @@ class ActiveRoomMeta {
   /// active (offline, between switches, etc.). Helps a consumer ignore
   /// transient empty snapshots vs. honest "we're not paired" state.
   final String? peerEpk;
+
   /// Pi-side room id this snapshot describes — defaults to `'main'`.
   final String roomId;
+
   /// Display model name from `meta.model` (e.g. "Claude Opus 4.7").
   /// `null` until the Pi publishes it (or while disconnected).
   final String? model;
+
   /// Current thinking level from `meta.thinking`. Forward-compat — the
   /// relay does not yet flatten this field, so until the relay update
   /// ships this is always `null` in production. Kept on the API
@@ -269,18 +272,27 @@ class ActionsRepository extends Repository implements IActionsRepository {
 
   @override
   Future<void> compact() async {
-    await _dispatch<void>((id) => SessionCompact(id: id));
+    await _dispatch<void>(
+      (id, sessionId) => SessionCompact(id: id, sessionId: sessionId),
+    );
   }
 
   @override
   Future<void> newSession() async {
-    await _dispatch<void>((id) => SessionNew(id: id));
+    await _dispatch<void>(
+      (id, sessionId) => SessionNew(id: id, sessionId: sessionId),
+    );
   }
 
   @override
   Future<void> setModel(String provider, String modelId) async {
     await _dispatch<void>(
-      (id) => ModelSet(id: id, provider: provider, modelId: modelId),
+      (id, sessionId) => ModelSet(
+        id: id,
+        sessionId: sessionId,
+        provider: provider,
+        modelId: modelId,
+      ),
     );
     // Invalidate the cached catalogue so the next picker open reflects
     // the new `current` highlight.
@@ -289,7 +301,10 @@ class ActionsRepository extends Repository implements IActionsRepository {
 
   @override
   Future<void> setThinking(ThinkingLevel level) async {
-    await _dispatch<void>((id) => ThinkingSet(id: id, level: level));
+    await _dispatch<void>(
+      (id, sessionId) =>
+          ThinkingSet(id: id, sessionId: sessionId, level: level),
+    );
   }
 
   @override
@@ -299,8 +314,9 @@ class ActionsRepository extends Repository implements IActionsRepository {
       final cached = _modelsCache[key];
       if (cached != null) return cached;
     }
-    final result =
-        await _dispatch<ModelsCatalogue>((id) => ListModels(id: id));
+    final result = await _dispatch<ModelsCatalogue>(
+      (id, sessionId) => ListModels(id: id, sessionId: sessionId),
+    );
     // Re-evaluate the session key — the user may have switched rooms
     // mid-flight. We only cache against the key the *response* belongs
     // to, which is the live one when it resolves.
@@ -308,10 +324,16 @@ class ActionsRepository extends Repository implements IActionsRepository {
     return result;
   }
 
-  Future<T> _dispatch<T>(ClientMessage Function(String id) builder) async {
+  Future<T> _dispatch<T>(
+    ClientMessage Function(String id, String sessionId) builder,
+  ) async {
     final ch = _channel;
     if (ch == null) {
       throw const ActionFailure('offline');
+    }
+    final sessionId = _conn.activeSessionId;
+    if (sessionId == null || sessionId.isEmpty) {
+      throw const ActionFailure('session identity unavailable');
     }
     final id = 'act_${uuid7()}';
     final completer = Completer<dynamic>();
@@ -325,7 +347,7 @@ class ActionsRepository extends Repository implements IActionsRepository {
     _pending[id] = _Pending(completer: completer, timeout: timer);
 
     try {
-      await ch.send(builder(id));
+      await ch.send(builder(id, sessionId));
     } catch (e) {
       timer.cancel();
       _pending.remove(id);
