@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-pi-adapter-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract-pi-adapter
 depends_on: [epic-bold-reachability-contract-state-machine]
@@ -73,3 +73,13 @@ Remove the new module and tests; restore in-file constants in all consumers.
 - Discrepancies from design: The state-machine story had already landed `src/reachability/contract.ts`; this story adds the requested `reachability_contract.ts` projection as a thin re-export/adapter instead of duplicating the contract values.
 - Adjacent issues parked: none.
 - Verification: `corepack pnpm exec vitest run src/reachability/reachability_contract.test.ts` passed. `corepack pnpm typecheck` failed on pre-existing missing `session_id` errors in `src/actions/handlers.ts` and `src/index.ts`; `corepack pnpm test -- reachability_contract` also runs unrelated tests under this Vitest setup and hit existing suite/environment failures before timing out.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane substrate review. Implementation commit `9ad3558` was inspected. The added `reachability_contract.ts` is a thin local projection over the canonical contract values, exports backoff/liveness constants, and clamps `reachabilityBackoffMs()` at the final ladder entry; the test reads `protocol/schema/reachability.json` and fails on drift. Verification run during review: `cd pi-extension && corepack pnpm typecheck` passed; `cd pi-extension && corepack pnpm exec vitest run src/reachability/reachability_contract.test.ts` passed as part of the targeted 80-test run. Full `corepack pnpm test` was attempted but did not complete green due existing UDS/daemon/leader-election environment-sensitive failures/timeouts unrelated to this value-only projection. Item advanced to `stage: done`.
