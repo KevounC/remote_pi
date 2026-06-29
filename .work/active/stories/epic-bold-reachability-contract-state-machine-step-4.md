@@ -84,7 +84,7 @@ let mut heartbeat = time::interval_at(
 
 - Keep relay responsibility narrow: the relay uses only the WS heartbeat constant today; it does not infer app/Pi `Degraded` or session state.
 - Export `pub mod reachability;` from `relay/src/lib.rs`.
-- Add tests that compare the Rust projection against `.orchestration/contracts/reachability.json` where practical. If JSON parsing in unit tests is awkward, at minimum assert all state variants, backoff clamp behavior, and heartbeat constants; note in implementation notes why full artifact comparison was deferred.
+- Add tests that compare the Rust projection against `protocol/schema/reachability.json` where practical. If JSON parsing in unit tests is awkward, at minimum assert all state variants, backoff clamp behavior, and heartbeat constants; note in implementation notes why full artifact comparison was deferred.
 - Do not add durable relay session state or offline queue.
 
 ## Acceptance Criteria

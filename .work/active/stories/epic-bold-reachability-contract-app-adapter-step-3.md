@@ -26,7 +26,7 @@ are observationally equivalent to the current behavior while using contract-back
 state values:
 
 - `app/test/domain/reachability_test.dart` validates state names/backoff/heartbeat
-  values against `../.orchestration/contracts/reachability.json` (already aligned
+  values against `../protocol/schema/reachability.json` (already aligned
   with state-machine work).
 - `app/lib/data/transport/reachability_adapter.dart` gets focused unit tests for
   transition ordering and counter clamp behavior.

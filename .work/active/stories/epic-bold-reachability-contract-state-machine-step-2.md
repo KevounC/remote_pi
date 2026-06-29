@@ -96,7 +96,7 @@ export const REACHABILITY_TRANSITIONS = [
 ## Implementation Notes
 
 - Keep the module pure: no WebSocket, Pi SDK, filesystem, timers, or relay imports.
-- Tests should import the JSON artifact from `.orchestration/contracts/reachability.json` using `fs.readFileSync` and assert states, display names, backoff seconds, heartbeat timings, and transition triples match the TS projection.
+- Tests should import the JSON artifact from `protocol/schema/reachability.json` using `fs.readFileSync` and assert states, display names, backoff seconds, heartbeat timings, and transition triples match the TS projection.
 - Do not replace `index.ts` or `mesh_node.ts` constants here; `epic-bold-reachability-contract-pi-adapter` owns mechanical adoption.
 - ESM imports in tests must include `.js` for source imports.
 

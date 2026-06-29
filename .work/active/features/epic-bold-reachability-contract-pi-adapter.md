@@ -34,7 +34,7 @@ while preserving reconnect/ping timing and ordering.
 ## Foundation references
 - Evidence: `pi-extension/src/index.ts`, `pi-extension/src/session/mesh_node.ts`,
   `pi-extension/src/transport/relay_client.ts`,
-  `.orchestration/contracts/reachability.json`.
+  `protocol/schema/reachability.json`.
 
 ## Refactor Design Notes
 - Behavior-preserving only: no timing or ordering changes; no wire format changes.
@@ -63,7 +63,7 @@ state-machine adapter is over-factoring for this cycle and risks behavior
 regressions. This adapter is therefore intentionally value-only.
 
 A small unit test in `pi-extension/src/reachability/reachability_contract.test.ts`
-must assert these values match `.orchestration/contracts/reachability.json` and
+must assert these values match `protocol/schema/reachability.json` and
 document drift if the source-of-truth changes.
 
 ## Cycle check
@@ -116,7 +116,7 @@ export function reachabilityBackoffMs(attempt: number): number {
 #### Design/Acceptance
 - Exported values become the local single source for all pi-extension reachability
   timers.
-- Unit test asserts the projection equals `.orchestration/contracts/reachability.json`
+- Unit test asserts the projection equals `protocol/schema/reachability.json`
   heartbeat/backoff values.
 
 #### Risk

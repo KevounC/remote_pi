@@ -19,7 +19,7 @@ Its private backoff/timer state (`_retryAttempt`, `_missedPings`, `_connectInFli
 `_retryTimer`, `_pingTimer`) is moved into a dedicated reachability runtime
 while preserving the existing public `ConnectionStatus` surface and outward reconnect
 cadence. This keeps user-visible behavior stable while unifying app reachability
-logic with `.orchestration/contracts/reachability.json`.
+logic with `protocol/schema/reachability.json`.
 
 ## Epic context
 - Parent epic: `epic-bold-reachability-contract`
@@ -159,7 +159,7 @@ final class ReachabilityAdapter {
 - Preserve the existing `ReachabilityState.degraded` as app/local degradation,
   not relay-level disconnect.
 - Use contract heartbeat values and backoff from `reachability.dart` (which is
-  validated against `.orchestration/contracts/reachability.json`).
+  validated against `protocol/schema/reachability.json`).
 - Keep naming close to current `ConnectionManager` events to minimize migration
   risk (`connectRequested`, `connectSucceeded`, `appFrameObserved`,
   `transportClosed`, `pingMissed`, `retryTimerFired`).

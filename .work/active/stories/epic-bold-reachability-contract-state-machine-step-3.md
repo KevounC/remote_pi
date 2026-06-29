@@ -98,7 +98,7 @@ Add a transition registry as a typed list/set so the app adapter can assert lega
 
 - Place this in `domain/value_objects` because it is a transport/domain contract, not a widget or `IChannel` carrier.
 - Keep `ConnectionStatus` untouched in this story; `epic-bold-reachability-contract-app-adapter` maps it to/from `ReachabilityState` later.
-- Tests should read `../.orchestration/contracts/reachability.json` from the repo root relative to `app/` and compare state names, backoff seconds, heartbeat fields, and transitions.
+- Tests should read `../protocol/schema/reachability.json` from the repo root relative to `app/` and compare state names, backoff seconds, heartbeat fields, and transitions.
 - Do not import `dart:io` from production code; reading JSON is test-only.
 
 ## Acceptance Criteria

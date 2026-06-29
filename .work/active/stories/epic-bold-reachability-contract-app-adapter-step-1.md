@@ -29,7 +29,7 @@ Duration _backoffFor(int attempt) =>
     Duration(seconds: _kBackoff[attempt.clamp(0, _kBackoff.length - 1)]);
 ```
 
-The contract artifact already exists in `.orchestration/contracts/reachability.json`,
+The contract artifact already exists in `protocol/schema/reachability.json`,
 but `ConnectionManager` still drives local constants and state manually.
 
 ## Target State

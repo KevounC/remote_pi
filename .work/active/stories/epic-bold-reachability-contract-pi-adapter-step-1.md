@@ -49,7 +49,7 @@ export function reachabilityBackoffMs(attempt: number): number {
 }
 ```
 
-- Test reads `.orchestration/contracts/reachability.json` and asserts that
+- Test reads `protocol/schema/reachability.json` and asserts that
   backoff and liveness values are in sync.
 
 ## Notes

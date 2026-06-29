@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-state-machine-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app, relay]
 parent: epic-bold-reachability-contract-state-machine
 depends_on: []
@@ -16,7 +16,7 @@ updated: 2026-06-29
 **Priority**: High
 **Risk**: Low
 **Source Lens**: missing abstraction / pattern drift
-**Files**: `.orchestration/contracts/reachability.json`, `.orchestration/contracts/reachability.md` (optional explanatory companion)
+**Files**: `protocol/schema/reachability.json`, `protocol/schema/reachability.md` (optional explanatory companion)
 
 ## Current State
 
@@ -96,7 +96,7 @@ Optional markdown companion should state: this file is the temporary source unti
 
 ## Acceptance Criteria
 
-- [ ] `.orchestration/contracts/reachability.json` contains exactly the five states: `connecting`, `online`, `degraded`, `offline`, `retrying`.
+- [ ] `protocol/schema/reachability.json` contains exactly the five states: `connecting`, `online`, `degraded`, `offline`, `retrying`.
 - [ ] The only retry schedule in the artifact is `[1, 2, 5, 10, 30]` seconds.
 - [ ] The artifact records the 25s/25s/20s/70s heartbeat/liveness timings.
 - [ ] The transition table includes the Online → Degraded and Degraded → Online recovery paths.
@@ -112,9 +112,9 @@ Delete the new reachability contract artifact(s). No production code depends on 
 
 ## Implementation Notes
 
-Implemented inline by the bold-refactor implement-orchestrator because no subagent dispatcher is exposed in this delegated harness. Added `.orchestration/contracts/reachability.json` as the inert canonical artifact and `.orchestration/contracts/reachability.md` as the temporary-source companion. The artifact records exactly the designed five states, `[1, 2, 5, 10, 30]` backoff seconds, 25s/25s/20s/70s heartbeat/liveness timings, and the Online→Degraded / Degraded→Online transitions. Runtime behavior is unchanged.
+Implemented inline by the bold-refactor implement-orchestrator because no subagent dispatcher is exposed in this delegated harness. Added `protocol/schema/reachability.json` as the inert canonical artifact and `protocol/schema/reachability.md` as the temporary-source companion. The artifact records exactly the designed five states, `[1, 2, 5, 10, 30]` backoff seconds, 25s/25s/20s/70s heartbeat/liveness timings, and the Online→Degraded / Degraded→Online transitions. Runtime behavior is unchanged.
 
-Verification: `python3 -m json.tool .orchestration/contracts/reachability.json` passed. Production subproject builds were not run for this inert artifact-only story.
+Verification: `python3 -m json.tool protocol/schema/reachability.json` passed. Production subproject builds were not run for this inert artifact-only story.
 
 ## Review findings (2026-06-29)
 
@@ -127,3 +127,14 @@ Verification: `python3 -m json.tool .orchestration/contracts/reachability.json` 
 **Nits**: none
 
 **Notes**: Fast-lane story review with direct verification. The JSON artifact itself parsed successfully and contains the requested five states, `[1, 2, 5, 10, 30]` backoff, 25s/25s/20s/70s timings, and Online→Degraded / Degraded→Online transitions; the blocker is the location, not the JSON content.
+
+## Bounce fix implementation notes (2026-06-29)
+
+Relocated the reachability contract from retired `.orchestration/contracts/` into `protocol/schema/`:
+
+- `protocol/schema/reachability.json`
+- `protocol/schema/reachability.md`
+
+Updated the parent feature and reachability child/app/pi adapter work items to reference `protocol/schema/reachability.json` so follow-on projection tests read from the owned schema-world location. The JSON payload itself is unchanged; this fix only changes ownership/location and companion prose. Runtime behavior remains unchanged.
+
+Verification: `python3 -m json.tool protocol/schema/reachability.json` passed.

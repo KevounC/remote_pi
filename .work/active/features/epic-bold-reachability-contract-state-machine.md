@@ -63,7 +63,7 @@ Backoff policy: `[1, 2, 5, 10, 30]` seconds, capped at 30s for later attempts.
 
 Heartbeat/liveness policy preserved from current code: app protocol ping every 25s, relay WS ping every 25s, extension liveness check every 20s, extension liveness timeout at 70s, and app-side degraded room liveness after 3 missed protocol pongs. The existing app comment says “two consecutive misses,” but current code marks local room offline at `_missedPings == 3`; the contract follows code to avoid a hidden behavior change.
 
-Contract location decision: until `epic-bold-generated-protocol` lands, the interim canonical source lives under `.orchestration/contracts/reachability.json`, next to the current cross-language contract fixtures called out in `docs/DECISIONS.md`. TS/Dart/Rust modules are projections guarded by tests against the artifact. When generated-protocol lands, this artifact should be absorbed into the schema and the projection tests should become generated-schema/codegen tests. Rationale: this gives one reviewable source now without baking a fork-only runtime dependency that would block patchbay migration.
+Contract location decision: until `epic-bold-generated-protocol` absorbs reachability into generated schema/codegen, the interim canonical source lives under `protocol/schema/reachability.json`. It does not live under `.orchestration/` because that tree is retired except for the legacy protocol contract fixtures named in `docs/DECISIONS.md`. TS/Dart/Rust modules are projections guarded by tests against the artifact. Rationale: this gives one reviewable source now without baking a fork-only runtime dependency that would block patchbay migration.
 
 Cycle check by frontmatter (no work-view binary used): the feature has `depends_on: []`; sibling app/pi adapter features depend on this feature; child stories form a one-way chain `step-1 -> step-2 -> step-3 -> step-4`. No story depends on the feature or on a downstream sibling, so the dependency graph is acyclic.
 
@@ -74,7 +74,7 @@ Cycle check by frontmatter (no work-view binary used): the feature has `depends_
 **Priority**: High
 **Risk**: Low
 **Source Lens**: missing abstraction / pattern drift
-**Files**: `.orchestration/contracts/reachability.json`, optional `.orchestration/contracts/reachability.md`
+**Files**: `protocol/schema/reachability.json`, optional `protocol/schema/reachability.md`
 **Story**: `epic-bold-reachability-contract-state-machine-step-1`
 
 **Current State**:
@@ -197,7 +197,7 @@ export const REACHABILITY_HEARTBEAT = {
 **Implementation Notes**:
 
 - Keep this module pure: no Pi SDK, RelayClient, timers, or filesystem in production code.
-- Test the projection against `.orchestration/contracts/reachability.json`.
+- Test the projection against `protocol/schema/reachability.json`.
 - Do not yet replace `index.ts` or `mesh_node.ts` constants; the pi-adapter sibling owns that mechanical adoption.
 
 **Acceptance Criteria**:
