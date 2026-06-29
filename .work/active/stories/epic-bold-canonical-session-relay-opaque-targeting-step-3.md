@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-relay-opaque-targeting-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-canonical-session-relay-opaque-targeting
 depends_on: [epic-bold-canonical-session-relay-opaque-targeting-step-2]
@@ -70,3 +70,9 @@ Medium. The relay-owned inbound wrapper adds `to_room`, which generated protocol
 ## Rollback
 
 Revert `pi_envelope_in.to_room` emission and route through `forward_to_peer`; transport-error helper can remain if unchanged.
+
+## Implementation notes
+- Files changed: `relay/tests/pi_forward_test.rs`.
+- Tests added: `unknown_destination_room_returns_transport_error_offline`; strengthened happy path to assert `pi_envelope_in.to_room` and verbatim carry of an opaque `session_id` inside the generic envelope body.
+- Discrepancies from design: implementation code for `to_room` parsing, `forward_to_room`, and inbound `to_room` was already present from previous steps; this story locked the transport-error and inbound-metadata contract with integration coverage.
+- Adjacent issues parked: none.

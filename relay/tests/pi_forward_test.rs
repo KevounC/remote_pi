@@ -91,11 +91,20 @@ async fn publish_owner_blob(
 
 /// Sends a `pi_envelope` frame from an already-authenticated Pi WS.
 async fn send_pi_envelope(ws: &mut common::WsStream, to_pc: &str, envelope: Value) {
+    send_pi_envelope_to_room(ws, to_pc, "main", envelope).await;
+}
+
+async fn send_pi_envelope_to_room(
+    ws: &mut common::WsStream,
+    to_pc: &str,
+    to_room: &str,
+    envelope: Value,
+) {
     ws.send(Message::text(
         json!({
             "type": "pi_envelope",
             "to_pc": to_pc,
-            "to_room": "main",
+            "to_room": to_room,
             "envelope": envelope,
         })
         .to_string(),
@@ -143,7 +152,7 @@ async fn happy_path_same_owner_envelope_delivered_verbatim() {
         "to": "trab:agent-1",
         "id": "u1",
         "re": null,
-        "body": { "type": "hello", "text": "ping" },
+        "body": { "type": "hello", "text": "ping", "session_id": "opaque-session" },
     });
     let t0 = std::time::Instant::now();
     send_pi_envelope(&mut ws_a, &peer_b, envelope.clone()).await;
@@ -156,8 +165,12 @@ async fn happy_path_same_owner_envelope_delivered_verbatim() {
         "must carry authenticated sender pk"
     );
     assert_eq!(
+        frame["to_room"], "main",
+        "inbound frame carries target room"
+    );
+    assert_eq!(
         frame["envelope"], envelope,
-        "envelope must be forwarded verbatim"
+        "envelope must be forwarded verbatim, including opaque session_id in body"
     );
     assert!(
         latency < std::time::Duration::from_millis(100),
@@ -168,6 +181,38 @@ async fn happy_path_same_owner_envelope_delivered_verbatim() {
 /// Pi-B is NOT connected when A sends. Relay synthesizes a transport_error
 /// envelope and returns it to A as `pi_envelope_in`. Body carries
 /// `type=transport_error, reason=offline` and `re` matches the original id.
+#[tokio::test]
+async fn unknown_destination_room_returns_transport_error_offline() {
+    let port = start_relay().await;
+    let base_http = format!("http://127.0.0.1:{port}");
+
+    let owner = random_key();
+    let sk_a = random_key();
+    let sk_b = random_key();
+    let peer_a = B64.encode(sk_a.verifying_key().to_bytes());
+    let peer_b = B64.encode(sk_b.verifying_key().to_bytes());
+
+    publish_owner_blob(&base_http, &owner, &[&peer_a, &peer_b], 1).await;
+
+    let (mut ws_a, _) = connect_and_auth_with_key(port, &sk_a).await;
+    let (_ws_b, _) = connect_and_auth_with_key(port, &sk_b).await;
+
+    let original_id = "018f3333-3333-7333-8333-333333333333";
+    let envelope = json!({
+        "from": "casa:sess-3",
+        "to": "trab:agent-1",
+        "id": original_id,
+        "re": null,
+        "body": { "type": "ping", "session_id": "opaque-session" },
+    });
+    send_pi_envelope_to_room(&mut ws_a, &peer_b, "unknown-room", envelope).await;
+
+    let frame = recv_json(&mut ws_a, "ws_a unknown-room transport_error").await;
+    assert_transport_error(&frame, "offline", Some(original_id));
+    assert_eq!(frame["envelope"]["from"], "_relay");
+    assert_eq!(frame["envelope"]["to"], "casa:sess-3");
+}
+
 #[tokio::test]
 async fn pi_b_offline_returns_transport_error_offline() {
     let port = start_relay().await;
