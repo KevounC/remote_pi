@@ -1,7 +1,7 @@
 ---
 id: story-adversarial-findings-dedup-routing
 kind: story
-stage: review
+stage: done
 tags: [app, pi-extension, relay, cockpit, workflow]
 parent: feature-adversarial-codebase-review
 depends_on: [story-adversarial-state-protocol-review, story-adversarial-mobile-lifecycle-review, story-adversarial-security-privacy-review]
@@ -74,3 +74,13 @@ All active fix stories are parented to `epic-remote-session-resilience-refactor`
 ## Recommendation
 
 Patch narrowly first. The high-confidence findings are concrete enough for focused stories with regression tests. Larger protocol/refactor directions remain parked until the patch set clarifies what state-machine shape remains.
+
+## Review (2026-06-28)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Acceptance is complete; the three depended-on adversarial reviewer stories are done; all accepted active story ids and parked backlog ids exist; parent feature contains the final summary and narrow-patch recommendation.
