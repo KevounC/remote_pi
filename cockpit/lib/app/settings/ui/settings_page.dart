@@ -12,14 +12,16 @@ import 'package:cockpit/app/settings/domain/entities/daemon_info.dart';
 import 'package:cockpit/app/settings/domain/entities/paired_device.dart';
 import 'package:cockpit/app/core/ui/widgets/app_menu.dart';
 import 'package:cockpit/app/core/ui/widgets/code_highlight.dart';
-import 'package:cockpit/app/core/ui/widgets/window_controls.dart';
 import 'package:cockpit/app/settings/ui/connectivity_viewmodel.dart';
 import 'package:cockpit/app/settings/ui/cron_viewmodel.dart';
 import 'package:cockpit/app/settings/ui/daemons_viewmodel.dart';
 import 'package:cockpit/app/settings/ui/notifications_viewmodel.dart';
 import 'package:cockpit/app/settings/ui/pairing_dialog.dart';
 import 'package:cockpit/app/settings/ui/revoke_dialog.dart';
+import 'package:cockpit/app/settings/ui/settings_category.dart';
 import 'package:cockpit/app/settings/ui/settings_env_gate.dart';
+import 'package:cockpit/app/settings/ui/settings_shell.dart';
+import 'package:cockpit/app/settings/ui/widgets/settings_components.dart';
 import 'package:cockpit/app/core/ui/settings_controller.dart';
 import 'package:cockpit/app/core/ui/themes/themes.dart';
 import 'package:cockpit/app/core/ui/widgets/hover_tap.dart';
@@ -37,25 +39,8 @@ class SettingsPage extends StatefulWidget {
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
-enum _Category {
-  appearance,
-  languages,
-  notifications,
-  connectivity,
-  daemons,
-  scheduling,
-}
-
-extension on _Category {
-  /// Abas que dependem do ambiente remote-pi (extensão + supervisor).
-  bool get isRemote =>
-      this == _Category.connectivity ||
-      this == _Category.daemons ||
-      this == _Category.scheduling;
-}
-
 class _SettingsPageState extends State<SettingsPage> {
-  _Category _category = _Category.appearance;
+  SettingsCategory _category = SettingsCategory.appearance;
 
   @override
   void initState() {
@@ -68,194 +53,24 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final remoteReady = context.watch<SettingsEnvGate>().remoteReady;
     // Categoria selecionada caiu (ambiente sumiu) → volta pra Aparência.
-    final category = (!remoteReady && _category.isRemote)
-        ? _Category.appearance
-        : _category;
-    return Scaffold(
-      backgroundColor: colors.bg,
-      child: Column(
-        children: [
-          const _SettingsHeader(),
-          Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _CategoryNav(
-                  selected: category,
-                  remoteReady: remoteReady,
-                  onSelect: (c) => setState(() => _category = c),
-                ),
-                Expanded(
-                  child: switch (category) {
-                    _Category.appearance => const _AppearancePanel(),
-                    _Category.languages => const _LanguagesPanel(),
-                    _Category.notifications => const _NotificationsPanel(),
-                    _Category.connectivity => const _ConnectivityPanel(),
-                    _Category.daemons => const _DaemonsPanel(),
-                    _Category.scheduling => const _AgendamentosPanel(),
-                  },
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+    final category = _category.visibleWhen(remoteReady)
+        ? _category
+        : SettingsCategory.appearance;
 
-/// Header da tela: window controls + voltar + título (a barra arrasta a janela).
-class _SettingsHeader extends StatelessWidget {
-  const _SettingsHeader();
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return WindowTitleBar(
-      children: [
-        const WindowControls(),
-        const SizedBox(width: 14),
-        Tooltip(
-          tooltip: (context) => const TooltipContainer(child: Text('Back')),
-          child: HoverTap(
-            borderRadius: BorderRadius.circular(6),
-            onTap: () => context.pop(),
-            child: SizedBox(
-              width: 30,
-              height: 30,
-              child: Icon(Icons.arrow_back, size: 18, color: colors.text2),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          'Settings',
-          style: context.typo.title.copyWith(fontSize: 14, color: colors.text),
-        ),
-        const Spacer(),
-        const WindowControlsTrailing(),
-      ],
-    );
-  }
-}
-
-class _CategoryNav extends StatelessWidget {
-  const _CategoryNav({
-    required this.selected,
-    required this.remoteReady,
-    required this.onSelect,
-  });
-  final _Category selected;
-
-  /// Extensão remote-pi + supervisor instalados → mostra as abas remotas.
-  final bool remoteReady;
-  final ValueChanged<_Category> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      width: 210,
-      decoration: BoxDecoration(
-        border: Border(right: BorderSide(color: colors.border)),
-      ),
-      padding: const EdgeInsets.all(10),
-      child: Column(
-        children: [
-          _NavItem(
-            icon: Icons.palette_outlined,
-            label: 'Appearance',
-            selected: selected == _Category.appearance,
-            onTap: () => onSelect(_Category.appearance),
-          ),
-          _NavItem(
-            icon: Icons.code,
-            label: 'Language',
-            selected: selected == _Category.languages,
-            onTap: () => onSelect(_Category.languages),
-          ),
-          _NavItem(
-            icon: Icons.notifications_outlined,
-            label: 'Notifications',
-            selected: selected == _Category.notifications,
-            onTap: () => onSelect(_Category.notifications),
-          ),
-          // Abas que dependem do ambiente remote-pi — ocultas até instalá-lo
-          // (via checklist da aba de agente).
-          if (remoteReady) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              child: Divider(height: 1, thickness: 1, color: colors.border),
-            ),
-            _NavItem(
-              icon: Icons.wifi_tethering,
-              label: 'Connectivity',
-              selected: selected == _Category.connectivity,
-              onTap: () => onSelect(_Category.connectivity),
-            ),
-            _NavItem(
-              icon: Icons.dns_outlined,
-              label: 'Daemon Agents',
-              selected: selected == _Category.daemons,
-              onTap: () => onSelect(_Category.daemons),
-            ),
-            _NavItem(
-              icon: Icons.schedule_outlined,
-              label: 'Schedules',
-              selected: selected == _Category.scheduling,
-              onTap: () => onSelect(_Category.scheduling),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _NavItem extends StatelessWidget {
-  const _NavItem({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: HoverTap(
-        color: selected ? colors.panel2 : Colors.transparent,
-        borderRadius: BorderRadius.circular(7),
-        onTap: onTap,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: 16,
-              color: selected ? colors.accentText : colors.text3,
-            ),
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: context.typo.body.copyWith(
-                fontSize: 13.5,
-                color: selected ? colors.text : colors.text2,
-                fontWeight: selected ? FontWeight.w500 : FontWeight.w400,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return SettingsShell(
+      selected: category,
+      remoteReady: remoteReady,
+      onSelect: (c) => setState(() => _category = c),
+      child: switch (category) {
+        SettingsCategory.appearance => const _AppearancePanel(),
+        SettingsCategory.languages => const _LanguagesPanel(),
+        SettingsCategory.notifications => const _NotificationsPanel(),
+        SettingsCategory.connectivity => const _ConnectivityPanel(),
+        SettingsCategory.daemons => const _DaemonsPanel(),
+        SettingsCategory.scheduling => const _AgendamentosPanel(),
+      },
     );
   }
 }
@@ -279,11 +94,11 @@ class _AppearancePanel extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _Section(
+              SettingsSection(
                 label: 'Theme',
-                child: _Card(
+                child: SettingsCard(
                   children: [
-                    _Row(
+                    SettingsRow(
                       title: 'Theme',
                       trailing: _ThemeDropdown(
                         value: s.themeMode,
@@ -293,11 +108,11 @@ class _AppearancePanel extends StatelessWidget {
                   ],
                 ),
               ),
-              _Section(
+              SettingsSection(
                 label: 'Fonts',
-                child: _Card(
+                child: SettingsCard(
                   children: [
-                    _Row(
+                    SettingsRow(
                       title: 'Interface font',
                       description:
                           'Used across the whole app. Empty = system default.',
@@ -307,7 +122,7 @@ class _AppearancePanel extends StatelessWidget {
                         onChanged: controller.setInterfaceFont,
                       ),
                     ),
-                    _Row(
+                    SettingsRow(
                       title: 'Interface size',
                       trailing: _SizeStepper(
                         value: s.interfaceSize,
@@ -316,7 +131,7 @@ class _AppearancePanel extends StatelessWidget {
                         onChanged: controller.setInterfaceSize,
                       ),
                     ),
-                    _Row(
+                    SettingsRow(
                       title: 'Code font',
                       description: 'Code and diffs. Empty = system default.',
                       trailing: _FontField(
@@ -325,7 +140,7 @@ class _AppearancePanel extends StatelessWidget {
                         onChanged: controller.setCodeFont,
                       ),
                     ),
-                    _Row(
+                    SettingsRow(
                       title: 'Code size',
                       trailing: _SizeStepper(
                         value: s.codeSize,
@@ -334,7 +149,7 @@ class _AppearancePanel extends StatelessWidget {
                         onChanged: controller.setCodeSize,
                       ),
                     ),
-                    _Row(
+                    SettingsRow(
                       title: 'Terminal font',
                       description:
                           'Uses the code size. Empty = system default.',
@@ -347,14 +162,14 @@ class _AppearancePanel extends StatelessWidget {
                   ],
                 ),
               ),
-              _Section(
+              SettingsSection(
                 label: 'Syntax',
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _Card(
+                    SettingsCard(
                       children: [
-                        _Row(
+                        SettingsRow(
                           title: 'Highlight theme',
                           description:
                               'Code colors, independent of the app theme.',
@@ -370,11 +185,11 @@ class _AppearancePanel extends StatelessWidget {
                   ],
                 ),
               ),
-              _Section(
+              SettingsSection(
                 label: 'Conversation',
-                child: _Card(
+                child: SettingsCard(
                   children: [
-                    _Row(
+                    SettingsRow(
                       title: 'Pin user message',
                       description:
                           'The question stays fixed at the top while the answer '
@@ -418,11 +233,11 @@ class _NotificationsPanel extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _Section(
+              SettingsSection(
                 label: 'Notifications',
-                child: _Card(
+                child: SettingsCard(
                   children: [
-                    _Row(
+                    SettingsRow(
                       title: 'Enable notifications',
                       description:
                           'Alert me when an agent finishes a turn and the window '
@@ -479,7 +294,7 @@ class _NotificationPermissionRowState
     final colors = context.colors;
     final granted =
         context.watch<NotificationsViewModel>().status == CheckStatus.ok;
-    return _Row(
+    return SettingsRow(
       title: 'System permission',
       description: granted
           ? 'Cockpit is allowed to send notifications.'
@@ -544,148 +359,7 @@ class _SyntaxPreview extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Blocos reutilizáveis
-// ---------------------------------------------------------------------------
-class _Section extends StatelessWidget {
-  const _Section({required this.label, required this.child, this.trailing});
-  final String label;
-  final Widget child;
-
-  /// Ação opcional à direita do rótulo da seção (ex.: botão de recarregar).
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(left: 4, right: 4, bottom: 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    label,
-                    style: context.typo.label.copyWith(color: colors.text3),
-                  ),
-                ),
-                ?trailing,
-              ],
-            ),
-          ),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-class _Card extends StatelessWidget {
-  const _Card({required this.children});
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final rows = <Widget>[];
-    for (var i = 0; i < children.length; i++) {
-      if (i > 0) {
-        rows.add(Divider(height: 1, thickness: 1, color: colors.border));
-      }
-      rows.add(children[i]);
-    }
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.panel2,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colors.border),
-      ),
-      child: Column(children: rows),
-    );
-  }
-}
-
-class _Row extends StatelessWidget {
-  const _Row({required this.title, required this.trailing, this.description});
-  final String title;
-  final String? description;
-  final Widget trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title,
-                  style: context.typo.body.copyWith(
-                    fontSize: 13.5,
-                    color: colors.text,
-                  ),
-                ),
-                if (description != null) ...[
-                  const SizedBox(height: 3),
-                  Text(
-                    description!,
-                    style: context.typo.label.copyWith(color: colors.text3),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          trailing,
-        ],
-      ),
-    );
-  }
-}
-
 /// Gatilho de dropdown (rótulo + chevron) que abre o `showAppMenu`.
-class _DropdownChip extends StatelessWidget {
-  const _DropdownChip({required this.label, required this.onTap, this.icon});
-  final String label;
-  final IconData? icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return HoverTap(
-      color: colors.panel3,
-      borderRadius: BorderRadius.circular(7),
-      onTap: onTap,
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 14, color: colors.text2),
-            const SizedBox(width: 7),
-          ],
-          Text(
-            label,
-            style: context.typo.body.copyWith(fontSize: 13, color: colors.text),
-          ),
-          const SizedBox(width: 6),
-          Icon(Icons.keyboard_arrow_down, size: 16, color: colors.text3),
-        ],
-      ),
-    );
-  }
-}
-
 class _ThemeDropdown extends StatelessWidget {
   const _ThemeDropdown({required this.value, required this.onChanged});
   final AppThemeMode value;
@@ -703,7 +377,7 @@ class _ThemeDropdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final current = _meta[value]!;
-    return _DropdownChip(
+    return SettingsDropdownChip(
       icon: current.icon,
       label: current.label,
       onTap: () async {
@@ -739,7 +413,7 @@ class _SyntaxDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _DropdownChip(
+    return SettingsDropdownChip(
       label: _labels[value]!,
       onTap: () async {
         final picked = await showAppMenu<SyntaxThemeId>(
@@ -887,11 +561,11 @@ class _LanguagesPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _Section(
+          SettingsSection(
             label: 'FORMATTING',
-            child: _Card(
+            child: SettingsCard(
               children: [
-                _Row(
+                SettingsRow(
                   title: 'Format on save',
                   description:
                       'Format the file automatically when you save (⌘S).',
@@ -903,9 +577,9 @@ class _LanguagesPanel extends StatelessWidget {
               ],
             ),
           ),
-          _Section(
+          SettingsSection(
             label: 'LANGUAGE SERVERS',
-            child: _Card(
+            child: SettingsCard(
               children: [
                 for (final def in kLanguageDefs)
                   _LanguageRow(
@@ -1289,13 +963,13 @@ class _ConnectivityPanelState extends State<_ConnectivityPanel> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const _Section(
+              const SettingsSection(
                 label: 'Relay',
-                child: _Card(children: [_RelayEditor()]),
+                child: SettingsCard(children: [_RelayEditor()]),
               ),
-              _Section(
+              SettingsSection(
                 label: 'Paired devices',
-                trailing: _ReloadButton(
+                trailing: SettingsReloadButton(
                   busy: vm.devicesLoad == ConnLoad.loading,
                   onTap: vm.loadDevices,
                 ),
@@ -1320,7 +994,7 @@ class _ConnectivityPanelState extends State<_ConnectivityPanel> {
 
     // Primeira carga (ainda sem dados).
     if (vm.devicesLoad == ConnLoad.loading && vm.devices.isEmpty) {
-      return _MessageCard(
+      return SettingsMessageCard(
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -1343,7 +1017,7 @@ class _ConnectivityPanelState extends State<_ConnectivityPanel> {
     }
 
     if (vm.devicesLoad == ConnLoad.error && vm.devices.isEmpty) {
-      return _MessageCard(
+      return SettingsMessageCard(
         child: Text(
           vm.devicesError ?? 'Failed to list devices.',
           style: context.typo.body.copyWith(
@@ -1355,7 +1029,7 @@ class _ConnectivityPanelState extends State<_ConnectivityPanel> {
     }
 
     if (vm.devices.isEmpty) {
-      return _MessageCard(
+      return SettingsMessageCard(
         child: Text(
           'No paired devices.',
           style: context.typo.body.copyWith(
@@ -1366,7 +1040,7 @@ class _ConnectivityPanelState extends State<_ConnectivityPanel> {
       );
     }
 
-    return _Card(
+    return SettingsCard(
       children: [
         for (final device in vm.devices)
           _DeviceTile(device: device, onRevoke: () => _confirmRevoke(device)),
@@ -1615,60 +1289,8 @@ class _DeviceTile extends StatelessWidget {
 }
 
 /// Botão de recarregar (à direita do rótulo da seção). Vira spinner enquanto carrega.
-class _ReloadButton extends StatelessWidget {
-  const _ReloadButton({required this.busy, required this.onTap});
-  final bool busy;
-  final Future<void> Function() onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Tooltip(
-      tooltip: (context) => const TooltipContainer(child: Text('Reload')),
-      child: HoverTap(
-        borderRadius: BorderRadius.circular(6),
-        onTap: busy ? null : () => onTap(),
-        child: SizedBox(
-          width: 26,
-          height: 22,
-          child: busy
-              ? Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: CircularProgressIndicator(
-                    size: 14,
-                    strokeWidth: 2,
-                    color: colors.text3,
-                  ),
-                )
-              : Icon(Icons.refresh, size: 15, color: colors.text3),
-        ),
-      ),
-    );
-  }
-}
-
-/// Container com a mesma moldura do `_Card`, para mensagens de estado (vazio /
+/// Container com a mesma moldura do `SettingsCard`, para mensagens de estado (vazio /
 /// carregando / erro) no lugar da lista.
-class _MessageCard extends StatelessWidget {
-  const _MessageCard({required this.child});
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-      decoration: BoxDecoration(
-        color: colors.panel2,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colors.border),
-      ),
-      child: child,
-    );
-  }
-}
-
 /// Botão de pareamento (abre o dialog com QR). Tonal accent pra diferenciar do
 /// Salvar (primário) sem competir com ele.
 class _PairButton extends StatelessWidget {
@@ -1816,16 +1438,16 @@ class _AgendamentosPanelState extends State<_AgendamentosPanel> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (vm.actionError != null) ...[
-                _ErrorBanner(message: vm.actionError!),
+                SettingsErrorBanner(message: vm.actionError!),
                 const SizedBox(height: 12),
               ],
               if (vm.online) ...[
                 _cronActions(context, vm),
                 const SizedBox(height: 16),
               ],
-              _Section(
+              SettingsSection(
                 label: 'Scheduled prompts',
-                trailing: _ReloadButton(
+                trailing: SettingsReloadButton(
                   busy: vm.load == CronLoad.loading,
                   onTap: vm.reload,
                 ),
@@ -1864,7 +1486,7 @@ class _AgendamentosPanelState extends State<_AgendamentosPanel> {
     final colors = context.colors;
 
     if (!vm.online && vm.load != CronLoad.loading) {
-      return _MessageCard(
+      return SettingsMessageCard(
         child: Text(
           'Supervisor offline. Schedules need pi-supervisord running '
           '(`remote-pi install`).',
@@ -1876,7 +1498,7 @@ class _AgendamentosPanelState extends State<_AgendamentosPanel> {
       );
     }
     if (vm.load == CronLoad.loading && vm.jobs.isEmpty) {
-      return _MessageCard(
+      return SettingsMessageCard(
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -1898,7 +1520,7 @@ class _AgendamentosPanelState extends State<_AgendamentosPanel> {
       );
     }
     if (vm.load == CronLoad.error && vm.jobs.isEmpty) {
-      return _MessageCard(
+      return SettingsMessageCard(
         child: Text(
           vm.error ?? 'Failed to list schedules.',
           style: context.typo.body.copyWith(
@@ -1909,7 +1531,7 @@ class _AgendamentosPanelState extends State<_AgendamentosPanel> {
       );
     }
     if (vm.jobs.isEmpty) {
-      return _MessageCard(
+      return SettingsMessageCard(
         child: Text(
           'No schedules. Create a recurring prompt for a daemon.',
           style: context.typo.body.copyWith(
@@ -1919,7 +1541,7 @@ class _AgendamentosPanelState extends State<_AgendamentosPanel> {
         ),
       );
     }
-    return _Card(
+    return SettingsCard(
       children: [
         for (final job in vm.jobs)
           _CronTile(
@@ -2201,7 +1823,7 @@ class _CronEditorDialogState extends State<_CronEditorDialog> {
               // Builder garante um BuildContext cujo RenderBox é o próprio chip,
               // não o do AlertDialog — senão o menu ancora fora do dialog.
               Builder(
-                builder: (chipContext) => _DropdownChip(
+                builder: (chipContext) => SettingsDropdownChip(
                   label: vm.daemonName(_daemonId),
                   icon: Icons.dns_outlined,
                   onTap: () async {
@@ -2741,7 +2363,7 @@ class _DaemonsPanelState extends State<_DaemonsPanel> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (vm.actionError != null) ...[
-                _ErrorBanner(message: vm.actionError!),
+                SettingsErrorBanner(message: vm.actionError!),
                 const SizedBox(height: 12),
               ],
               if (vm.online) ...[
@@ -2752,9 +2374,9 @@ class _DaemonsPanelState extends State<_DaemonsPanel> {
                 ),
                 const SizedBox(height: 16),
               ],
-              _Section(
+              SettingsSection(
                 label: 'Always-on agents',
-                trailing: _ReloadButton(
+                trailing: SettingsReloadButton(
                   busy: vm.load == DaemonsLoad.loading,
                   onTap: vm.reload,
                 ),
@@ -2771,7 +2393,7 @@ class _DaemonsPanelState extends State<_DaemonsPanel> {
     final colors = context.colors;
 
     if (!vm.online && vm.load != DaemonsLoad.loading) {
-      return _MessageCard(
+      return SettingsMessageCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2800,7 +2422,7 @@ class _DaemonsPanelState extends State<_DaemonsPanel> {
     }
 
     if (vm.load == DaemonsLoad.loading && vm.daemons.isEmpty) {
-      return _MessageCard(
+      return SettingsMessageCard(
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -2823,7 +2445,7 @@ class _DaemonsPanelState extends State<_DaemonsPanel> {
     }
 
     if (vm.load == DaemonsLoad.error && vm.daemons.isEmpty) {
-      return _MessageCard(
+      return SettingsMessageCard(
         child: Text(
           vm.error ?? 'Failed to list daemons.',
           style: context.typo.body.copyWith(
@@ -2835,7 +2457,7 @@ class _DaemonsPanelState extends State<_DaemonsPanel> {
     }
 
     if (vm.daemons.isEmpty) {
-      return _MessageCard(
+      return SettingsMessageCard(
         child: Text(
           'No registered agents. Create one from a folder.',
           style: context.typo.body.copyWith(
@@ -2846,7 +2468,7 @@ class _DaemonsPanelState extends State<_DaemonsPanel> {
       );
     }
 
-    return _Card(
+    return SettingsCard(
       children: [
         for (final daemon in vm.daemons)
           _DaemonTile(
@@ -3080,38 +2702,6 @@ class _DaemonTile extends StatelessWidget {
           height: 30,
           child: Icon(icon, size: 16, color: context.colors.text3),
         ),
-      ),
-    );
-  }
-}
-
-class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner({required this.message});
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-      decoration: BoxDecoration(
-        color: colors.panel2,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colors.error),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.error_outline, size: 15, color: colors.error),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: context.typo.label.copyWith(color: colors.error),
-            ),
-          ),
-        ],
       ),
     );
   }

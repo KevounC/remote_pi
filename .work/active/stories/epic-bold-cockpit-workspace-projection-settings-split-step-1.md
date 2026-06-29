@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-settings-split-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-settings-split
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document]
@@ -129,3 +129,10 @@ Medium — broad imports/name changes can cause compile churn, but the code move
 
 ## Rollback
 Inline `settings_category.dart`, `settings_shell.dart`, and `widgets/settings_components.dart` back into `settings_page.dart`, restore `_Category`, and keep the panel bodies untouched.
+
+## Implementation notes
+- Files changed: `cockpit/lib/app/settings/ui/settings_category.dart`, `cockpit/lib/app/settings/ui/settings_shell.dart`, `cockpit/lib/app/settings/ui/widgets/settings_components.dart`, `cockpit/lib/app/settings/ui/settings_page.dart`.
+- Tests added: none (mechanical split; existing settings/cockpit tests remain the behavior guard).
+- Verification: attempted `flutter analyze` from `cockpit/`, but Flutter failed before analysis because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`). `flutter test` was skipped for the same toolchain write failure.
+- Discrepancies from design: category panel bodies remain in `settings_page.dart` for this step; only the route shell, category registry/nav, and shared chrome/components moved.
+- Adjacent issues parked: none.
