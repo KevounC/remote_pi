@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-composition-root-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-composition-root
 depends_on: [epic-bold-split-pi-extension-index-composition-root-step-1]
@@ -79,3 +79,10 @@ High: lifecycle registration order and shutdown races are sensitive.
 
 ## Rollback
 Revert the composition-root module and restore inline extension-factory registration in `index.ts`.
+
+## Implementation notes
+- Files changed: `pi-extension/src/extension/composition_root.ts`, `pi-extension/src/extension/composition_root.test.ts`.
+- Tests added: composition-root tests for register ordering and dispose/epoch teardown.
+- Discrepancies from design: this step introduced the reusable shell and epoch without routing the existing `index.ts` hook bodies through it yet; current `index.ts` registration order remains unchanged for behavior preservation and later adapter/routing stories can adopt `createRemotePiExtensionFactory`.
+- Adjacent issues parked: none.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/extension/composition_root.test.ts` passed.
