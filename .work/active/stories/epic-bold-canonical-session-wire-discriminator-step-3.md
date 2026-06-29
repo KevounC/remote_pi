@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-wire-discriminator-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-canonical-session-wire-discriminator
 depends_on: [epic-bold-canonical-session-wire-discriminator-step-2]
@@ -60,3 +60,9 @@ High. A missing expected session id during bootstrap could make the app appear i
 
 ## Rollback
 Disable the app gate via one internal seam, then revert the protocol fields and SyncService call sites. Rolling back reopens contamination and should be treated as an emergency-only fork-private regression.
+
+## Implementation notes
+- Files changed: none in this stride (land mode); current app code already has `SessionGate` at the top of `SyncService._onServerMessage`, active-session tracking from connection room metadata, fail-closed client command session ids, and regression coverage in `app/test/data/sync/sync_service_test.dart`.
+- Tests added: none in this stride; existing tests include foreign/missing `session_history` rejection and foreign chunk drop while same-session chunks stream.
+- Discrepancies from design: verification was blocked by the local Flutter install attempting to update `/opt/flutter/bin/cache` on a read-only filesystem even with `HOME=/tmp/pi-dart-home`; this is an environment issue, not a product-code failure.
+- Adjacent issues parked: none.
