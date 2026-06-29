@@ -61,11 +61,22 @@ import type {
 } from "./protocol/types.js";
 import { RelayClient, RoomAlreadyOpenError } from "./transport/relay_client.js";
 import { PlainPeerChannel } from "./transport/peer_channel.js";
+import { createCommandSurface } from "./extension/command_surface.js";
+import type { CommandSurfacePort, RemotePiRuntime } from "./extension/ports.js";
+import { SdkSessionProjection } from "./session/sdk_session_projection.js";
 import { roomIdFor } from "./rooms.js";
 import { registerAgentTools } from "./session/tools.js";
 import { formatPeerInventory } from "./session/peer_inventory.js";
 import { MeshNode } from "./session/mesh_node.js";
 import { RemoteSessionIssuer } from "./session/remote_session.js";
+import {
+  initialTurnSnapshot,
+  projectTurn,
+  reduceTurn,
+  type TurnEvent,
+  type TurnProjection,
+  type TurnSnapshot,
+} from "./session/turn_state.js";
 import {
   handleSessionCompact,
   handleSessionNew,
@@ -255,9 +266,15 @@ function _setCurrentModel(name: string): void {
  * so room_meta.working must be bracketed manually around compaction.
  */
 function _publishWorking(working: boolean): void {
-  if (_myRoomMeta) _myRoomMeta = { ..._myRoomMeta, working };
+  _publishRoomMetaPatch({ working });
+}
+
+function _publishRoomMetaPatch(
+  patch: { session_id?: string; model?: string; thinking?: ThinkingLevel; working?: boolean },
+): void {
+  if (_myRoomMeta) _myRoomMeta = { ..._myRoomMeta, ...patch };
   if (_relay && _myRoomId) {
-    _relay.sendControl({ type: "room_meta_update", room_id: _myRoomId, meta: { working } });
+    _relay.sendControl({ type: "room_meta_update", room_id: _myRoomId, meta: patch });
   }
 }
 
@@ -523,7 +540,7 @@ export function _setCurrentModelForTest(name: string | undefined): void {
 
 /** Test-only: read the active turn id used for plain `cancel` routing. */
 export function _getCurrentTurnIdForTest(): string | null {
-  return _currentTurnId;
+  return _turnProjection().activeTurnId;
 }
 
 /** Test-only: override the bound AgentSession so a spy can capture the
@@ -531,6 +548,7 @@ export function _getCurrentTurnIdForTest(): string | null {
 export function _setPiForTest(pi: unknown): void {
   _pi = pi as typeof _pi;
   _messageApi = _isAgentMessageApi(pi) ? pi : null;
+  if (_pi) _sdkSessionProjection.bindApi(_pi);
 }
 
 /**
@@ -563,13 +581,36 @@ function _persistModelDefault(provider: string, modelId: string): void {
 }
 
 // Per-turn messaging state
-let _currentTurnId: string | null = null;
-let _turnActive = false;
-let _finishedTurnIdAwaitingSync: string | null = null;
-const _peersAttachedDuringTurn = new Set<string>();
+let _turn: TurnSnapshot = initialTurnSnapshot();
 
 type QueuedMessage = { id: string; text: string };
 let _queuedMessage: QueuedMessage | null = null;
+
+function _turnProjection(): TurnProjection {
+  return projectTurn(_turn);
+}
+
+function _publishTurnProjection(before: TurnProjection, after: TurnProjection): void {
+  if (before.working === after.working) return;
+  _publishWorking(after.working);
+}
+
+function _applyTurnAndPublish(event: TurnEvent): TurnProjection {
+  const before = _turnProjection();
+  _turn = reduceTurn(_turn, event);
+  const after = _turnProjection();
+  _publishTurnProjection(before, after);
+  return after;
+}
+
+function _resetTurnSnapshot(): void {
+  _turn = initialTurnSnapshot();
+}
+
+function _activeReplyTarget(): string | null {
+  const projection = _turnProjection();
+  return projection.replyTo ?? projection.activeTurnId;
+}
 
 // Module-level pi reference
 let _pi: ExtensionAPI | null = null;
@@ -663,9 +704,9 @@ function _broadcastToActive(msg: ServerMessage): void {
 }
 
 function _queuedMessageState(): Extract<ServerMessage, { type: "queued_message_state" }> {
-  return _withCurrentSession(_queuedMessage
-    ? { type: "queued_message_state", id: _queuedMessage.id, text: _queuedMessage.text }
-    : { type: "queued_message_state" });
+  return _queuedMessage
+    ? _withCurrentSession({ type: "queued_message_state", id: _queuedMessage.id, text: _queuedMessage.text })
+    : ({ type: "queued_message_state" } as Extract<ServerMessage, { type: "queued_message_state" }>);
 }
 
 function _broadcastQueuedMessageState(): void {
@@ -685,7 +726,7 @@ function _anyPeerActive(): boolean {
 function _attachPeerChannel(appPeerId: string, channel: PlainPeerChannel): void {
   _activePeers.set(appPeerId, channel);
   _peerShort = appPeerId.slice(0, 8);
-  if (_turnActive) _peersAttachedDuringTurn.add(appPeerId);
+  _applyTurnAndPublish({ type: "peer_attached", target: { kind: "owner", id: appPeerId } });
 }
 
 /** Detaches a single owner's channel + removes it from the map. Used by
@@ -771,10 +812,9 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
   }
   _activePeers.clear();
   _peerShort = "";
-  _currentTurnId = null;
-  _turnActive = false;
-  _finishedTurnIdAwaitingSync = null;
-  _peersAttachedDuringTurn.clear();
+  _applyTurnAndPublish({ type: "session_shutdown" });
+  _resetTurnSnapshot();
+  _publishWorking(false);
   _queuedMessage = null;
 
   _relay?.close();
@@ -825,8 +865,7 @@ function _onRelayClose(): void {
   }
   _activePeers.clear();
   _peerShort = "";
-  if (!_turnActive) _currentTurnId = null;
-  _peersAttachedDuringTurn.clear();
+  if (!_turnProjection().working) _resetTurnSnapshot();
 
   _relay = null;  // _relayUrl preserved for retry
 
@@ -1073,15 +1112,15 @@ export function _onPeerDisconnect(appPeerId?: string): void {
 
   _detachPeerChannel(target);
   if (_anyPeerActive()) {
-    // Other owners still attached — keep _currentTurnId so they continue
+    // Other owners still attached — keep the turn projection so they continue
     // seeing the in-flight agent stream.
     _refreshFooter();
     return;
   }
 
-  // No owner left. Keep an active turn id so a later attach during the same
-  // turn can still receive chunks/done; clear only once no turn is active.
-  if (!_turnActive) _currentTurnId = null;
+  // No owner left. Keep the turn projection active so a later attach during the
+  // same turn can still receive chunks/done; the reducer clears only on terminal events.
+  if (!_turnProjection().working) _resetTurnSnapshot();
   _refreshFooter();
   _notify("[remote-pi] All app peers disconnected, listening for reconnect", "info");
   // Auto-listener stays up — same listener catches the reconnect on any peer.
@@ -1353,27 +1392,30 @@ function _isAgentMessageApi(value: unknown): value is AgentMessageApi {
   return typeof candidate.sendMessage === "function" && typeof candidate.sendUserMessage === "function";
 }
 
+const _sdkSessionProjection = new SdkSessionProjection({
+  outputs: {
+    broadcast: _broadcastToActive,
+    sendTo: (sender, message) => sender.send(message),
+    publishRoomMeta: (patch) => _publishRoomMetaPatch(patch),
+    activeOwnerIds: () => [..._activePeers.keys()],
+    lateAttachTargets: () => [..._activePeers.entries()].map(([peerId, channel]) => ({ peerId, channel })),
+    handleClientMessage: (sender, message) => _routeClientMessageFrom(sender as PlainPeerChannel, message, _lastEventCtx ?? _lastCtx ?? _noopCtx),
+    onStaleMessageApi: (api) => _forgetStaleMessageApi(api),
+  },
+});
+
 const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   _pi = pi;
   _messageApi = pi;
+  _sdkSessionProjection.bindApi(pi);
 
-  // Plano 19: ensure ~/.pi/remote/{sessions,skills}/ exist and deploy the
-  // agent-network skill on first load. resources_discover lets Pi find it.
+  // Plano 19: ensure ~/.pi/remote/{sessions,skills}/ exist. The command
+  // surface deploys the agent-network skill when it registers.
   try {
     ensureGlobalDirs();
-    _deployAgentNetworkSkill();
   } catch { /* best-effort init */ }
 
-  // Seed the global-pairings cache from peers.json so the footer can show
-  // 🟢/🟡 correctly the moment the relay is up (no race with first refresh).
-  _refreshPairingsCache();
-
   pi.on("resources_discover", () => ({ skillPaths: [skillsDir()] }));
-
-  // Plano 20: agent_send + agent_request tools so the LLM can drive the
-  // session network natively. Getter captures `_meshNode` live so the
-  // tool always sees the current state.
-  registerAgentTools(pi, () => _meshNode?.peer() ?? null);
 
   // Tool calls execute without prompting the remote user. The Pi SDK has no
   // native `requiresApproval` per tool, and a hardcoded gate (Bash/Edit/Write)
@@ -1383,7 +1425,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
 
   // Mirror input typed in the Pi terminal (or sent via RPC) to every
   // connected owner. 'extension' source is our own sendUserMessage call
-  // from routeClientMessage, which already set _currentTurnId — skip to
+  // from routeClientMessage, which already seeded the turn projection — skip to
   // avoid a double turnId.
   pi.on("input", (event) => {
     // Transparent control channel: a `CTRL_PREFIX`-tagged input from an RPC
@@ -1395,8 +1437,9 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
       return { action: "handled" } as const;
     }
     if (event.source === "extension") return;
-    const turnId = _currentTurnId ?? `local_${randomUUID()}`;
-    _currentTurnId = turnId;
+    const before = _turnProjection();
+    const turnId = before.replyTo ?? before.activeTurnId ?? `local_${randomUUID()}`;
+    _applyTurnAndPublish({ type: "local_input", turnId, replyTo: turnId, source: "local" });
     if (!_anyPeerActive()) return;
     _broadcastToActive(_withCurrentSession({ type: "user_input", id: turnId, text: event.text }));
     return undefined;
@@ -1435,11 +1478,12 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   });
 
   pi.on("message_update", (event) => {
-    if (!_anyPeerActive() || !_currentTurnId) return;
     const ae = event.assistantMessageEvent;
-    if (ae.type === "text_delta") {
-      _broadcastToActive(_withCurrentSession({ type: "agent_chunk", in_reply_to: _currentTurnId, delta: ae.delta }));
-    }
+    if (ae.type !== "text_delta") return;
+    const projection = _applyTurnAndPublish({ type: "agent_chunk" });
+    const replyTo = projection.replyTo ?? projection.activeTurnId;
+    if (!_anyPeerActive() || replyTo === null) return;
+    _broadcastToActive(_withCurrentSession({ type: "agent_chunk", in_reply_to: replyTo, delta: ae.delta }));
   });
 
   // Notify every connected owner that a tool is about to run (visibility
@@ -1492,8 +1536,10 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
       const message = typeof m.errorMessage === "string" && m.errorMessage
         ? m.errorMessage
         : "Provider error";
-      const errMsg: ServerMessage = _withCurrentSession(_currentTurnId
-        ? { type: "error", in_reply_to: _currentTurnId, code: "provider_error", message }
+      const replyTo = _activeReplyTarget();
+      _applyTurnAndPublish({ type: "provider_error", turnId: replyTo });
+      const errMsg: ServerMessage = _withCurrentSession(replyTo
+        ? { type: "error", in_reply_to: replyTo, code: "provider_error", message }
         : { type: "error", code: "provider_error", message });
       _broadcastToActive(errMsg);
     }
@@ -1502,13 +1548,13 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   pi.on("agent_end", () => {
     // Buffer is fed by `message_end`; here we only finalize the outbound
     // turn signal to every connected owner. No buffer mutation.
-    if (!_currentTurnId) return;
-    const finishedTurnId = _currentTurnId;
+    const before = _turnProjection();
+    const finishedTurnId = before.replyTo ?? before.activeTurnId;
+    if (finishedTurnId === null) return;
+    _applyTurnAndPublish({ type: "agent_done" });
     if (_anyPeerActive()) {
       _broadcastToActive(_withCurrentSession({ type: "agent_done", in_reply_to: finishedTurnId }));
     }
-    _currentTurnId = null;
-    _finishedTurnIdAwaitingSync = finishedTurnId;
     _maybeSendLateAttachSessionSync();
     _maybeDrainQueuedMessage();
   });
@@ -1518,10 +1564,8 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // room_meta over the relay (plan/32) below — that's independent of the
   // broker and drives the app's working indicator.
   pi.on("turn_start", (_event, ctx) => {
-    _turnActive = true;
-    _finishedTurnIdAwaitingSync = null;
-    _peersAttachedDuringTurn.clear();
-    if (_currentTurnId === null) _currentTurnId = `local_${randomUUID()}`;
+    const fallbackTurnId = _turnProjection().replyTo ?? _turnProjection().activeTurnId ?? `local_${randomUUID()}`;
+    _applyTurnAndPublish({ type: "turn_start", fallbackTurnId });
     // Late model hydration: if the model was still unknown at connect (resolved
     // lazily by the SDK), grab it on the first turn and fan it out — so a daemon
     // whose model only materialises at turn 1 still reports it to the app.
@@ -1532,20 +1576,12 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
         if (name) _setCurrentModel(name);
       } catch { /* defensive — never block a turn on a model lookup */ }
     }
-    // Plan/32 Part B: publish working=true as room_meta (raw, no debounce —
-    // the debounce lives in the app). Same shape as the model/thinking updates.
-    if (_myRoomMeta) _myRoomMeta = { ..._myRoomMeta, working: true };
-    if (_relay && _myRoomId) {
-      _relay.sendControl({ type: "room_meta_update", room_id: _myRoomId, meta: { working: true } });
-    }
+    // Plan/32 Part B: room_meta.working is published by the turn projection diff.
   });
   pi.on("turn_end", () => {
-    _turnActive = false;
-    // Plan/32 Part B: publish working=false as room_meta (raw, no debounce).
-    if (_myRoomMeta) _myRoomMeta = { ..._myRoomMeta, working: false };
-    if (_relay && _myRoomId) {
-      _relay.sendControl({ type: "room_meta_update", room_id: _myRoomId, meta: { working: false } });
-    }
+    const before = _turnProjection();
+    const after = _applyTurnAndPublish({ type: "turn_end" });
+    if (!before.working && !after.working) _publishWorking(false);
     _maybeSendLateAttachSessionSync();
     _maybeDrainQueuedMessage();
   });
@@ -1554,7 +1590,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // with working=true/false here. Returning void = no veto → default
   // compaction proceeds.
   pi.on("session_before_compact", () => {
-    _publishWorking(true);
+    _applyTurnAndPublish({ type: "compaction_start", turnId: `compact_${randomUUID()}` });
   });
   pi.on("session_compact", (event) => {
     const entry = event?.compactionEntry as { summary?: unknown; tokensBefore?: unknown } | undefined;
@@ -1568,7 +1604,10 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     // (1) Live result to every connected owner.
     _broadcastToActive(_withCurrentSession({ type: "compaction", summary, tokens_before: tokensBefore, ts }));
     // (3) Working ends.
+    _applyTurnAndPublish({ type: "compaction_done" });
+    _applyTurnAndPublish({ type: "turn_end" });
     _publishWorking(false);
+    _maybeSendLateAttachSessionSync();
   });
 
   // Re-capture the freshest base ctx on every session replacement so compact
@@ -1584,6 +1623,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // withSession callback when Remote Pi itself initiated the replacement.
   pi.on("session_start", (_event, ctx) => {
     _lastEventCtx = ctx;
+    _sdkSessionProjection.bindSessionContext(ctx);
     _captureRemoteSession(ctx);
     // Rearm a reused-but-disposed instance. The session_shutdown teardown (below)
     // sets _disposed=true assuming the host re-evaluates THIS module fresh for the
@@ -1638,6 +1678,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     _lastEventCtx = null;
     _messageApi = null;
     _pi = null;
+    _sdkSessionProjection.clearStaleContexts();
     if (_meshNode) {
       try { await _meshNode.close(); } catch { /* best-effort */ }
       _meshNode = null;
@@ -1655,13 +1696,40 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   });
 
   // ── Commands ──────────────────────────────────────────────────────────────
-  //
-  // Final surface: 8 commands. Pre-2026-05-23 we had 20 commands covering
-  // multi-session UDS + granular relay control; in practice every install
-  // converged on one session and the relay was always either fully on or
-  // fully off. The simplified surface keeps the day-to-day path one-key
-  // (`/remote-pi`) and exposes only the actions that have distinct user
-  // intent: setup, status, stop, pair, devices, revoke, set-relay.
+  createLegacyCommandSurface().register(pi, legacyCommandSurfaceRuntime());
+
+};
+
+export default extension;
+
+function legacyCommandSurfaceRuntime(): RemotePiRuntime {
+  return {
+    epoch: {
+      id: 0,
+      get disposed() { return _disposed; },
+      isCurrent: () => !_disposed,
+      dispose: () => { _disposed = true; },
+    },
+    ports: {} as RemotePiRuntime["ports"],
+  };
+}
+
+function createLegacyCommandSurface(): CommandSurfacePort {
+  return createCommandSurface({
+    deployAgentNetworkSkill: _deployAgentNetworkSkill,
+    refreshPairingsCache: _refreshPairingsCache,
+    registerAgentTools: (pi) => registerAgentTools(pi, () => _meshNode?.peer() ?? null),
+    registerCommands: _registerRemotePiCommands,
+    startDaemonMode: _startDaemonMode,
+  });
+}
+
+function _rememberCommandCtx(ctx: ExtensionCommandContext): void {
+  _lastCtx = ctx;
+  _sdkSessionProjection.bindCommandContext(ctx);
+}
+
+function _registerRemotePiCommands(pi: ExtensionAPI): void {
   pi.registerCommand("remote-pi", {
     description: "Connect (join local mesh + start relay), or run setup on first use",
     getArgumentCompletions: async (prefix) => {
@@ -1673,20 +1741,18 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
         "setup", "status", "stop",
         "pair", "devices", "revoke",
         "set-relay",
-        "peers",  // plan/25 Wave D — local + cross-PC inventory
-        "create", "remove", "daemons",  // daemon registry (plan/26 W1)
-        // Fleet ops use the `daemon` prefix so `/remote-pi stop` keeps
-        // meaning "stop this local Pi" — the local UX shipped in plan/25.
+        "peers",
+        "create", "remove", "daemons",
         "daemon start", "daemon stop", "daemon restart",
         "daemon send", "daemon status",
         "cron", "cron add", "cron list", "cron remove", "cron enable", "cron disable", "cron run", "cron log",
-        "install", "uninstall",  // service install (plan/26 W3)
+        "install", "uninstall",
       ]
         .filter((o) => o.startsWith(prefix))
         .map((o) => ({ value: o, label: o }));
     },
     handler: async (args, ctx) => {
-      _lastCtx = ctx;
+      _rememberCommandCtx(ctx);
       const sub = args.trim();
       if      (sub === "")                       { await _cmdRoot(ctx); }
       else if (sub === "setup")                  { await _cmdSetup(ctx); }
@@ -1712,70 +1778,47 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     },
   });
 
-  // Nested registrations (one entry per public action). The flat handler
-  // above already routes `/remote-pi <sub>` — these exist for the SDK's
-  // command palette and slash-autocomplete in some UI modes.
-  pi.registerCommand("remote-pi setup",    { description: "Run the setup wizard and update local config", handler: async (_, ctx) => { _lastCtx = ctx; await _cmdSetup(ctx); } });
-  pi.registerCommand("remote-pi status",   { description: "Show local mesh + relay status", handler: async (_, ctx) => { _lastCtx = ctx; _cmdStatus(ctx); } });
-  pi.registerCommand("remote-pi stop",     { description: "Stop everything (leave local mesh + disconnect relay)", handler: async (_, ctx) => { _lastCtx = ctx; await _cmdStop(ctx); } });
-  pi.registerCommand("remote-pi pair",     { description: "Show a QR code to pair a new mobile device (optional: --ttl <seconds>)", handler: async (args, ctx) => { _lastCtx = ctx; await _cmdPair(ctx, args.trim()); } });
-  pi.registerCommand("remote-pi devices",  { description: "List paired mobile devices", handler: async (_, ctx) => { _lastCtx = ctx; await _cmdList(ctx); } });
+  pi.registerCommand("remote-pi setup",    { description: "Run the setup wizard and update local config", handler: async (_, ctx) => { _rememberCommandCtx(ctx); await _cmdSetup(ctx); } });
+  pi.registerCommand("remote-pi status",   { description: "Show local mesh + relay status", handler: async (_, ctx) => { _rememberCommandCtx(ctx); _cmdStatus(ctx); } });
+  pi.registerCommand("remote-pi stop",     { description: "Stop everything (leave local mesh + disconnect relay)", handler: async (_, ctx) => { _rememberCommandCtx(ctx); await _cmdStop(ctx); } });
+  pi.registerCommand("remote-pi pair",     { description: "Show a QR code to pair a new mobile device (optional: --ttl <seconds>)", handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdPair(ctx, args.trim()); } });
+  pi.registerCommand("remote-pi devices",  { description: "List paired mobile devices", handler: async (_, ctx) => { _rememberCommandCtx(ctx); await _cmdList(ctx); } });
   pi.registerCommand("remote-pi revoke", {
     description: "Revoke a paired device by its shortid",
     getArgumentCompletions: async (prefix) => _shortidCompletions(prefix),
-    handler: async (args, ctx) => { _lastCtx = ctx; await _cmdRevoke(args.trim(), ctx); },
+    handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdRevoke(args.trim(), ctx); },
   });
-  pi.registerCommand("remote-pi set-relay", { description: "Persist a new relay URL to user config", handler: async (args, ctx) => { _lastCtx = ctx; _cmdSetRelay(args.trim(), ctx); } });
-
-  // Plan/25 Wave D
+  pi.registerCommand("remote-pi set-relay", { description: "Persist a new relay URL to user config", handler: async (args, ctx) => { _rememberCommandCtx(ctx); _cmdSetRelay(args.trim(), ctx); } });
   pi.registerCommand("remote-pi peers", {
     description: "List local + cross-PC mesh peers, grouped by PC label",
-    handler: async (_, ctx) => { _lastCtx = ctx; await _cmdPeers(ctx); },
+    handler: async (_, ctx) => { _rememberCommandCtx(ctx); await _cmdPeers(ctx); },
   });
-
-  // Daemon registry (plan/26 Wave 1) — create + remove. start/stop/send/
-  // status/install/uninstall come in later waves with the supervisor.
   pi.registerCommand("remote-pi create", {
     description: "Register a folder as a daemon and start it (when the supervisor is running)",
-    handler: async (args, ctx) => { _lastCtx = ctx; await _cmdCreate(args.trim(), ctx); },
+    handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdCreate(args.trim(), ctx); },
   });
   pi.registerCommand("remote-pi remove", {
     description: "Stop + unregister a daemon by id (local config is preserved)",
-    handler: async (args, ctx) => { _lastCtx = ctx; await _cmdRemove(args.trim(), ctx); },
+    handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdRemove(args.trim(), ctx); },
   });
+  pi.registerCommand("remote-pi daemons",        { description: "List registered daemons + state", handler: async (_, ctx) => { _rememberCommandCtx(ctx); await _cmdDaemonsList(ctx); } });
+  pi.registerCommand("remote-pi daemon start",   { description: "Start daemons: all, or one by id (`daemon start <id>`)", handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdDaemonStart(ctx, args.trim() || undefined); } });
+  pi.registerCommand("remote-pi daemon stop",    { description: "Stop daemons: all, or one by id (`daemon stop <id>`)", handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdDaemonStop(ctx, args.trim() || undefined); } });
+  pi.registerCommand("remote-pi daemon restart", { description: "Restart daemons: all, or one by id (`daemon restart <id>`)", handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdDaemonRestart(ctx, args.trim() || undefined); } });
+  pi.registerCommand("remote-pi daemon status",  { description: "Show fleet runtime status (pid, uptime, restarts)", handler: async (_, ctx) => { _rememberCommandCtx(ctx); await _cmdDaemonStatus(ctx); } });
+  pi.registerCommand("remote-pi daemon send",    { description: "Send a prompt to a daemon: `daemon send <id> \"<text>\"`", handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdDaemonSend(args.trim(), ctx); } });
+  pi.registerCommand("remote-pi cron",           { description: "Schedule recurring prompts to daemons: `cron <add|list|remove|enable|disable|run|log>`", handler: async (args, ctx) => { _rememberCommandCtx(ctx); await _cmdCron(args.trim(), ctx); } });
+  pi.registerCommand("remote-pi install",   { description: "Install pi-supervisord as a system service + link the remote-pi CLI (systemd/launchd/Task Scheduler; Windows prompts for admin)", handler: async (_, ctx) => { _rememberCommandCtx(ctx); _cmdInstall(ctx, { linkCli: true }); } });
+  pi.registerCommand("remote-pi uninstall", { description: "Remove the pi-supervisord system service + the CLI shims (daemons registry preserved; Windows prompts for admin)", handler: async (_, ctx) => { _rememberCommandCtx(ctx); _cmdUninstall(ctx, { linkCli: true }); } });
+}
 
-  // Fleet ops via the supervisor (plan/26 W2). `/remote-pi stop` stays as
-  // local stop — fleet stop is `/remote-pi daemon stop`.
-  pi.registerCommand("remote-pi daemons",        { description: "List registered daemons + state", handler: async (_, ctx) => { _lastCtx = ctx; await _cmdDaemonsList(ctx); } });
-  pi.registerCommand("remote-pi daemon start",   { description: "Start daemons: all, or one by id (`daemon start <id>`)", handler: async (args, ctx) => { _lastCtx = ctx; await _cmdDaemonStart(ctx, args.trim() || undefined); } });
-  pi.registerCommand("remote-pi daemon stop",    { description: "Stop daemons: all, or one by id (`daemon stop <id>`)", handler: async (args, ctx) => { _lastCtx = ctx; await _cmdDaemonStop(ctx, args.trim() || undefined); } });
-  pi.registerCommand("remote-pi daemon restart", { description: "Restart daemons: all, or one by id (`daemon restart <id>`)", handler: async (args, ctx) => { _lastCtx = ctx; await _cmdDaemonRestart(ctx, args.trim() || undefined); } });
-  pi.registerCommand("remote-pi daemon status",  { description: "Show fleet runtime status (pid, uptime, restarts)", handler: async (_, ctx) => { _lastCtx = ctx; await _cmdDaemonStatus(ctx); } });
-  pi.registerCommand("remote-pi daemon send",    { description: "Send a prompt to a daemon: `daemon send <id> \"<text>\"`", handler: async (args, ctx) => { _lastCtx = ctx; await _cmdDaemonSend(args.trim(), ctx); } });
-  pi.registerCommand("remote-pi cron",           { description: "Schedule recurring prompts to daemons: `cron <add|list|remove|enable|disable|run|log>`", handler: async (args, ctx) => { _lastCtx = ctx; await _cmdCron(args.trim(), ctx); } });
-
-  // Service install / uninstall (plan/26 W3)
-  pi.registerCommand("remote-pi install",   { description: "Install pi-supervisord as a system service + link the remote-pi CLI (systemd/launchd/Task Scheduler; Windows prompts for admin)", handler: async (_, ctx) => { _lastCtx = ctx; _cmdInstall(ctx, { linkCli: true }); } });
-  pi.registerCommand("remote-pi uninstall", { description: "Remove the pi-supervisord system service + the CLI shims (daemons registry preserved; Windows prompts for admin)", handler: async (_, ctx) => { _lastCtx = ctx; _cmdUninstall(ctx, { linkCli: true }); } });
-
-  // Daemon mode: when spawned by pi-supervisord (REMOTE_PI_DAEMON=1) there is
-  // no human to type /remote-pi, so we auto-init after the factory returns.
-  // _cmdRoot checks localConfig.auto_start_relay and connects to the relay +
-  // local broker automatically; if no config exists it is a no-op (no wizard
-  // in headless mode).
-  if (process.env["REMOTE_PI_DAEMON"] === "1") {
-    const daemonCtx = {
-      // Headless: only warnings/errors reach stderr; the RPC client sees state
-      // via structured events, so info chatter is dropped (was stderr noise in
-      // the Cockpit).
-      ui: _headlessUi(),
-      cwd: process.cwd(),
-    } as unknown as Pick<ExtensionContext, "ui" | "cwd">;
-    setTimeout(() => { void _cmdRoot(daemonCtx); }, 0);
-  }
-};
-
-export default extension;
+function _startDaemonMode(): void {
+  const daemonCtx = {
+    ui: _headlessUi(),
+    cwd: process.cwd(),
+  } as unknown as Pick<ExtensionContext, "ui" | "cwd">;
+  setTimeout(() => { void _cmdRoot(daemonCtx); }, 0);
+}
 
 // ── Command implementations ───────────────────────────────────────────────────
 
@@ -3304,16 +3347,16 @@ async function _deliverUserMessage(
   const requestedSteer = mode === "auto" && msg.streaming_behavior === "steer";
   const inferredBusySteer = mode === "auto" && !requestedSteer && _myRoomMeta?.working === true;
   const shouldSteer = requestedSteer || inferredBusySteer;
-  // A reconnecting app can correctly send `steer` while our mirror has no
+  // A reconnecting app can correctly send `steer` while our projection has no
   // turn id (for example, the turn started while no owner was attached).
   // Also be defensive for clients that send a plain user_message while the
   // room is already working. Tell the SDK this is steering; otherwise it
-  // rejects the message as a normal busy prompt. Seed a fallback id so
+  // rejects the message as a normal busy prompt. Seed the projection so
   // later chunks/done have a target instead of being dropped.
-  const previousTurnId = _currentTurnId;
-  const seededTurnId = !shouldSteer || _currentTurnId === null;
+  const previousTurn = _turn;
+  const seededTurnId = !shouldSteer || _turnProjection().activeTurnId === null;
   if (seededTurnId) {
-    _currentTurnId = msg.id;
+    _applyTurnAndPublish({ type: "user_message_accepted", turnId: msg.id, replyTo: msg.id, source: mode === "normal" ? "queued" : "app" });
   }
   const content: Parameters<ExtensionAPI["sendUserMessage"]>[0] =
     msg.images && msg.images.length > 0
@@ -3330,7 +3373,14 @@ async function _deliverUserMessage(
     shouldSteer ? "steer" : undefined,
   );
   if (!wake.ok) {
-    if (seededTurnId) _currentTurnId = previousTurnId;
+    if (seededTurnId) {
+      const before = _turnProjection();
+      _turn = previousTurn;
+      _publishTurnProjection(before, _turnProjection());
+    }
+    if (seededTurnId) {
+      _applyTurnAndPublish({ type: "delivery_error", turnId: msg.id });
+    }
     _sendDeliveryError(sender, msg.id, wake.detail);
     return;
   }
@@ -3345,26 +3395,25 @@ async function _deliverUserMessage(
 }
 
 function _maybeDrainQueuedMessage(): void {
-  if (!_queuedMessage || _turnActive || _currentTurnId !== null) return;
+  if (!_queuedMessage || !_turnProjection().canDrainQueuedMessage) return;
   const queued = _queuedMessage;
   _queuedMessage = null;
+  _applyTurnAndPublish({ type: "queued_message_clear" });
   _broadcastQueuedMessageState();
   void _deliverUserMessage(_withCurrentSession({ type: "user_message", id: queued.id, text: queued.text }), null, "normal");
 }
 
 function _maybeSendLateAttachSessionSync(): void {
-  if (!_finishedTurnIdAwaitingSync || _turnActive) return;
-  const inReplyTo = _finishedTurnIdAwaitingSync;
-  _finishedTurnIdAwaitingSync = null;
-  const targets = [..._peersAttachedDuringTurn];
-  _peersAttachedDuringTurn.clear();
-  if (targets.length === 0) return;
-  const history = _buildSessionHistoryMessage(inReplyTo, undefined);
-  for (const peerId of targets) {
-    const channel = _activePeers.get(peerId);
+  const projection = _turnProjection();
+  if (!projection.canFlushLateAttachSync || projection.awaitingSyncTurnId === null) return;
+  const history = _buildSessionHistoryMessage(projection.awaitingSyncTurnId, undefined);
+  for (const target of projection.lateAttachSyncTargets) {
+    if (target.kind !== "owner") continue;
+    const channel = _activePeers.get(target.id);
     if (!channel) continue;
     try { channel.send(history); } catch { /* best-effort per late attach */ }
   }
+  _applyTurnAndPublish({ type: "flush_late_attach_sync" });
 }
 
 export function _routeClientMessageFrom(
@@ -3419,10 +3468,12 @@ export function _routeClientMessageFrom(
       break;
     case "queued_message_set":
       _queuedMessage = { id: msg.id, text: msg.text };
+      _applyTurnAndPublish({ type: "queued_message_set", id: msg.id, text: msg.text });
       _broadcastQueuedMessageState();
       break;
     case "queued_message_clear":
       _queuedMessage = null;
+      _applyTurnAndPublish({ type: "queued_message_clear" });
       _broadcastQueuedMessageState();
       break;
     case "approve_tool":
@@ -3476,6 +3527,7 @@ export function _routeClientMessageFrom(
           // narrowly-typed _lastCtx slot is sound (mirrors the read-site casts).
           _lastCtx = freshCtx as unknown as typeof _lastCtx;
           _lastEventCtx = freshCtx as unknown as typeof _lastEventCtx;
+          _sdkSessionProjection.bindCommandContext(freshCtx as ExtensionCommandContext);
           _captureRemoteSession(freshCtx);
           if (_isAgentMessageApi(freshCtx)) _messageApi = freshCtx;
           if (_disposed && _messageApi) {
@@ -3605,8 +3657,9 @@ function _buildSessionHistoryMessage(
 function _resetSessionForNew(inReplyTo: string): void {
   _messageBuffer = [];
   _queuedMessage = null;
-  _finishedTurnIdAwaitingSync = null;
-  _peersAttachedDuringTurn.clear();
+  _applyTurnAndPublish({ type: "session_shutdown" });
+  _resetTurnSnapshot();
+  _publishWorking(false);
   _broadcastQueuedMessageState();
   _sessionStartedAt = Date.now();
   _broadcastToActive(_withCurrentSession({

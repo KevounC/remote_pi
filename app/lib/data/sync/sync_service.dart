@@ -17,6 +17,7 @@ import 'package:app/data/local/records/message_record.dart';
 import 'package:app/data/local/records/runtime_record.dart';
 import 'package:app/data/local/records/session_index_record.dart';
 import 'package:app/data/sync/sync_events.dart';
+import 'package:app/data/sync/session_gate.dart';
 import 'package:app/data/transport/connection_manager.dart';
 import 'package:app/domain/contracts/service.dart';
 import 'package:app/domain/session_state.dart';
@@ -27,6 +28,7 @@ import 'package:flutter/foundation.dart';
 class SyncService extends Service {
   final ConnectionManager _conn;
   final LocalBoxes _boxes;
+  final SessionGate _sessionGate = const SessionGate();
 
   StreamSubscription<ConnectionStatus>? _connSub;
   StreamSubscription<ServerMessage>? _msgSub;
@@ -687,6 +689,24 @@ class SyncService extends Service {
       case ModelsList():
         break;
     }
+  }
+
+  ActiveSessionRef? _activeSessionRef() {
+    final epk = _activeEpk;
+    final sessionId = _activeSessionId;
+    if (epk == null || sessionId == null || sessionId.isEmpty) return null;
+    return ActiveSessionRef(
+      peerEpk: epk,
+      roomId: _activeRoomId,
+      sessionId: sessionId,
+    );
+  }
+
+  static String _shortSessionId(String? sessionId) {
+    if (sessionId == null || sessionId.isEmpty) return '-';
+    return sessionId.length <= 8
+        ? sessionId
+        : '…${sessionId.substring(sessionId.length - 8)}';
   }
 
   /// Plan/32 — persist a compaction as a system row so it renders a system

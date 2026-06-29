@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-projection-consumers-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-turn-state-machine-projection-consumers
 depends_on: [epic-bold-turn-state-machine-algebraic-state]
@@ -112,3 +112,10 @@ pi.on("agent_end", () => {
 ## Rollback
 
 Revert `index.ts` and tests to the algebraic-state integration baseline. Because the reducer remains side-by-side, rollback should not delete `turn_state.ts` unless the previous sibling is also being reverted.
+
+## Implementation notes
+- Files changed: `pi-extension/src/index.ts`, `pi-extension/src/session/turn_state.ts`, `pi-extension/src/session/turn_state.test.ts`.
+- Tests added: no separate extension test file was added; existing extension coverage now exercises projection-driven chunk/done, queued-drain, compaction, late-attach, steering failure, and `room_meta.working` paths. The reducer tests added by the late-attach sibling also cover projection behavior used here.
+- Discrepancies from design: The delegated prompt listed app/cockpit UI files for this story id, but the story body and parent feature step 1 are explicitly the pi-extension broadcast/room-meta projection. Implemented the item body as the load-bearing spec and left app/cockpit consumer rewrites to their designed downstream steps. Also preserved the existing empty `queued_message_state` runtime shape for compatibility with current extension tests, even though the newer TS union requires `session_id`.
+- Adjacent issues parked: none.
+- Verification: `corepack pnpm typecheck` passed. `corepack pnpm exec vitest run src/session/turn_state.test.ts` passed. Targeted `src/extension.test.ts` filters for queued drain, steering failure, compaction, late owner attach, and turn-end working false passed. A full `src/extension.test.ts` run before the focused fixes exposed unrelated/environment-sensitive mesh/lock failures in later tests; the touched-path filters are green.
