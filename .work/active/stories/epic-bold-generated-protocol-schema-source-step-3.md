@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-schema-source-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay, pi-extension, app]
 parent: epic-bold-generated-protocol-schema-source
 depends_on: [epic-bold-generated-protocol-schema-source-step-2]
@@ -129,11 +129,11 @@ Add relay-owned schemas without making the relay parse app-pi inner messages. Mo
 
 ## Acceptance Criteria
 
-- [ ] `OuterEnvelope`, `RoomMeta`, `RoomMetaPatch`, auth frames, presence frames, rooms frames, and `room_meta_update` are represented in schema.
-- [ ] `pi_envelope` / `pi_envelope_in` and the generic `{from,to,id,re,body}` agent envelope are represented in schema.
-- [ ] The schema marks app-pi `ct` and agent `body` as opaque to relay routing.
-- [ ] Added relay/cross-PC fixtures validate against the schema.
-- [ ] No relay runtime parser is replaced in this step.
+- [x] `OuterEnvelope`, `RoomMeta`, `RoomMetaPatch`, auth frames, presence frames, rooms frames, and `room_meta_update` are represented in schema.
+- [x] `pi_envelope` / `pi_envelope_in` and the generic `{from,to,id,re,body}` agent envelope are represented in schema.
+- [x] The schema marks app-pi `ct` and agent `body` as opaque to relay routing.
+- [x] Added relay/cross-PC fixtures validate against the schema.
+- [x] No relay runtime parser is replaced in this step.
 
 ## Rollback
 
@@ -146,3 +146,13 @@ Revert the relay/cross-PC schema and fixtures. No runtime code consumes these sc
 - Modeled `RoomMetaPatch` merge semantics explicitly: absent fields preserve, nullable string fields can clear with `null`, and `working` is absent-or-boolean only.
 - Added relay and cross-PC JSONL fixtures covering hello/auth/challenge, outer envelope, presence, rooms, room metadata updates, `pi_envelope`, `pi_envelope_in`, and relay transport-error envelope shape.
 - Verification: parsed every `protocol/**/*.json` and `protocol/**/*.jsonl` fixture with Python `json` successfully. Full schema validation is deferred to step 5 because the protocol package does not yet have the AJV fixture checker.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane substrate review. Inspected commit `775a9c0`, schemas, and fixtures. Verified JSON parse for all `protocol/**/*.json`/`.jsonl` and ran `corepack pnpm --dir protocol --config.store-dir=/tmp/remote-pi-pnpm-store check`, which validated the relay and cross-PC fixtures as part of all 5 schema families. Relay runtime code was unchanged.
