@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-projection-consumers-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-turn-state-machine-projection-consumers
 depends_on: [epic-bold-turn-state-machine-algebraic-state]
@@ -141,3 +141,13 @@ Revert `index.ts` and tests to the algebraic-state integration baseline. Because
 - Discrepancies from design: the original implementation notes were incomplete. The app-side `SessionGate` import/use in `app/lib/data/sync/sync_service.dart` is not part of the pi-extension turn projection; it depends on the app-attribution/session-gating work that supplied `app/lib/data/sync/session_gate.dart`. The pi-extension projection behavior remains the implementation surface for this story, while the app gate belongs to the canonical-session/app-attribution line.
 - Adjacent issues parked: none.
 - Verification: direct app analyzer check passed with `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib test` (one existing deprecation info in `lib/ui/chat/widgets/input_bar.dart`, no errors). Full `flutter analyze && flutter test` could not start because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`).
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane re-review after bounce `f43ee11`. The requested blocker was attribution/self-containment of the undocumented app-side `SessionGate` touch in implementation commit `c40b4ed`; re-fix commit `9576f63` updates the story record to explicitly attribute that app dependency to the app-attribution/session-gating line and makes clear this story's implementation surface remains the pi-extension turn projection. Verification: `HOME=/tmp/pi-dart-home flutter analyze && flutter test` could not start because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`); direct `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib test` passed with one existing deprecation info; direct `dart test` could not run because pub.dev access is blocked by a 403 proxy. Working convergence was checked against the current app source/tests: `SyncService._resetTurnState`, `_setWorking(false)`, and `ConnectionManager` working tests cover false after room meta false/offline, and the re-fix itself changes only the story body.
