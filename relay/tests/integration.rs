@@ -16,9 +16,11 @@ async fn two_peers_route_message() {
 
     let ct = "aGVsbG8="; // "hello" in base64, never decoded by relay
     // A sends: peer = dest (peer_b)
-    ws_a.send(Message::text(json!({"peer": peer_b, "ct": ct}).to_string()))
-        .await
-        .unwrap();
+    ws_a.send(Message::text(
+        json!({"peer": peer_b, "room": "main", "ct": ct}).to_string(),
+    ))
+    .await
+    .unwrap();
 
     let received = tokio::time::timeout(tokio::time::Duration::from_secs(1), ws_b.next())
         .await
@@ -33,6 +35,10 @@ async fn two_peers_route_message() {
         received_json["peer"], peer_a,
         "relay must rewrite peer to sender id"
     );
+    assert_eq!(
+        received_json["room"], "main",
+        "relay must rewrite room to sender room"
+    );
     assert_eq!(received_json["ct"], ct, "ct must be forwarded unchanged");
 }
 
@@ -42,7 +48,8 @@ async fn dest_offline_drops_silently() {
     let port = start_relay().await;
     let (mut ws_a, _) = connect_and_auth(port).await;
 
-    let envelope = json!({"peer": "bm9uZXhpc3RlbnRwZWVy", "ct": "aGVsbG8="}).to_string();
+    let envelope =
+        json!({"peer": "bm9uZXhpc3RlbnRwZWVy", "room": "main", "ct": "aGVsbG8="}).to_string();
     ws_a.send(Message::text(envelope)).await.unwrap();
 
     // If the relay silently drops it, no message arrives and no close frame is sent.

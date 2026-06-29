@@ -68,7 +68,7 @@ Medium. Tightening missing-room behavior is a breaking change for legacy peers; 
 Restore `OuterEnvelope` default-room parsing and `forward_to_peer` usage. This reopens the known fanout risk, so only roll back together with endpoint validation if a deployment needs emergency legacy compatibility.
 
 ## Implementation notes
-- Files changed: `relay/src/protocol/outer.rs`.
-- Tests added: `rejects_missing_room`, `preserves_opaque_ct_that_mentions_session_id` in `relay/src/protocol/outer.rs`.
+- Files changed: `relay/src/protocol/outer.rs`, `relay/tests/integration.rs`.
+- Tests added: `rejects_missing_room`, `preserves_opaque_ct_that_mentions_session_id` in `relay/src/protocol/outer.rs`; updated integration outer-envelope routing tests to send explicit room and assert room rewrite.
 - Discrepancies from design: `RoomMeta.session_id` remains as endpoint-owned bootstrap metadata from prior identity-model work; it is not a registry key, DB field, or routing branch. The unused generated mirror under `relay/src/protocol/generated/` still reflects the old generated schema and is intentionally left for the generated-protocol owner rather than hand-editing generated code.
 - Adjacent issues parked: none.
