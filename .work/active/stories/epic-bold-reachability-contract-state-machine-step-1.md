@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-state-machine-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app, relay]
 parent: epic-bold-reachability-contract-state-machine
 depends_on: []
@@ -109,3 +109,9 @@ Low. This adds an inert contract artifact. The main risk is future drift if lang
 ## Rollback
 
 Delete the new reachability contract artifact(s). No production code depends on them after this step.
+
+## Implementation Notes
+
+Implemented inline by the bold-refactor implement-orchestrator because no subagent dispatcher is exposed in this delegated harness. Added `.orchestration/contracts/reachability.json` as the inert canonical artifact and `.orchestration/contracts/reachability.md` as the temporary-source companion. The artifact records exactly the designed five states, `[1, 2, 5, 10, 30]` backoff seconds, 25s/25s/20s/70s heartbeat/liveness timings, and the Online→Degraded / Degraded→Online transitions. Runtime behavior is unchanged.
+
+Verification: `python3 -m json.tool .orchestration/contracts/reachability.json` passed. Production subproject builds were not run for this inert artifact-only story.

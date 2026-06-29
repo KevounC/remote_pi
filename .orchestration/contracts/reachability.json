@@ -1,0 +1,35 @@
+{
+  "name": "Reachability",
+  "version": 1,
+  "states": ["connecting", "online", "degraded", "offline", "retrying"],
+  "displayNames": {
+    "connecting": "Connecting",
+    "online": "Online",
+    "degraded": "Degraded",
+    "offline": "Offline",
+    "retrying": "Retrying"
+  },
+  "backoffSeconds": [1, 2, 5, 10, 30],
+  "heartbeat": {
+    "appProtocolPingSeconds": 25,
+    "relayWsPingSeconds": 25,
+    "extensionLivenessCheckSeconds": 20,
+    "extensionLivenessTimeoutSeconds": 70,
+    "degradedAfterMissedAppPongs": 3
+  },
+  "transitions": [
+    { "from": "offline", "event": "connect_requested", "to": "connecting" },
+    { "from": "connecting", "event": "connect_succeeded", "to": "online" },
+    { "from": "connecting", "event": "connect_failed_retryable", "to": "retrying" },
+    { "from": "connecting", "event": "connect_cancelled", "to": "offline" },
+    { "from": "online", "event": "app_protocol_silence", "to": "degraded" },
+    { "from": "online", "event": "transport_closed", "to": "retrying" },
+    { "from": "online", "event": "stop_requested", "to": "offline" },
+    { "from": "degraded", "event": "fresh_app_frame_or_room_snapshot", "to": "online" },
+    { "from": "degraded", "event": "transport_closed", "to": "retrying" },
+    { "from": "degraded", "event": "stop_requested", "to": "offline" },
+    { "from": "retrying", "event": "retry_timer_fired", "to": "connecting" },
+    { "from": "retrying", "event": "stop_requested", "to": "offline" },
+    { "from": "retrying", "event": "retry_disabled", "to": "offline" }
+  ]
+}
