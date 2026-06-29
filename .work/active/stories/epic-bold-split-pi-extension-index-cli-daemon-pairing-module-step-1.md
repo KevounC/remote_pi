@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-cli-daemon-pairing-module
 depends_on: [epic-bold-split-pi-extension-index-composition-root]
@@ -88,3 +88,10 @@ function createLegacyCommandSurface(): CommandSurfacePort {
 
 ## Rollback
 Inline `createCommandSurface(...).register(...)` back into the extension factory and delete the new command-surface shell. This wrapper-only step does not touch protocol, daemon, or pairing internals.
+
+## Implementation notes
+- Files changed: `pi-extension/src/extension/command_surface.ts`, `pi-extension/src/extension/command_surface/legacy_deps.ts`, `pi-extension/src/index.ts`.
+- Tests added: none (wrapper-only shell; existing command registration tests remain the behavior guard).
+- Verification: `corepack pnpm typecheck` passed from `pi-extension/`; `corepack pnpm test` was run and failed on pre-existing/environment UDS lock/listen failures (`EPERM` under `/tmp/claude/...`, cwd lock/leader-election suites), not on command-surface typing.
+- Discrepancies from design: `resources_discover` stays registered in `index.ts` because the current `CommandSurfacePort` only owns registration side effects and command/daemon auto-init; the shell still deploys the skill and registers agent tools/commands.
+- Adjacent issues parked: none.
