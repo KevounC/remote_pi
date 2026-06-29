@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-composition-root-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-composition-root
 depends_on: [epic-bold-split-pi-extension-index-composition-root-step-1]
@@ -86,3 +86,13 @@ Revert the composition-root module and restore inline extension-factory registra
 - Discrepancies from design: this step introduced the reusable shell and epoch without routing the existing `index.ts` hook bodies through it yet; current `index.ts` registration order remains unchanged for behavior preservation and later adapter/routing stories can adopt `createRemotePiExtensionFactory`.
 - Adjacent issues parked: none.
 - Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/extension/composition_root.test.ts` passed.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Implementation commit `7eaa970` adds the composition-root shell, `RuntimeEpoch`, `createRemotePiExtensionRuntime`, `dispose()` teardown ordering, and tests that bind API before command registration and mark epoch disposed before resource cleanup. This step intentionally leaves existing `index.ts` hook routing untouched for later extraction. Verification run from `pi-extension/`: `corepack pnpm typecheck` passed; targeted `composition_root.test.ts` passed. Full `corepack pnpm test` remains not clean in this container due pre-existing UDS/cwd-lock/leader-election environment failures plus unrelated current-head session-gate expectations outside this shell slice.
