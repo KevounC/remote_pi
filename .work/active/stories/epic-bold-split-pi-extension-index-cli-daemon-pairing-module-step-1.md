@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-cli-daemon-pairing-module
 depends_on: [epic-bold-split-pi-extension-index-composition-root]
@@ -95,3 +95,13 @@ Inline `createCommandSurface(...).register(...)` back into the extension factory
 - Verification: `corepack pnpm typecheck` passed from `pi-extension/`; `corepack pnpm test` was run and failed on pre-existing/environment UDS lock/listen failures (`EPERM` under `/tmp/claude/...`, cwd lock/leader-election suites), not on command-surface typing.
 - Discrepancies from design: `resources_discover` stays registered in `index.ts` because the current `CommandSurfacePort` only owns registration side effects and command/daemon auto-init; the shell still deploys the skill and registers agent tools/commands.
 - Adjacent issues parked: none.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Implementation commit `1e2c290` inspected; it adds the side-effect-free `createCommandSurface` module and the legacy seam, and `index.ts` delegates command-surface registration via `createLegacyCommandSurface().register(...)`. The shell uses the composition-root `CommandSurfacePort` signature and preserves delayed daemon-mode startup behind `REMOTE_PI_DAEMON=1`. Verification: `corepack pnpm typecheck` passed. `corepack pnpm test` was attempted and failed in unrelated environment-sensitive UDS suites (`listen EPERM` / cwd-lock / leader-election under `/tmp/claude/...`). Targeted `extension.test.ts` command-registration tests passed; one unrelated join/name-assigned test failed because UDS mesh join could not start in this harness.
