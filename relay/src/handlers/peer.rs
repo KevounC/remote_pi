@@ -18,6 +18,90 @@ use crate::auth::challenge::{
 use crate::protocol::outer::{OuterEnvelope, parse_line};
 use crate::rooms::{RoomMeta, RoomMetaPatch};
 
+/// Maximum number of peer IDs accepted in one presence/rooms control frame.
+/// The relay uses unbounded per-connection channels internally, so every frame
+/// that can register subscriptions or request per-peer snapshots must have a
+/// small, explicit fanout ceiling.
+pub const MAX_CONTROL_FRAME_PEERS: usize = 64;
+
+/// Maximum peer-cost a single WebSocket connection may spend on presence/rooms
+/// check frames inside one limiter window. Empty checks still cost 1 so a peer
+/// cannot spin free no-op requests indefinitely.
+pub const MAX_CONTROL_CHECK_PEER_COST_PER_WINDOW: usize = MAX_CONTROL_FRAME_PEERS * 4;
+const CONTROL_CHECK_PEER_COST_WINDOW: Duration = Duration::from_secs(60);
+
+#[derive(Debug)]
+struct ControlCheckLimiter {
+    window_started: time::Instant,
+    peer_cost_used: usize,
+}
+
+impl ControlCheckLimiter {
+    fn new() -> Self {
+        Self {
+            window_started: time::Instant::now(),
+            peer_cost_used: 0,
+        }
+    }
+
+    fn allow(&mut self, peer_cost: usize) -> bool {
+        let now = time::Instant::now();
+        if now.duration_since(self.window_started) >= CONTROL_CHECK_PEER_COST_WINDOW {
+            self.window_started = now;
+            self.peer_cost_used = 0;
+        }
+
+        let Some(next_cost) = self.peer_cost_used.checked_add(peer_cost) else {
+            return false;
+        };
+        if next_cost > MAX_CONTROL_CHECK_PEER_COST_PER_WINDOW {
+            return false;
+        }
+        self.peer_cost_used = next_cost;
+        true
+    }
+}
+
+fn parse_bounded_control_peers(
+    frame: &serde_json::Value,
+    frame_type: &str,
+    peer_short: &str,
+) -> Option<Vec<String>> {
+    let Some(peers_value) = frame.get("peers") else {
+        return Some(Vec::new());
+    };
+    let Some(peer_array) = peers_value.as_array() else {
+        warn!(
+            peer = %peer_short,
+            frame_type = %frame_type,
+            "control frame peers field is not an array, using empty peer list"
+        );
+        return Some(Vec::new());
+    };
+
+    if peer_array.len() > MAX_CONTROL_FRAME_PEERS {
+        warn!(
+            peer = %peer_short,
+            frame_type = %frame_type,
+            requested_peers = peer_array.len(),
+            limit = MAX_CONTROL_FRAME_PEERS,
+            "control frame peer limit exceeded, dropping"
+        );
+        return None;
+    }
+
+    Some(
+        peer_array
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect(),
+    )
+}
+
+fn control_check_cost(peers: &[String]) -> usize {
+    peers.len().max(1)
+}
+
 /// Axum route handler: validates the WebSocket upgrade and hands the upgraded
 /// socket to `handle_peer`, which owns the connection for its lifetime.
 pub async fn ws_handler(
@@ -143,6 +227,7 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
     // subscription set per conn) and `rooms` (one slot per target peer).
     let mut last_presence_resp: Option<String> = None;
     let mut last_rooms_resp: HashMap<String, String> = HashMap::new();
+    let mut control_check_limiter = ControlCheckLimiter::new();
 
     // ── 4. Routing loop ───────────────────────────────────────────────────
     // Send a WS Ping every 25 s so NAT/LB idle timers don't close the connection.
@@ -178,19 +263,14 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
 
                         // Frames with a top-level "type" are handled by the relay itself.
                         if let Some(t) = frame.get("type").and_then(|v| v.as_str()) {
-                            let peers: Vec<String> = frame
-                                .get("peers")
-                                .and_then(|v| v.as_array())
-                                .map(|arr| {
-                                    arr.iter()
-                                        .filter_map(|v| v.as_str().map(String::from))
-                                        .collect()
-                                })
-                                .unwrap_or_default();
-
                             match t {
                                 // ── presence control frames (plano 12) ──
                                 "subscribe_presence" => {
+                                    let Some(peers) =
+                                        parse_bounded_control_peers(&frame, t, &peer_short)
+                                    else {
+                                        continue;
+                                    };
                                     presence.subscribe(peer_id.clone(), peers.clone()).await;
                                     // Backfill: push peer_online for any already-online
                                     // peers in the list, so subscribers don't have to
@@ -198,9 +278,28 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
                                     registry.backfill_presence(&peer_id, &peers);
                                 }
                                 "unsubscribe_presence" => {
+                                    let peers = parse_bounded_control_peers(&frame, t, &peer_short)
+                                        .unwrap_or_default();
                                     presence.unsubscribe(&peer_id, peers).await;
                                 }
                                 "presence_check" => {
+                                    let Some(peers) =
+                                        parse_bounded_control_peers(&frame, t, &peer_short)
+                                    else {
+                                        continue;
+                                    };
+                                    let cost = control_check_cost(&peers);
+                                    if !control_check_limiter.allow(cost) {
+                                        warn!(
+                                            peer = %peer_short,
+                                            frame_type = %t,
+                                            cost,
+                                            limit = MAX_CONTROL_CHECK_PEER_COST_PER_WINDOW,
+                                            window_secs = CONTROL_CHECK_PEER_COST_WINDOW.as_secs(),
+                                            "control frame check rate limit exceeded, dropping"
+                                        );
+                                        continue;
+                                    }
                                     let states = presence
                                         .snapshot(&peers, |p| registry.is_online(p))
                                         .await;
@@ -226,12 +325,36 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
 
                                 // ── rooms control frames (plano 17) ──
                                 "subscribe_rooms" => {
+                                    let Some(peers) =
+                                        parse_bounded_control_peers(&frame, t, &peer_short)
+                                    else {
+                                        continue;
+                                    };
                                     rooms.subscribe(peer_id.clone(), peers).await;
                                 }
                                 "unsubscribe_rooms" => {
+                                    let peers = parse_bounded_control_peers(&frame, t, &peer_short)
+                                        .unwrap_or_default();
                                     rooms.unsubscribe(&peer_id, peers).await;
                                 }
                                 "rooms_check" => {
+                                    let Some(peers) =
+                                        parse_bounded_control_peers(&frame, t, &peer_short)
+                                    else {
+                                        continue;
+                                    };
+                                    let cost = control_check_cost(&peers);
+                                    if !control_check_limiter.allow(cost) {
+                                        warn!(
+                                            peer = %peer_short,
+                                            frame_type = %t,
+                                            cost,
+                                            limit = MAX_CONTROL_CHECK_PEER_COST_PER_WINDOW,
+                                            window_secs = CONTROL_CHECK_PEER_COST_WINDOW.as_secs(),
+                                            "control frame check rate limit exceeded, dropping"
+                                        );
+                                        continue;
+                                    }
                                     for target_peer in &peers {
                                         let active_rooms = registry.rooms_of(target_peer);
                                         let resp = serde_json::json!({
@@ -395,4 +518,22 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
     registry.unregister(&peer_id, &room_id, conn_id).await;
     rooms.unsubscribe_all(&peer_id).await;
     info!(peer = %peer_short, room = %room_id, addr = %peer_addr, "disconnected");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_check_limiter_counts_peer_cost_and_rejects_over_budget() {
+        let mut limiter = ControlCheckLimiter::new();
+
+        assert!(limiter.allow(MAX_CONTROL_CHECK_PEER_COST_PER_WINDOW));
+        assert!(!limiter.allow(1));
+    }
+
+    #[test]
+    fn control_check_cost_charges_empty_checks() {
+        assert_eq!(control_check_cost(&[]), 1);
+    }
 }

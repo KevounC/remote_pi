@@ -3,11 +3,18 @@ use common::{connect_and_auth, connect_and_auth_with_key, start_relay};
 
 use ed25519_dalek::SigningKey;
 use futures_util::{SinkExt, StreamExt};
+use relay::handlers::peer::MAX_CONTROL_FRAME_PEERS;
 use serde_json::json;
 use tokio_tungstenite::tungstenite::Message;
 
 fn random_key() -> SigningKey {
     SigningKey::generate(&mut rand::thread_rng())
+}
+
+fn oversized_peer_list(first_peer: String) -> Vec<String> {
+    let mut peers = vec![first_peer];
+    peers.extend((0..MAX_CONTROL_FRAME_PEERS).map(|i| format!("overflow-presence-peer-{i}")));
+    peers
 }
 
 /// B subscribes to A before A connects. When A connects, B must receive peer_online.
@@ -95,6 +102,33 @@ async fn peer_disconnects_pushes_offline_with_since_ts() {
     );
 }
 
+/// Oversized `subscribe_presence` frames are dropped instead of installing a
+/// subscription that could fan out through the relay's unbounded channels.
+#[tokio::test]
+async fn oversized_subscribe_presence_is_dropped() {
+    let port = start_relay().await;
+    let sk_a = random_key();
+    use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+    let peer_a = B64.encode(sk_a.verifying_key().to_bytes());
+
+    let (mut ws_b, _) = connect_and_auth(port).await;
+    ws_b.send(Message::text(
+        json!({"type": "subscribe_presence", "peers": oversized_peer_list(peer_a.clone())})
+            .to_string(),
+    ))
+    .await
+    .unwrap();
+    tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+
+    let (_ws_a, _) = connect_and_auth_with_key(port, &sk_a).await;
+
+    let spurious = tokio::time::timeout(tokio::time::Duration::from_millis(250), ws_b.next()).await;
+    assert!(
+        spurious.is_err(),
+        "oversized subscribe_presence must not install subscription for {peer_a}"
+    );
+}
+
 /// presence_check for a peer that has never connected → offline, since_ts null.
 #[tokio::test]
 async fn presence_check_returns_offline_for_unknown_peer() {
@@ -125,6 +159,28 @@ async fn presence_check_returns_offline_for_unknown_peer() {
     assert!(
         states[0]["since_ts"].is_null(),
         "since_ts should be null for never-seen peer"
+    );
+}
+
+/// Oversized `presence_check` frames are dropped without generating a snapshot.
+#[tokio::test]
+async fn oversized_presence_check_is_dropped() {
+    let port = start_relay().await;
+    let sk_a = random_key();
+    use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+    let peer_a = B64.encode(sk_a.verifying_key().to_bytes());
+
+    let (mut ws_b, _) = connect_and_auth(port).await;
+    ws_b.send(Message::text(
+        json!({"type": "presence_check", "peers": oversized_peer_list(peer_a)}).to_string(),
+    ))
+    .await
+    .unwrap();
+
+    let spurious = tokio::time::timeout(tokio::time::Duration::from_millis(250), ws_b.next()).await;
+    assert!(
+        spurious.is_err(),
+        "oversized presence_check must not receive a presence response"
     );
 }
 

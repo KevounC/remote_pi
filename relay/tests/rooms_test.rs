@@ -5,11 +5,18 @@ use common::{
 
 use ed25519_dalek::SigningKey;
 use futures_util::{SinkExt, StreamExt};
+use relay::handlers::peer::MAX_CONTROL_FRAME_PEERS;
 use serde_json::json;
 use tokio_tungstenite::tungstenite::Message;
 
 fn random_key() -> SigningKey {
     SigningKey::generate(&mut rand::thread_rng())
+}
+
+fn oversized_peer_list(first_peer: String) -> Vec<String> {
+    let mut peers = vec![first_peer];
+    peers.extend((0..MAX_CONTROL_FRAME_PEERS).map(|i| format!("overflow-rooms-peer-{i}")));
+    peers
 }
 
 /// B subscribes to Pi's rooms. Pi connects with a named room → B gets room_announced.
@@ -88,6 +95,35 @@ async fn peer_disconnects_pushes_room_ended() {
     );
 }
 
+/// Oversized `subscribe_rooms` frames are dropped instead of installing a
+/// subscription that could fan out through the relay's unbounded channels.
+#[tokio::test]
+async fn oversized_subscribe_rooms_is_dropped() {
+    let port = start_relay().await;
+    let sk_pi = random_key();
+    use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+    let peer_pi = B64.encode(sk_pi.verifying_key().to_bytes());
+
+    let (mut ws_app, _) = connect_and_auth(port).await;
+    ws_app
+        .send(Message::text(
+            json!({"type": "subscribe_rooms", "peers": oversized_peer_list(peer_pi.clone())})
+                .to_string(),
+        ))
+        .await
+        .unwrap();
+    tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+
+    let (_ws_pi, _) = connect_and_auth_with_room(port, &sk_pi, "work").await;
+
+    let spurious =
+        tokio::time::timeout(tokio::time::Duration::from_millis(250), ws_app.next()).await;
+    assert!(
+        spurious.is_err(),
+        "oversized subscribe_rooms must not install subscription for {peer_pi}"
+    );
+}
+
 /// rooms_check for a peer with no active connections → rooms: [].
 #[tokio::test]
 async fn rooms_check_empty_for_offline_peer() {
@@ -114,6 +150,30 @@ async fn rooms_check_empty_for_offline_peer() {
     assert_eq!(v["type"], "rooms");
     assert_eq!(v["peer"], peer_pi);
     assert_eq!(v["rooms"].as_array().unwrap().len(), 0);
+}
+
+/// Oversized `rooms_check` frames are dropped without generating snapshots.
+#[tokio::test]
+async fn oversized_rooms_check_is_dropped() {
+    let port = start_relay().await;
+    let sk_pi = random_key();
+    use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+    let peer_pi = B64.encode(sk_pi.verifying_key().to_bytes());
+
+    let (mut ws_app, _) = connect_and_auth(port).await;
+    ws_app
+        .send(Message::text(
+            json!({"type": "rooms_check", "peers": oversized_peer_list(peer_pi)}).to_string(),
+        ))
+        .await
+        .unwrap();
+
+    let spurious =
+        tokio::time::timeout(tokio::time::Duration::from_millis(250), ws_app.next()).await;
+    assert!(
+        spurious.is_err(),
+        "oversized rooms_check must not receive rooms responses"
+    );
 }
 
 /// rooms_check while two rooms are active → both room_ids appear in snapshot.
