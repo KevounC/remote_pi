@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-app-adapter-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, app]
 parent: epic-bold-reachability-contract-app-adapter
 depends_on: [epic-bold-reachability-contract-state-machine]
@@ -104,3 +104,13 @@ in `ConnectionManager`.
 - Discrepancies from design: Added the behavior test in this step rather than deferring all adapter tests to step 3 because the adapter is pure and cheap to verify; no `ConnectionManager` behavior changed.
 - Adjacent issues parked: none.
 - Verification: `cd app && dart format ... && flutter test test/transport/reachability_adapter_test.dart` could not run because the Flutter SDK cache under `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm` writes failed before test startup).
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: `dart format --set-exit-if-changed lib/data/transport/reachability_adapter.dart test/transport/reachability_adapter_test.dart` would reflow the test file; not behavior-affecting.
+
+**Notes**: Fast-lane substrate review. Inspected commit `89e0ec1` and confirmed the adapter is pure (`domain/value_objects/reachability.dart` only), not wired into `ConnectionManager`, and covered by a focused adapter test. Re-ran with writable Flutter: `HOME=/tmp /tmp/flutter-writable/bin/flutter test test/transport/reachability_adapter_test.dart` passed; `HOME=/tmp /tmp/flutter-writable/bin/cache/dart-sdk/bin/dart analyze lib/data/transport/reachability_adapter.dart test/transport/reachability_adapter_test.dart` passed. `flutter analyze` still fails only on the pre-existing `lib/ui/chat/widgets/input_bar.dart:802` deprecation info. Full `flutter test` still fails in pre-existing action/sync/chat/session-identity tests; the new adapter test passes. A combined run with `test/domain/reachability_test.dart` still exposes that pre-existing domain test's map-`contains` matcher issue, outside this adapter story.
