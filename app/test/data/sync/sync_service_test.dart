@@ -758,6 +758,107 @@ void main() {
   });
 
   test(
+    'history replay preserves local pending events absent from replay',
+    () async {
+      final s = await setup();
+      await s.sync.sendMessage('local draft');
+      await _settle();
+      final sentId = s.ch.sent.whereType<UserMessage>().last.id;
+      expect(messages(s.epk).single.pending, isTrue);
+
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-preserve-pending',
+          sessionStartedAt: 0,
+          events: const [UserInputEvt(ts: 1, id: 'server-old', text: 'old')],
+          eos: true,
+        ),
+      );
+      await _settle();
+
+      final rows = messages(s.epk);
+      expect(rows.map((row) => row.text), <String>['old', 'local draft']);
+      final pending = rows.singleWhere((row) => row.id == sentId);
+      expect(pending.pending, isTrue);
+      expect(pending.role, MsgRole.user);
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
+    'duplicate history replay through projection emits no Hive churn',
+    () async {
+      final s = await setup();
+      final read = SessionReadRepository(LocalBoxes());
+      var emits = 0;
+      final sub = read.watchMessages(s.epk, 'main').listen((_) => emits++);
+      await _settle();
+
+      final history = SessionHistory(
+        inReplyTo: 'sync-duplicate-1',
+        sessionStartedAt: 0,
+        events: const [
+          UserInputEvt(ts: 1, id: 'u1', text: 'hi'),
+          AgentMessageEvt(ts: 2, inReplyTo: 'u1', text: 'done'),
+        ],
+        eos: true,
+      );
+      s.ch.push(history);
+      await _settle();
+      final afterFirst = emits;
+      expect(afterFirst, greaterThan(1));
+
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-duplicate-2',
+          sessionStartedAt: history.sessionStartedAt,
+          events: history.events,
+          eos: history.eos,
+        ),
+      );
+      await _settle();
+
+      expect(emits, afterFirst);
+      expect(messages(s.epk).map((row) => row.text), <String>['hi', 'done']);
+
+      await sub.cancel();
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
+    'late authoritative echo after timeout confirms and removes failure',
+    () async {
+      final s = await setup(
+        pendingSendTimeout: const Duration(milliseconds: 20),
+      );
+      await s.sync.sendMessage('eventual echo');
+      await _settle();
+      final sentId = s.ch.sent.whereType<UserMessage>().last.id;
+
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await _settle();
+      expect(messages(s.epk).single.text, startsWith('⚠ send_timeout:'));
+
+      s.ch.push(UserInput(id: sentId, text: 'eventual echo'));
+      await _settle();
+
+      final rows = messages(s.epk);
+      expect(rows, hasLength(1));
+      expect(rows.single.id, sentId);
+      expect(rows.single.role, MsgRole.user);
+      expect(rows.single.text, 'eventual echo');
+      expect(rows.single.pending, isFalse);
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
     'switching the writer to a new session: a late frame from the OLD '
     "connection is dropped — it neither writes the new box nor appears in the "
     "new session's read projection (plan/32f session-switch bleed)",

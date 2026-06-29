@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-2]
@@ -89,4 +89,11 @@ Revert `SyncService` to direct `_upsert` / `_applyHistory` mutation. Projection 
 **Blocker**: Acceptance coverage for the high-risk `SyncService` projection switchover is still missing. The story explicitly requires tests proving history replay does not delete local pending events, duplicate replay emits no Hive churn, and late authoritative echo after timeout converges to the intended projection. The implementation notes say no tests were added, and I found no matching coverage in `app/test/data/sync/sync_service_test.dart`. Add focused regression tests for those three cases (or an explicit equivalent coverage path), then re-run/record `flutter test test/data/sync/sync_service_test.dart` when the Flutter toolchain is writable.
 
 **Verification**: Inspected implementation commit `843b56e00a17d4528f6ea875d6bf16d8417e8ccb` and `app/lib/data/sync/sync_service.dart`. `HOME=/tmp/pi-dart-home flutter analyze && flutter test` could not start because `/opt/flutter/bin/cache` is read-only. Direct analyzer fallback passed for changed app files: `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/data/sync/sync_service.dart lib/data/local/transcript_event_store_hive.dart lib/data/local/records/transcript_event_record.dart lib/domain/contracts/transcript_event_store.dart lib/config/dependencies.dart`. `dart test test/domain/transcript/transcript_projection_test.dart` could not run because pub attempted network access and got `403 Forbidden` from the proxy.
+
+## Implementation notes (test-coverage re-fix)
+- Files changed: `app/test/data/sync/sync_service_test.dart`.
+- Tests added: focused SyncService regressions for history replay preserving local pending events, duplicate history replay emitting no read-repository/Hive churn, and late authoritative echo after timeout converging to the confirmed user row with the timeout failure suppressed.
+- Discrepancies from design: none; this re-fix adds the missing acceptance coverage only.
+- Adjacent issues parked: none.
+- Verification: `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze test/data/sync/sync_service_test.dart lib/data/sync/sync_service.dart` passed. `dart test test/data/sync/sync_service_test.dart` could not run because pub network access failed with `403 Forbidden`; `flutter analyze`/`flutter test` cannot start because `/opt/flutter/bin/cache` is read-only.
 
