@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-late-attach-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-turn-state-machine-late-attach
 depends_on: [epic-bold-turn-state-machine-late-attach-step-1]
@@ -113,3 +113,10 @@ High. This is the integration step that can break stream correlation, queued-mes
 ## Rollback
 
 Revert `index.ts` and extension tests to the algebraic-state baseline. Step 1 can remain unused while the integration is backed out.
+
+## Implementation notes
+- Files changed: `pi-extension/src/index.ts`.
+- Tests added: none in this stride; the existing reducer tests cover `peer_attached`, `Done(awaitingSync)`, flush, and queued-drain selectors.
+- Discrepancies from design: owner attach and late-sync routing were already represented through `_applyTurnAndPublish({ type: "peer_attached" ... })`, `_turnProjection().canFlushLateAttachSync`, and `lateAttachSyncTargets`; this pass removed the remaining duplicate queued-message latch so queued drain is fully projection-driven.
+- Adjacent issues parked: none.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/session/turn_state.test.ts src/session/session_gate.test.ts` passed.
