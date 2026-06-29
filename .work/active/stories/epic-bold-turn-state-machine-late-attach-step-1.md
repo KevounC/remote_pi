@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-late-attach-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-turn-state-machine-late-attach
 depends_on: [epic-bold-turn-state-machine-algebraic-state]
@@ -117,3 +117,13 @@ Revert the added late-attach event/projection fields and tests from `turn_state.
 - Discrepancies from design: Kept backwards-compatible support for the existing `{ type: "peer_attached", peerId }` event while adding the requested `{ target: { kind, id } }` shape so downstream integration can migrate without a flag day. `TurnSnapshot` stores only ids/kinds, not channels or lifecycle resources.
 - Adjacent issues parked: none.
 - Verification: `corepack pnpm exec vitest run src/session/turn_state.test.ts` passed. Full `corepack pnpm typecheck` is still blocked by pre-existing missing-`session_id` TypeScript errors in `src/actions/handlers.ts` and `src/index.ts`.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane substrate review. Implementation commit `50a1423` was inspected. `TurnSnapshot` now stores late-attach targets as ids/kinds only, preserves the promised owner id set, dedupes repeated targets, projects `Done(awaitingSync)` with `working:false`, exposes flush/drain selectors, and clears late targets on shutdown. Verification run during review: `cd pi-extension && corepack pnpm typecheck` passed; targeted `src/session/turn_state.test.ts` passed as part of the 80-test targeted run. Full `corepack pnpm test` was attempted but did not complete green due existing UDS/daemon/leader-election environment-sensitive failures/timeouts unrelated to the pure reducer. Item advanced to `stage: done`.
