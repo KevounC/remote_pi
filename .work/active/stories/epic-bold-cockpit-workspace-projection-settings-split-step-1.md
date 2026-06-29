@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-settings-split-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-settings-split
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document]
@@ -136,3 +136,13 @@ Inline `settings_category.dart`, `settings_shell.dart`, and `widgets/settings_co
 - Verification: attempted `flutter analyze` from `cockpit/`, but Flutter failed before analysis because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`). `flutter test` was skipped for the same toolchain write failure.
 - Discrepancies from design: category panel bodies remain in `settings_page.dart` for this step; only the route shell, category registry/nav, and shared chrome/components moved.
 - Adjacent issues parked: none.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Implementation commit `22fffd8` inspected; changed files match the scoped shell/category/component extraction. Category metadata now lives in `settings_category.dart`, the shell/nav derive from the registry, shared settings chrome is public within the settings feature, selected-category fallback and remote gating remain in `settings_page.dart`, and no `WorkspaceDocument` / `WorkspaceLayoutStore` / `PaneNode` imports were introduced under `cockpit/lib/app/settings/`. Verification attempted: `flutter analyze && flutter test` from `cockpit/` failed before analysis because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`). A direct `dart analyze` attempt was also not authoritative because `.dart_tool`/Flutter package resolution is unavailable in this checkout. No code-level blocker found in the reviewed diff.
