@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-settings-split-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-settings-split
 depends_on: [epic-bold-cockpit-workspace-projection-settings-split-step-1]
@@ -123,4 +123,14 @@ Move the three panels and their helpers back into `settings_page.dart`, restore 
 - Discrepancies from design: preserved the existing scroll/chrome structure rather than introducing a new `SettingsPanelScroll` helper in this step; the shared settings components from step 1 remain the public chrome boundary.
 - Adjacent issues parked: none.
 - Verification: `flutter test test/settings/app_preferences_settings_panel_test.dart` could not start because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`) even with `HOME=/tmp/pi-dart-home`; direct Dart formatting succeeded using the SDK binary.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Inspected implementation commit `a7f3d6b588ecb380b6fac5ec0cab8df82ffd2a32` and changed files. The extracted appearance/language/notification panels compile as independent imports by inspection, keep `SettingsController` ownership, preserve LSP controller disposal, and guard notification permission `context` use after `await`. `HOME=/tmp/pi-dart-home flutter analyze && flutter test` could not start because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`); direct Dart analyzer fallback is not an honest substitute for Flutter in this cockpit tree because it reports existing shadcn/Flutter override noise broadly.
 
