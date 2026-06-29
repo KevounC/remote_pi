@@ -5,7 +5,7 @@ stage: done
 tags: [bug, app]
 parent: null
 depends_on: []
-release_binding: null
+release_binding: app-v1.1.1
 gate_origin: null
 archived_atop: cockpit-v1.5.1
 git_ref: 03adf85

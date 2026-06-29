@@ -5,8 +5,10 @@ stage: done
 tags: [app, tests]
 parent: epic-remote-session-resilience-refactor
 depends_on: [story-preserve-pending-send-backstop-on-disconnect]
-release_binding: null
+release_binding: app-v1.1.1
 gate_origin: null
+archived_atop: unbound
+archived_ref: 3dba904
 created: 2026-06-28
 updated: 2026-06-28
 ---

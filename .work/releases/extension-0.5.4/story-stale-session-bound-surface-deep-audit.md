@@ -5,7 +5,7 @@ stage: done
 tags: [pi-extension, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [story-fix-session-start-message-api-recapture]
-release_binding: null
+release_binding: extension-0.5.4
 gate_origin: null
 created: 2026-06-28
 updated: 2026-06-28

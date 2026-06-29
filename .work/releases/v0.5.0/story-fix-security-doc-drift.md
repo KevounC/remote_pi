@@ -5,7 +5,7 @@ stage: done
 tags: [docs, pi-extension, site, relay]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review]
-release_binding: null
+release_binding: v0.5.0
 gate_origin: null
 created: 2026-06-28
 updated: 2026-06-28

@@ -5,7 +5,7 @@ stage: done
 tags: [app, pi-extension, relay, cockpit, workflow]
 parent: feature-adversarial-codebase-review
 depends_on: [story-adversarial-state-protocol-review, story-adversarial-mobile-lifecycle-review, story-adversarial-security-privacy-review]
-release_binding: null
+release_binding: v0.5.0
 gate_origin: null
 created: 2026-06-28
 updated: 2026-06-28

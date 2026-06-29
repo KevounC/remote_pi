@@ -5,7 +5,7 @@ stage: done
 tags: [app, pi-extension, relay, cockpit, workflow]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-mobile-remote-coding-best-practices-skill]
-release_binding: null
+release_binding: v0.5.0
 gate_origin: null
 created: 2026-06-27
 updated: 2026-06-28

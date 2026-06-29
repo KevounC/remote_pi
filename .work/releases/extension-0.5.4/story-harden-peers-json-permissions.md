@@ -5,7 +5,7 @@ stage: done
 tags: [pi-extension, security]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review]
-release_binding: null
+release_binding: extension-0.5.4
 gate_origin: null
 created: 2026-06-28
 updated: 2026-06-28

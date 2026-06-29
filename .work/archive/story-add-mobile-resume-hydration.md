@@ -5,8 +5,10 @@ stage: done
 tags: [app, pi-extension, relay]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review, story-fix-mobile-working-convergence-on-disconnect]
-release_binding: null
+release_binding: v0.5.0
 gate_origin: null
+archived_atop: unbound
+archived_ref: 3dba904
 created: 2026-06-28
 updated: 2026-06-28
 ---

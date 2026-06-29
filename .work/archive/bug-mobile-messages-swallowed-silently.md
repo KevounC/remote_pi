@@ -1,9 +1,24 @@
 ---
 id: bug-mobile-messages-swallowed-silently
-created: 2026-06-28
-updated: 2026-06-28
+kind: story
+stage: done
 tags: [bug, app, pi-extension]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
+archived_atop: unbound
+archived_ref: 3dba904
+status: superseded
+resolved_by: story-fix-mobile-message-send-failures-visible
+created: 2026-06-28
+updated: 2026-06-29
 ---
+
+> **SUPERSEDED 2026-06-29** — resolved by `story-fix-mobile-message-send-failures-visible`
+> (archived in `.work/archive/`). Silent mobile send drops now surface a visible
+> chat error and the stale-extension-ctx rejection path was hardened by the
+> `story-remote-pi-stale-context-source-fix` family. Kept for historical context.
 
 Mobile messages are getting swallowed silently on the current remote sessions.
 

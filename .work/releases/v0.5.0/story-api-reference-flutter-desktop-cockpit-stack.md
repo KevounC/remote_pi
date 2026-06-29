@@ -5,7 +5,7 @@ stage: done
 tags: [cockpit, research, docs]
 parent: feature-agent-reference-surface
 depends_on: [story-research-platform-agent-reference-patterns]
-release_binding: null
+release_binding: v0.5.0
 gate_origin: null
 research_refs: [flutter-desktop-cockpit-skill-base]
 research_dials:

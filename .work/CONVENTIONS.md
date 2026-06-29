@@ -72,6 +72,50 @@ Start small. Current tags:
 - `docs` — agent/reference documentation, skills, or operator docs.
 - `bug` — observed defect or regression.
 
+## Releases
+
+This fork ships per-component semver. Components and their tag prefixes:
+
+| Component | Tag prefix | Current shipped |
+|-----------|-----------|----------------|
+| `app` (Flutter mobile) | `app-v` | `app-v1.1.0` |
+| `cockpit` (Flutter desktop) | `cockpit-v` | `cockpit-v1.5.1` |
+| `pi-extension` (Node/TS daemon) | `extension-` (no `v`) | `extension-0.5.3` |
+| `relay` (Rust relay) | `relay-` (no `v`) | (none yet) |
+| repo (cross-cutting / docs / research) | `v` | `v0.4.0` |
+
+### Attribution rule
+
+A release binds only items touching its component. Attribution is by `tags:`
+frontmatter, not by path:
+
+- **Exactly one component tag** (`app` / `cockpit` / `pi-extension` / `relay`) →
+  that component's release.
+- **Multiple component tags, or none** → repo-level `vX.Y.Z`.
+- **Docs/research deliverables** (`tags:` includes `research` or `docs` but no
+  component code changed) → repo-level, even when nominally about one component.
+  They are not component code changes.
+
+`release-deploy <version>` is invoked once per component version. The bind
+(Phase 3 gather) is filtered to that component's items by the attribution rule
+above — cross-component and docs/research items go to the repo-level release,
+not whichever component release is running.
+
+### Release config
+
+- `release_mapping: tag-based` — git tags mark releases; push is external
+  (operator runs from their machine). `release-deploy` creates the tag locally;
+  the operator pushes.
+- `gates_for_release: []` — intentionally empty. This fork ships to the
+  operator's phone without a gate process today. Enable gates (security, tests,
+  cruft, docs, patterns) when bold-refactor work is ready to ship.
+- `terminal-tier retention: retain-bodies` — bound item bodies stay on disk.
+  Active done items move to `.work/releases/<version>/`; archived items stay in
+  `.work/archive/`. A release summary doc is produced at
+  `.work/releases/<version>/release-<version>.md`.
+- `binding_guard: warn` (default) — cross-component work legitimately spans
+  releases; INCOMPLETEs under `epic_cohesion: phased` (default) are informational.
+
 ## Routing
 
 - Keep code-owned Remote Pi bugs here.

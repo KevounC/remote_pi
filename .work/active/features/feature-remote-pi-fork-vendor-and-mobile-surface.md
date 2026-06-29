@@ -8,7 +8,7 @@ depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-06-27
-updated: 2026-06-27
+updated: 2026-06-29
 ---
 
 # Remote-pi fork, local vendor switch, and mobile-surface development
@@ -56,7 +56,7 @@ The current `remote-pi` mobile path is workable but now has two separate needs:
   — pin the recurring stale-context rejection sequence and classify unsafe context captures before patching.
 - [`story-remote-pi-stale-context-source-fix`](../stories/story-remote-pi-stale-context-source-fix.md)
   — port the stale-context crash fix into `pi-extension/src/`, verify, and prepare upstreamable patch.
-- [`story-remote-pi-android-build-smoke`](../stories/story-remote-pi-android-build-smoke.md) — prove
+- [`story-remote-pi-android-build-smoke`](../archive/story-remote-pi-android-build-smoke.md) — prove
   the Flutter app can build locally and pair against the current relay.
 - [`story-remote-pi-mobile-mode-client-slice`](../stories/story-remote-pi-mobile-mode-client-slice.md)
   — only after the build path is known, add one thin in-app control slice if plain-text mobile mode

@@ -9,6 +9,73 @@ For the canonical protocol specification, see [PROTOCOL.md](PROTOCOL.md).
 
 ---
 
+## [app-v1.1.1] — 2026-06-29
+
+Mobile app patch over `app-v1.1.0`. Mobile-side fixes shipped to the
+operator's phone before the bold-refactor arc began.
+
+### Fixed
+- Mobile message send failures now visible (send-timeout backstop, pending-send
+  preservation on disconnect, deterministic disconnect test).
+- Mobile `working` status now converges on disconnect instead of sticking.
+- Room-switch snapshot adoption corrected.
+- History clear guarded against missing prior session start.
+- Rooms controller now closes on dispose (lifecycle leak).
+
+### Added
+- Android debug-APK build smoke test (`flutter build apk --debug`).
+
+## [extension-0.5.4] — 2026-06-29
+
+pi-extension patch over `extension-0.5.3`. Stale-context and session-bound
+surface fixes.
+
+### Fixed
+- Stale Pi SDK context after session replacement (`/new`): API recapture and
+  runtime audit hardened the session-bound surface.
+- Stale Pi API after app `session_new`.
+- `peers.json` permissions hardened (`0o600`, atomic write).
+- Session-start message API recapture.
+
+### Added
+- Local vendor switch (fork-private pi-extension packaging).
+- Stale-context source investigation + source fix.
+
+## [relay-0.1.0] — 2026-06-29
+
+First tracked relay release. The relay existed since project inception but had
+no tag; `0.1.0` is its first tracked release.
+
+### Fixed
+- Relay mesh auth cache reverified.
+- Relay control-frame fanout capped.
+
+## [v0.5.0] — 2026-06-29 (repo)
+
+Repo-level cross-component release over `v0.4.0`. Captures work that doesn't
+belong to a single component: the agent-reference surface, the adversarial
+codebase review, the api-reference stack docs, and cross-component fixes.
+
+### Added
+- Agent reference surface: platform-style stack references for agents
+  (`.agents/skills/<reference>/SKILL.md` pattern).
+- Mobile remote-coding best-practices skill (cross-cutting app/extension/relay).
+- API references: pi-extension TypeScript, Flutter mobile, Flutter desktop
+  cockpit, Rust relay, Next site stacks.
+- Research: platform agent reference patterns.
+
+### Fixed
+- Cross-PC transport-error uuid.
+- Extension queued-message protocol.
+- Late-attach turn stream sync.
+- Security doc drift.
+- Guard stale session history after `session_new`.
+- Mobile resume hydration.
+
+### Reviewed
+- Adversarial codebase review (multi-model): findings dedup/routing, mobile
+  lifecycle, security/privacy, state/protocol.
+
 ## [Unreleased] — PC mesh foundation
 
 This release consolidates the work that turned Remote Pi from "phone controls

@@ -1,9 +1,23 @@
 ---
 id: remote-pi-mobile-working-status-stuck
-created: 2026-06-27
-updated: 2026-06-27
+kind: story
+stage: done
 tags: [pi-extension, app, bug]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
+archived_atop: unbound
+archived_ref: 3dba904
+status: superseded
+resolved_by: story-fix-mobile-working-convergence-on-disconnect
+created: 2026-06-27
+updated: 2026-06-29
 ---
+
+> **SUPERSEDED 2026-06-29** — resolved by `story-fix-mobile-working-convergence-on-disconnect`
+> (archived in `.work/archive/`). The mobile `Working` spinner now converges false
+> on disconnect/error/abort/reconnect as intended. Kept for historical context.
 
 Remote-pi mobile session status can remain stuck on `Working` even when the workstation/Pi agent is idle and not taking a turn.
 
