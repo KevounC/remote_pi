@@ -476,6 +476,27 @@ bool isSessionScopedClientType(String type) =>
 bool isSessionScopedServerType(String type) =>
     sessionScopedServerTypes.contains(type);
 
+String typeOfServerMessage(ServerMessage message) => switch (message) {
+  PairOk() => 'pair_ok',
+  PairError() => 'pair_error',
+  UserInput() => 'user_input',
+  QueuedMessageState() => 'queued_message_state',
+  AgentChunk() => 'agent_chunk',
+  AgentDone() => 'agent_done',
+  AgentMessage() => 'agent_message',
+  Compaction() => 'compaction',
+  ToolRequest() => 'tool_request',
+  ToolResult() => 'tool_result',
+  ErrorMessage() => 'error',
+  Cancelled() => 'cancelled',
+  Pong() => 'pong',
+  Bye() => 'bye',
+  SessionHistory() => 'session_history',
+  ActionOk() => 'action_ok',
+  ActionError() => 'action_error',
+  ModelsList() => 'models_list',
+};
+
 String _sessionIdFromJson(Map<String, dynamic> j) {
   final sessionId = j['session_id'];
   if (sessionId is String && sessionId.isNotEmpty) return sessionId;
@@ -931,7 +952,7 @@ sealed class ServerMessage {
   }
 }
 
-mixin SessionScopedServerMessage on ServerMessage {
+mixin SessionScopedServerMessage {
   String get sessionId;
 }
 

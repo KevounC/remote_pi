@@ -504,13 +504,14 @@ class SyncService extends Service {
     if (originEpk != null && _activeEpk != null && originEpk != _activeEpk) {
       return;
     }
-    final messageSessionId = sessionIdOfServerMessage(msg);
-    final activeSessionId = _activeSessionId;
-    if (messageSessionId != null &&
-        messageSessionId.isNotEmpty &&
-        activeSessionId != null &&
-        activeSessionId.isNotEmpty &&
-        messageSessionId != activeSessionId) {
+    final gate = _sessionGate.accepts(msg, _activeSessionRef());
+    if (!gate.accepted) {
+      debugPrint(
+        '[session-gate] drop type=${gate.messageType ?? typeOfServerMessage(msg)} '
+        'room=$_activeRoomId reason=${gate.reason} '
+        'msg_session=${_shortSessionId(gate.messageSessionId)} '
+        'active_session=${_shortSessionId(gate.expectedSessionId)}',
+      );
       return;
     }
     switch (msg) {

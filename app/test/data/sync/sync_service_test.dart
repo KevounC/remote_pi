@@ -21,6 +21,7 @@ class _FakeChannel implements IChannel {
   final _ctrl = StreamController<ServerMessage>.broadcast();
   final List<ClientMessage> sent = [];
   Object? sendFailure;
+  String defaultSessionId = '';
 
   @override
   Stream<ServerMessage> get serverMessages => _ctrl.stream;
@@ -33,7 +34,80 @@ class _FakeChannel implements IChannel {
 
   @override
   Future<void> close() => _ctrl.close();
-  void push(ServerMessage m) => _ctrl.add(m);
+
+  void push(ServerMessage m) => _ctrl.add(_withDefaultSession(m));
+
+  void pushRaw(ServerMessage m) => _ctrl.add(m);
+
+  ServerMessage _withDefaultSession(ServerMessage m) {
+    final sid = defaultSessionId;
+    if (sid.isEmpty) return m;
+    return switch (m) {
+      UserInput(:final sessionId) when sessionId.isEmpty => UserInput(
+        id: m.id,
+        sessionId: sid,
+        text: m.text,
+        streamingBehavior: m.streamingBehavior,
+        image: m.image,
+      ),
+      QueuedMessageState(:final sessionId) when sessionId.isEmpty =>
+        QueuedMessageState(sessionId: sid, id: m.id, text: m.text),
+      AgentChunk(:final sessionId) when sessionId.isEmpty => AgentChunk(
+        sessionId: sid,
+        inReplyTo: m.inReplyTo,
+        delta: m.delta,
+      ),
+      AgentDone(:final sessionId) when sessionId.isEmpty => AgentDone(
+        sessionId: sid,
+        inReplyTo: m.inReplyTo,
+        usage: m.usage,
+      ),
+      AgentMessage(:final sessionId) when sessionId.isEmpty => AgentMessage(
+        sessionId: sid,
+        inReplyTo: m.inReplyTo,
+        text: m.text,
+        usage: m.usage,
+      ),
+      ToolRequest(:final sessionId) when sessionId.isEmpty => ToolRequest(
+        sessionId: sid,
+        toolCallId: m.toolCallId,
+        tool: m.tool,
+        args: m.args,
+      ),
+      ToolResult(:final sessionId) when sessionId.isEmpty => ToolResult(
+        sessionId: sid,
+        toolCallId: m.toolCallId,
+        result: m.result,
+        error: m.error,
+      ),
+      ErrorMessage(:final sessionId) when sessionId.isEmpty => ErrorMessage(
+        sessionId: sid,
+        inReplyTo: m.inReplyTo,
+        code: m.code,
+        message: m.message,
+      ),
+      Cancelled(:final sessionId) when sessionId.isEmpty => Cancelled(
+        sessionId: sid,
+        inReplyTo: m.inReplyTo,
+        targetId: m.targetId,
+      ),
+      Compaction(:final sessionId) when sessionId.isEmpty => Compaction(
+        sessionId: sid,
+        summary: m.summary,
+        tokensBefore: m.tokensBefore,
+        ts: m.ts,
+      ),
+      SessionHistory(:final sessionId) when sessionId.isEmpty => SessionHistory(
+        sessionId: sid,
+        inReplyTo: m.inReplyTo,
+        sessionStartedAt: m.sessionStartedAt,
+        events: m.events,
+        eos: m.eos,
+        truncated: m.truncated,
+      ),
+      _ => m,
+    };
+  }
 }
 
 class _FakeStorage extends PairingStorage {
@@ -59,7 +133,13 @@ void main() {
   });
 
   Future<
-    ({ConnectionManager conn, _FakeChannel ch, SyncService sync, String epk})
+    ({
+      ConnectionManager conn,
+      _FakeChannel ch,
+      SyncService sync,
+      String epk,
+      String sessionId,
+    })
   >
   setup({Duration pendingSendTimeout = const Duration(seconds: 20)}) async {
     final ch = _FakeChannel();
@@ -74,6 +154,8 @@ void main() {
       pendingSendTimeout: pendingSendTimeout,
     );
     final epk = 'epk_sync_${++_counter}';
+    final sessionId = 'session_$_counter';
+    ch.defaultSessionId = sessionId;
     conn.adopt(
       ch,
       PeerRecord(
@@ -84,7 +166,17 @@ void main() {
       ),
     );
     await _settle(); // _onlineActivated → activate(epk) settles
-    return (conn: conn, ch: ch, sync: sync, epk: epk);
+    ch.pushRaw(
+      PairOk(
+        inReplyTo: 'pair_$_counter',
+        sessionName: 'Pi',
+        sessionStartedAt: DateTime.now().millisecondsSinceEpoch,
+        roomId: 'main',
+        sessionId: sessionId,
+      ),
+    );
+    await _settle(); // ConnectionManager learns active session id
+    return (conn: conn, ch: ch, sync: sync, epk: epk, sessionId: sessionId);
   }
 
   List<MessageRecord> messages(String epk) {
@@ -103,6 +195,67 @@ void main() {
         ? SessionIndexRecord.fromJson(raw.cast<String, dynamic>())
         : null;
   }
+
+  test(
+    'foreign or missing session history cannot replace active rows',
+    () async {
+      final s = await setup();
+      s.ch.push(UserInput(id: 'u1', text: 'keep me'));
+      await _settle();
+      expect(messages(s.epk).map((m) => m.text), ['keep me']);
+
+      s.ch.pushRaw(
+        SessionHistory(
+          sessionId: 'foreign-session',
+          inReplyTo: 'sync-foreign',
+          sessionStartedAt: DateTime.now().millisecondsSinceEpoch,
+          events: const [UserInputEvt(ts: 1, id: 'foreign', text: 'drop me')],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk).map((m) => m.text), ['keep me']);
+
+      s.ch.pushRaw(
+        SessionHistory(
+          inReplyTo: 'sync-missing',
+          sessionStartedAt: DateTime.now().millisecondsSinceEpoch,
+          events: const [UserInputEvt(ts: 2, id: 'missing', text: 'drop too')],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk).map((m) => m.text), ['keep me']);
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
+    'session gate drops foreign chunks while same-session chunks stream',
+    () async {
+      final s = await setup();
+      s.ch.pushRaw(
+        AgentChunk(
+          sessionId: 'foreign-session',
+          inReplyTo: 'u1',
+          delta: 'drop',
+        ),
+      );
+      await _settle();
+      expect(s.sync.streaming, isNull);
+      expect(s.sync.isWorking, isFalse);
+
+      s.ch.pushRaw(
+        AgentChunk(sessionId: s.sessionId, inReplyTo: 'u1', delta: 'keep'),
+      );
+      await _settle();
+      expect(s.sync.streaming?.buffer, 'keep');
+      expect(s.sync.isWorking, isTrue);
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
 
   test(
     'user_message echo writes one MessageRecord + updates the index',
