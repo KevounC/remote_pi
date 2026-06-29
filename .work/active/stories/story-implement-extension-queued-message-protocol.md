@@ -1,7 +1,7 @@
 ---
 id: story-implement-extension-queued-message-protocol
 kind: story
-stage: implementing
+stage: review
 tags: [pi-extension, app, bug]
 parent: epic-remote-session-resilience-refactor
 depends_on: [feature-adversarial-codebase-review]
@@ -23,8 +23,20 @@ updated: 2026-06-28
 
 ## Acceptance Criteria
 
-- [ ] `queued_message_set` broadcasts current queued state to all owners.
-- [ ] `queued_message_clear` clears and broadcasts empty queued state.
-- [ ] `session_sync` includes the current queued state before/with history per `PROTOCOL.md`.
-- [ ] When the current turn ends, queued text is sent once as a normal user message and the queued state clears.
-- [ ] Add pi-extension tests for set, clear, sync replay, and drain.
+- [x] `queued_message_set` broadcasts current queued state to all owners.
+- [x] `queued_message_clear` clears and broadcasts empty queued state.
+- [x] `session_sync` includes the current queued state before/with history per `PROTOCOL.md`.
+- [x] When the current turn ends, queued text is sent once as a normal user message and the queued state clears.
+- [x] Add pi-extension tests for set, clear, sync replay, and drain.
+
+## Implementation notes
+
+- Implemented Pi-side in-memory queued-message state and broadcasts in `pi-extension/src/index.ts`.
+- Reused the safe user-message delivery path for queued-message drain and added `session_sync` queued-state replay before history.
+- Added deterministic pi-extension tests in `pi-extension/src/extension.test.ts` for set, clear, sync ordering, and one-shot drain.
+
+Verification from `pi-extension/`:
+
+- `corepack pnpm typecheck` — passed.
+- `corepack pnpm test -- src/extension.test.ts` — passed; Vitest executed the full 33-file suite (585 passed, 3 skipped).
+- `corepack pnpm test` — passed (33 files, 585 passed, 3 skipped).

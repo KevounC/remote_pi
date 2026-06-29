@@ -536,6 +536,10 @@ function _persistModelDefault(provider: string, modelId: string): void {
 
 // Per-turn messaging state
 let _currentTurnId: string | null = null;
+let _turnActive = false;
+
+type QueuedMessage = { id: string; text: string };
+let _queuedMessage: QueuedMessage | null = null;
 
 // Module-level pi reference
 let _pi: ExtensionAPI | null = null;
@@ -626,6 +630,16 @@ function _broadcastToActive(msg: ServerMessage): void {
   for (const ch of _activePeers.values()) {
     try { ch.send(msg); } catch { /* best-effort per channel */ }
   }
+}
+
+function _queuedMessageState(): Extract<ServerMessage, { type: "queued_message_state" }> {
+  return _queuedMessage
+    ? { type: "queued_message_state", id: _queuedMessage.id, text: _queuedMessage.text }
+    : { type: "queued_message_state" };
+}
+
+function _broadcastQueuedMessageState(): void {
+  _broadcastToActive(_queuedMessageState());
 }
 
 /** Returns true when at least one owner is attached. Derived `paired` UX. */
@@ -727,6 +741,8 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
   _activePeers.clear();
   _peerShort = "";
   _currentTurnId = null;
+  _turnActive = false;
+  _queuedMessage = null;
 
   _relay?.close();
   _relay = null;
@@ -1451,9 +1467,12 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   pi.on("agent_end", () => {
     // Buffer is fed by `message_end`; here we only finalize the outbound
     // turn signal to every connected owner. No buffer mutation.
-    if (!_anyPeerActive() || !_currentTurnId) return;
-    _broadcastToActive({ type: "agent_done", in_reply_to: _currentTurnId });
+    if (!_currentTurnId) return;
+    if (_anyPeerActive()) {
+      _broadcastToActive({ type: "agent_done", in_reply_to: _currentTurnId });
+    }
     _currentTurnId = null;
+    _maybeDrainQueuedMessage();
   });
 
   // plan/34: the broker no longer gates delivery on busy state, so we no
@@ -1461,6 +1480,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // room_meta over the relay (plan/32) below — that's independent of the
   // broker and drives the app's working indicator.
   pi.on("turn_start", (_event, ctx) => {
+    _turnActive = true;
     // Late model hydration: if the model was still unknown at connect (resolved
     // lazily by the SDK), grab it on the first turn and fan it out — so a daemon
     // whose model only materialises at turn 1 still reports it to the app.
@@ -1479,11 +1499,13 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     }
   });
   pi.on("turn_end", () => {
+    _turnActive = false;
     // Plan/32 Part B: publish working=false as room_meta (raw, no debounce).
     if (_myRoomMeta) _myRoomMeta = { ..._myRoomMeta, working: false };
     if (_relay && _myRoomId) {
       _relay.sendControl({ type: "room_meta_update", room_id: _myRoomId, meta: { working: false } });
     }
+    _maybeDrainQueuedMessage();
   });
 
   // Plan/32: compaction feedback. compact() doesn't run a turn, so bracket it
@@ -3217,6 +3239,75 @@ function _abortCurrentTurn(
   return false;
 }
 
+type UserClientMessage = Extract<ClientMessage, { type: "user_message" }>;
+
+function _sendDeliveryError(sender: PlainPeerChannel | null, inReplyTo: string, detail: string): void {
+  const error: ServerMessage = {
+    type: "error",
+    code: "internal_error",
+    in_reply_to: inReplyTo,
+    message: `Agent rejected incoming message: ${detail}`,
+  };
+  if (sender) sender.send(error);
+  else _broadcastToActive(error);
+}
+
+async function _deliverUserMessage(
+  msg: UserClientMessage,
+  sender: PlainPeerChannel | null,
+  mode: "auto" | "normal" = "auto",
+): Promise<void> {
+  const requestedSteer = mode === "auto" && msg.streaming_behavior === "steer";
+  const inferredBusySteer = mode === "auto" && !requestedSteer && _myRoomMeta?.working === true;
+  const shouldSteer = requestedSteer || inferredBusySteer;
+  // A reconnecting app can correctly send `steer` while our mirror has no
+  // turn id (for example, the turn started while no owner was attached).
+  // Also be defensive for clients that send a plain user_message while the
+  // room is already working. Tell the SDK this is steering; otherwise it
+  // rejects the message as a normal busy prompt. Seed a fallback id so
+  // later chunks/done have a target instead of being dropped.
+  const previousTurnId = _currentTurnId;
+  const seededTurnId = !shouldSteer || _currentTurnId === null;
+  if (seededTurnId) {
+    _currentTurnId = msg.id;
+  }
+  const content: Parameters<ExtensionAPI["sendUserMessage"]>[0] =
+    msg.images && msg.images.length > 0
+      ? [
+          ...msg.images.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mime })),
+          { type: "text" as const, text: msg.text },
+        ]
+      : msg.text;
+  const wake = await _wakeAgent(
+    content,
+    msg.images && msg.images.length > 0
+      ? `app user_message id=${msg.id} (+${msg.images.length} image)`
+      : `app user_message id=${msg.id}`,
+    shouldSteer ? "steer" : undefined,
+  );
+  if (!wake.ok) {
+    if (seededTurnId) _currentTurnId = previousTurnId;
+    _sendDeliveryError(sender, msg.id, wake.detail);
+    return;
+  }
+  const echo: ServerMessage = {
+    type: "user_message",
+    id: msg.id,
+    text: msg.text,
+    ...(msg.images && msg.images.length > 0 ? { images: msg.images } : {}),
+    ...(shouldSteer ? { streaming_behavior: "steer" as const } : {}),
+  };
+  _broadcastToActive(echo);
+}
+
+function _maybeDrainQueuedMessage(): void {
+  if (!_queuedMessage || _turnActive || _currentTurnId !== null) return;
+  const queued = _queuedMessage;
+  _queuedMessage = null;
+  _broadcastQueuedMessageState();
+  void _deliverUserMessage({ type: "user_message", id: queued.id, text: queued.text }, null, "normal");
+}
+
 export function _routeClientMessageFrom(
   sender: PlainPeerChannel,
   msg: ClientMessage,
@@ -3256,83 +3347,25 @@ export function _routeClientMessageFrom(
     return;
   }
   switch (msg.type) {
-    case "user_message": {
+    case "user_message":
       // Source-of-truth rebroadcast (plan/24 W2D fix). Echo the message
       // back to every attached owner (sender included) after the SDK accepts
       // the handoff, so optimistic app bubbles only confirm on real delivery.
-      //   1. The sender's app waits for this echo to render (no eager
-      //      local store), keeping all owners visually consistent.
-      //   2. Other owners see what was said, not just the agent's reply.
-      //   3. `id` is preserved verbatim, so future dedup logic on the app
-      //      side can key off it.
-      // The user_message is also recorded in _messageBuffer indirectly
-      // via `pi.on("message_end")` after the SDK persists the turn — so
-      // a later `session_sync` returns it in the history events.
-      // Plan/30: echo any inline images too so every owner renders the same
-      // image bubble. No-image path is byte-identical to before (no `images`
-      // key on the wire).
-      const requestedSteer = msg.streaming_behavior === "steer";
-      const inferredBusySteer = !requestedSteer && _myRoomMeta?.working === true;
-      const shouldSteer = requestedSteer || inferredBusySteer;
-      // A reconnecting app can correctly send `steer` while our mirror has no
-      // turn id (for example, the turn started while no owner was attached).
-      // Also be defensive for clients that send a plain user_message while the
-      // room is already working. Tell the SDK this is steering; otherwise it
-      // rejects the message as a normal busy prompt. Seed a fallback id so
-      // later chunks/done have a target instead of being dropped.
-      const previousTurnId = _currentTurnId;
-      const seededTurnId = !shouldSteer || _currentTurnId === null;
-      if (seededTurnId) {
-        _currentTurnId = msg.id;
-      }
-      const content: Parameters<ExtensionAPI["sendUserMessage"]>[0] =
-        msg.images && msg.images.length > 0
-          ? [
-              ...msg.images.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mime })),
-              { type: "text" as const, text: msg.text },
-            ]
-          : msg.text;
-      // Use a normal app-originated user message when idle so the local Pi TUI
-      // renders it like a typed prompt. Only ask Pi for steering semantics when
-      // the app requested steer or our room_meta says the agent is working.
-      void (async () => {
-        const wake = await _wakeAgent(
-          content,
-          msg.images && msg.images.length > 0
-            ? `app user_message id=${msg.id} (+${msg.images.length} image)`
-            : `app user_message id=${msg.id}`,
-          shouldSteer ? "steer" : undefined,
-        );
-        if (!wake.ok) {
-          if (seededTurnId) _currentTurnId = previousTurnId;
-          sender.send({
-            type: "error",
-            code: "internal_error",
-            in_reply_to: msg.id,
-            message: `Agent rejected incoming message: ${wake.detail}`,
-          });
-          return;
-        }
-        const echo: ServerMessage = {
-          type: "user_message",
-          id: msg.id,
-          text: msg.text,
-          ...(msg.images && msg.images.length > 0 ? { images: msg.images } : {}),
-          ...(shouldSteer ? { streaming_behavior: "steer" as const } : {}),
-        };
-        _broadcastToActive(echo);
-      })().catch((err: unknown) => {
+      // The user_message is also recorded in _messageBuffer indirectly via
+      // `pi.on("message_end")`, so a later `session_sync` returns it in history.
+      void _deliverUserMessage(msg, sender).catch((err: unknown) => {
         const detail = err instanceof Error ? err.message : String(err);
-        if (seededTurnId) _currentTurnId = previousTurnId;
-        sender.send({
-          type: "error",
-          code: "internal_error",
-          in_reply_to: msg.id,
-          message: `Agent rejected incoming message: ${detail}`,
-        });
+        _sendDeliveryError(sender, msg.id, detail);
       });
       break;
-    }
+    case "queued_message_set":
+      _queuedMessage = { id: msg.id, text: msg.text };
+      _broadcastQueuedMessageState();
+      break;
+    case "queued_message_clear":
+      _queuedMessage = null;
+      _broadcastQueuedMessageState();
+      break;
     case "approve_tool":
       // Approval gate was removed (plano 10.2 revisado). Type kept in
       // ClientMessage for forward-compat with a future permissions model;
@@ -3453,6 +3486,8 @@ function _handleSessionSync(
   sender: PlainPeerChannel,
   msg: Extract<ClientMessage, { type: "session_sync" }>,
 ): void {
+  sender.send(_queuedMessageState());
+
   if (_sessionStartedAt === null) {
     sender.send({
       type: "session_history",
@@ -3502,6 +3537,8 @@ function _handleSessionSync(
  */
 function _resetSessionForNew(inReplyTo: string): void {
   _messageBuffer = [];
+  _queuedMessage = null;
+  _broadcastQueuedMessageState();
   _sessionStartedAt = Date.now();
   _broadcastToActive({
     type: "session_history",

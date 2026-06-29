@@ -1036,6 +1036,145 @@ describe("multi-channel broadcast (W2D)", () => {
     expect(recipients).toEqual(new Set(["ownerA__1234567890", "ownerB__abcdefghij"]));
   });
 
+  test("queued_message_set broadcasts queued state to every owner", async () => {
+    await _pairForTest("ownerA__1234567890");
+    await _pairAdditionalForTest("ownerB__abcdefghij", "Android");
+    const sendsBefore = relayRef.current!.send.mock.calls.length;
+
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "ownerA__1234567890",
+      ct: Buffer.from(JSON.stringify({
+        type: "queued_message_set", id: "queued-1", text: "next prompt",
+      })).toString("base64"),
+    }));
+    await new Promise<void>((r) => setImmediate(r));
+
+    const sent = relayRef.current!.send.mock.calls.slice(sendsBefore)
+      .map((c) => c[0] as string).map(decodeSentCt);
+    const states = sent.filter((d) => d.inner.type === "queued_message_state");
+    expect(states).toHaveLength(2);
+    expect(new Set(states.map((d) => d.peer))).toEqual(new Set([
+      "ownerA__1234567890",
+      "ownerB__abcdefghij",
+    ]));
+    for (const state of states) {
+      expect(state.inner).toMatchObject({
+        type: "queued_message_state",
+        id: "queued-1",
+        text: "next prompt",
+      });
+    }
+  });
+
+  test("queued_message_clear clears and broadcasts empty queued state", async () => {
+    await _pairForTest("ownerA__1234567890");
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "ownerA__1234567890",
+      ct: Buffer.from(JSON.stringify({
+        type: "queued_message_set", id: "queued-clear", text: "discard me",
+      })).toString("base64"),
+    }));
+    await new Promise<void>((r) => setImmediate(r));
+    const sendsBefore = relayRef.current!.send.mock.calls.length;
+
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "ownerA__1234567890",
+      ct: Buffer.from(JSON.stringify({
+        type: "queued_message_clear", id: "clear-queued",
+      })).toString("base64"),
+    }));
+    await new Promise<void>((r) => setImmediate(r));
+
+    const sent = relayRef.current!.send.mock.calls.slice(sendsBefore)
+      .map((c) => c[0] as string).map(decodeSentCt);
+    const state = sent.find((d) => d.inner.type === "queued_message_state");
+    expect(state?.inner).toEqual({ type: "queued_message_state" });
+  });
+
+  test("session_sync sends queued state before history", async () => {
+    await _pairForTest("ownerA__1234567890");
+    _setMessageBufferForTest([{ role: "user", content: "already sent", timestamp: 1700000000000 }]);
+    _setSessionStartedAtForTest(1699999999000);
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "ownerA__1234567890",
+      ct: Buffer.from(JSON.stringify({
+        type: "queued_message_set", id: "queued-sync", text: "after this",
+      })).toString("base64"),
+    }));
+    await new Promise<void>((r) => setImmediate(r));
+    const sendsBefore = relayRef.current!.send.mock.calls.length;
+
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "ownerA__1234567890",
+      ct: Buffer.from(JSON.stringify({
+        type: "session_sync", id: "sync-queued", limit: 50,
+      })).toString("base64"),
+    }));
+    await new Promise<void>((r) => setImmediate(r));
+
+    const sent = relayRef.current!.send.mock.calls.slice(sendsBefore)
+      .map((c) => c[0] as string).map(decodeSentCt);
+    expect(sent[0]?.inner).toMatchObject({
+      type: "queued_message_state",
+      id: "queued-sync",
+      text: "after this",
+    });
+    expect(sent[1]?.inner).toMatchObject({
+      type: "session_history",
+      in_reply_to: "sync-queued",
+    });
+  });
+
+  test("queued message drains once as a normal user_message after active turn ends", async () => {
+    await _pairForTest("ownerA__1234567890");
+    const sendUserMessage = vi.fn();
+    const onTurnStart = captureEventHandler("turn_start");
+    const onInput = captureEventHandler("input");
+    const onAgentEnd = captureEventHandler("agent_end");
+    const onTurnEnd = captureEventHandler("turn_end");
+    _setPiForTest({
+      sendUserMessage,
+      sendMessage: () => undefined,
+    });
+
+    onTurnStart({ type: "turn_start", turnIndex: 0, timestamp: 0 });
+    onInput({ type: "input", text: "current turn", source: "interactive" });
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "ownerA__1234567890",
+      ct: Buffer.from(JSON.stringify({
+        type: "queued_message_set", id: "queued-drain", text: "run next",
+      })).toString("base64"),
+    }));
+    await new Promise<void>((r) => setImmediate(r));
+    const sendsBeforeDrain = relayRef.current!.send.mock.calls.length;
+
+    onAgentEnd({ type: "agent_end" });
+    await new Promise<void>((r) => setImmediate(r));
+    expect(sendUserMessage).not.toHaveBeenCalled();
+
+    onTurnEnd({ type: "turn_end", turnIndex: 0 });
+    await new Promise<void>((r) => setImmediate(r));
+
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(sendUserMessage).toHaveBeenCalledWith("run next");
+    const sent = relayRef.current!.send.mock.calls.slice(sendsBeforeDrain)
+      .map((c) => c[0] as string).map(decodeSentCt);
+    const emptyState = sent.find((d) => d.inner.type === "queued_message_state");
+    expect(emptyState?.inner).toEqual({ type: "queued_message_state" });
+    const drainedEcho = sent.find((d) => d.inner.type === "user_message");
+    expect(drainedEcho?.inner).toMatchObject({
+      type: "user_message",
+      id: "queued-drain",
+      text: "run next",
+    });
+    expect(drainedEcho?.inner).not.toHaveProperty("streaming_behavior");
+
+    onAgentEnd({ type: "agent_end" });
+    onTurnEnd({ type: "turn_end", turnIndex: 1 });
+    await new Promise<void>((r) => setImmediate(r));
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+  });
+
   test("plan/30: user_message with an image → sendUserMessage gets ImageContent+TextContent; echo carries images", async () => {
     await _pairForTest("ownerA__1234567890");
     // Override _pi with a spy to capture the multimodal content sent to the SDK.
