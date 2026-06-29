@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-composition-root-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-composition-root
 depends_on: []
@@ -58,10 +58,10 @@ Use concrete imports from existing protocol/transport types; do not create runti
 - Keep room-meta fields aligned with the existing relay/app protocol. No new wire fields.
 
 ## Acceptance Criteria
-- [ ] Boundary file defines the four module ports and runtime epoch contract.
-- [ ] File compiles under strict ESM/NodeNext with `.js` imports where required.
-- [ ] No runtime behavior changes.
-- [ ] `corepack pnpm typecheck` passes from `pi-extension/`.
+- [x] Boundary file defines the four module ports and runtime epoch contract.
+- [x] File compiles under strict ESM/NodeNext with `.js` imports where required.
+- [x] No runtime behavior changes.
+- [x] `corepack pnpm typecheck` passes from `pi-extension/`.
 
 ## Risk
 Medium: type imports can accidentally create cycles if they import runtime `index.ts` values.
@@ -79,3 +79,13 @@ The new files are side-effect free and not imported by runtime code yet. Public 
 
 Verification:
 - `corepack pnpm typecheck` from `pi-extension/` — passed.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review with direct commit/file verification (`d9eb442`). Confirmed `pi-extension/src/extension/ports.ts` defines the runtime epoch plus relay, owner, SDK-session, command-surface, and aggregate runtime port boundaries; `extension/types.ts` provides the neutral `RelayConnectivity` type; the new files are side-effect-free and not imported by runtime code. Ran `corepack pnpm typecheck` from `pi-extension/` successfully. Item advanced to `done`.
