@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-2]
@@ -74,3 +74,11 @@ High. This touches the mobile writer's lifecycle and can cause message loss, dup
 ## Rollback
 
 Revert `SyncService` to direct `_upsert` / `_applyHistory` mutation. Projection contract/tests from steps 1-2 can remain unused.
+
+## Implementation notes
+- Files changed: `app/lib/data/sync/sync_service.dart`.
+- Tests added: none in this stride; existing `SyncService` tests remain the target regression suite.
+- Discrepancies from design: the append-only Hive `TranscriptEventStore` remains side-by-side for the later store step; this story keeps an in-memory active-session event buffer and continues using existing `msgs:<epk>:<room>` boxes as the materialized projection. Timeout failure rows are deliberately preserved for compatibility until a later store/projection cleanup, but a late authoritative `UserInput` confirmation now re-projects from events and suppresses stale projection rows.
+- Adjacent issues parked: none.
+- Verification: direct Dart analyzer check passed for `app/lib/data/sync/sync_service.dart` with `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/data/sync/sync_service.dart`. Full `flutter analyze && flutter test` could not start in this environment because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`).
+

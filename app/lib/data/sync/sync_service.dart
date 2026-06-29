@@ -22,6 +22,8 @@ import 'package:app/data/transport/connection_manager.dart';
 import 'package:app/domain/contracts/service.dart';
 import 'package:app/domain/contracts/transcript_event_store.dart';
 import 'package:app/domain/session_state.dart';
+import 'package:app/domain/transcript/transcript_event.dart';
+import 'package:app/domain/transcript/transcript_projection.dart';
 import 'package:app/protocol/protocol.dart';
 import 'package:app/protocol/uuid7.dart';
 import 'package:flutter/foundation.dart';
@@ -55,9 +57,11 @@ class SyncService extends Service {
   // Serialise box mutations so concurrent async writes stay ordered.
   Future<void> _writeChain = Future<void>.value();
 
+  final List<TranscriptEvent> _transcriptEvents = <TranscriptEvent>[];
+  final Set<String> _transcriptEventIds = <String>{};
+
   // Streaming — in-memory only (#7).
   final StringBuffer _chunkBuffer = StringBuffer();
-  String _chunkReplyTo = '';
   Timer? _flushTimer;
   StreamingMessage? _streaming;
   final StreamController<StreamingMessage?> _streamingController =
@@ -152,7 +156,6 @@ class SyncService extends Service {
     _flushTimer?.cancel();
     _flushTimer = null;
     _chunkBuffer.clear();
-    _chunkReplyTo = '';
     _setQueuedText(null);
     if (clearPendingSendTimers) {
       // Session switch: the previous chat's in-flight sends are no longer ours
@@ -179,17 +182,14 @@ class SyncService extends Service {
     final isSteer = streamingBehavior == UserMessageStreamingBehavior.steer;
     // Optimistic pending row (#defaults: optimistic + dedupe by id).
     if (epk != null) {
-      await _upsert(
-        MsgRole.user,
-        id,
-        (seq, _) => MessageRecord(
-          id: id,
-          seq: seq,
-          role: MsgRole.user,
+      await _appendTranscriptEvent(
+        UserMessageSubmitted(
+          eventId: 'local:user_submitted:$id',
+          sessionId: _activeTranscriptSessionId(),
+          ts: now,
+          clientMessageId: id,
           text: text,
           image: image,
-          ts: now,
-          pending: true,
         ),
       );
       if (!isSteer) {
@@ -341,6 +341,9 @@ class SyncService extends Service {
   /// Test seam — number of armed no-echo timers (asserts no leak on reset).
   @visibleForTesting
   int get debugPendingSendTimerCount => _pendingSendTimers.length;
+
+  @visibleForTesting
+  TranscriptEventStore? get debugTranscriptEventStore => _transcriptEventStore;
 
   String? get _activeSessionId => _conn.activeSessionId;
 
@@ -516,16 +519,43 @@ class SyncService extends Service {
     }
     switch (msg) {
       case AgentChunk(:final inReplyTo, :final delta):
-        _chunkBuffer.write(delta);
-        _chunkReplyTo = inReplyTo;
-        _flushTimer?.cancel();
-        _flushTimer = Timer(const Duration(milliseconds: 16), _flushChunks);
+        // ignore: discarded_futures
+        _appendTranscriptEvent(
+          AssistantDeltaReceived(
+            eventId: 'server:assistant_delta:$inReplyTo:${uuid7()}',
+            sessionId: _activeTranscriptSessionId(),
+            ts: DateTime.now(),
+            replyTo: inReplyTo,
+            delta: delta,
+          ),
+        );
         _setWorking(true, replyTo: inReplyTo);
 
-      case AgentDone():
-        // Finalize whatever text accumulated since the last tool boundary.
-        final text = _finalizeSegment();
-        _setWorking(false, preview: text.isEmpty ? null : text);
+      case AgentDone(:final inReplyTo):
+        final buffered = _streaming?.buffer ?? '';
+        if (buffered.isNotEmpty) {
+          // ignore: discarded_futures
+          _appendTranscriptEvent(
+            AssistantMessageCommitted(
+              eventId: 'server:assistant_committed:$inReplyTo:${uuid7()}',
+              sessionId: _activeTranscriptSessionId(),
+              ts: DateTime.now(),
+              messageId: 'agent_${uuid7()}',
+              replyTo: inReplyTo,
+              text: buffered,
+            ),
+          );
+        }
+        // ignore: discarded_futures
+        _appendTranscriptEvent(
+          AssistantDoneReceived(
+            eventId: 'server:assistant_done:$inReplyTo:${uuid7()}',
+            sessionId: _activeTranscriptSessionId(),
+            ts: DateTime.now(),
+            replyTo: inReplyTo,
+          ),
+        );
+        _setWorking(false, preview: buffered.isEmpty ? null : buffered);
 
       case AgentMessage(:final inReplyTo, :final text):
         // ignore: discarded_futures
@@ -558,21 +588,18 @@ class SyncService extends Service {
         // Echo arrived → the send landed; disarm the no-echo backstop.
         _pendingSendTimers.remove(id)?.cancel();
         // ignore: discarded_futures
-        _upsert(
-          MsgRole.user,
-          id,
-          (seq, existing) => existing != null
-              ? existing.copyWith(pending: false)
-              : MessageRecord(
-                  id: id,
-                  seq: seq,
-                  role: MsgRole.user,
-                  text: text,
-                  image: image == null
-                      ? null
-                      : MessageImage(data: image.data, mime: image.mime),
-                  ts: DateTime.now(),
-                ),
+        _appendTranscriptEvent(
+          UserMessageConfirmed(
+            eventId: 'server:user_confirmed:$id',
+            sessionId: _activeTranscriptSessionId(),
+            ts: DateTime.now(),
+            clientMessageId: id,
+            text: text,
+            image: image == null
+                ? null
+                : MessageImage(data: image.data, mime: image.mime),
+            streamingBehavior: streamingBehavior,
+          ),
         );
         // Steering input should not start/replace the working turn bubble.
         if (streamingBehavior == UserMessageStreamingBehavior.steer) {
@@ -591,49 +618,44 @@ class SyncService extends Service {
         // Sequential ordering: close the current text segment as its own row
         // BEFORE the tool, so "narration → command → narration" renders in
         // order instead of all text landing after the commands.
-        _finalizeSegment();
+        final buffered = _streaming?.buffer ?? '';
+        if (buffered.isNotEmpty) {
+          // ignore: discarded_futures
+          _appendTranscriptEvent(
+            AssistantMessageCommitted(
+              eventId: 'server:assistant_committed:$toolCallId:${uuid7()}',
+              sessionId: _activeTranscriptSessionId(),
+              ts: DateTime.now(),
+              messageId: 'agent_${uuid7()}',
+              replyTo: _streaming!.inReplyTo,
+              text: buffered,
+            ),
+          );
+        }
         // ignore: discarded_futures
-        _upsert(
-          MsgRole.tool,
-          toolCallId,
-          (seq, existing) =>
-              existing ??
-              MessageRecord(
-                id: toolCallId,
-                seq: seq,
-                role: MsgRole.tool,
-                ts: DateTime.now(),
-                tool: ToolEventData(
-                  toolCallId: toolCallId,
-                  tool: tool,
-                  args: args,
-                ),
-              ),
+        _appendTranscriptEvent(
+          ToolRequested(
+            eventId: 'server:tool_requested:$toolCallId',
+            sessionId: _activeTranscriptSessionId(),
+            ts: DateTime.now(),
+            toolCallId: toolCallId,
+            tool: tool,
+            args: args,
+          ),
         );
 
       case ToolResult(:final toolCallId, :final result, :final error):
         // ignore: discarded_futures
-        _upsert(MsgRole.tool, toolCallId, (seq, existing) {
-          final base =
-              existing?.tool ??
-              ToolEventData(toolCallId: toolCallId, tool: 'unknown');
-          return (existing ??
-                  MessageRecord(
-                    id: toolCallId,
-                    seq: seq,
-                    role: MsgRole.tool,
-                    ts: DateTime.now(),
-                  ))
-              .copyWith(
-                tool: base.copyWith(
-                  status: error != null
-                      ? ToolEventStatus.failed
-                      : ToolEventStatus.completed,
-                  result: result,
-                  error: error,
-                ),
-              );
-        });
+        _appendTranscriptEvent(
+          ToolFinished(
+            eventId: 'server:tool_finished:$toolCallId',
+            sessionId: _activeTranscriptSessionId(),
+            ts: DateTime.now(),
+            toolCallId: toolCallId,
+            result: result,
+            error: error,
+          ),
+        );
 
       case Cancelled(:final targetId):
         _pendingSendTimers.remove(targetId)?.cancel();
@@ -683,7 +705,18 @@ class SyncService extends Service {
         );
 
       case Compaction(:final summary, :final tokensBefore, :final ts):
-        _writeCompaction(summary, tokensBefore, ts);
+        // ignore: discarded_futures
+        _appendTranscriptEvent(
+          CompactionRecorded(
+            eventId: 'server:compaction:${ts ?? uuid7()}',
+            sessionId: _activeTranscriptSessionId(),
+            ts: ts != null
+                ? DateTime.fromMillisecondsSinceEpoch(ts)
+                : DateTime.now(),
+            summary: summary,
+            tokensBefore: tokensBefore,
+          ),
+        );
 
       case Pong():
       case PairOk():
@@ -716,79 +749,52 @@ class SyncService extends Service {
   /// Plan/32 — persist a compaction as a system row so it renders a system
   /// bubble in the chat and survives a re-sync. Keyed by `ts` when present so
   /// the live message and its history replay collapse to one row.
-  void _writeCompaction(String summary, int? tokensBefore, int? ts) {
-    final id = 'compaction_${ts ?? uuid7()}';
-    final when = ts != null
-        ? DateTime.fromMillisecondsSinceEpoch(ts)
-        : DateTime.now();
-    // ignore: discarded_futures
-    _upsert(
-      MsgRole.compaction,
-      id,
-      (seq, existing) =>
-          existing ??
-          MessageRecord(
-            id: id,
-            seq: seq,
-            role: MsgRole.compaction,
-            text: summary,
-            tokensBefore: tokensBefore,
-            ts: when,
-          ),
-    );
+  String _activeTranscriptSessionId() {
+    final sessionId = _activeSessionId;
+    if (sessionId != null && sessionId.isNotEmpty) return sessionId;
+    final epk = _activeEpk ?? 'unknown-peer';
+    return 'compat:$epk:$_activeRoomId';
   }
 
-  Future<void> _applyHistory(SessionHistory h) async {
+  Future<void> _appendTranscriptEvent(TranscriptEvent event) =>
+      _appendTranscriptEvents(<TranscriptEvent>[event]);
+
+  Future<void> _appendTranscriptEvents(Iterable<TranscriptEvent> events) async {
+    final sessionId = _activeTranscriptSessionId();
+    var changed = false;
+    for (final event in events) {
+      if (event.sessionId != sessionId) continue;
+      if (_transcriptEventIds.add(event.eventId)) {
+        _transcriptEvents.add(event);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    final projection = deriveTranscriptProjection(
+      sessionId: sessionId,
+      events: _transcriptEvents,
+    );
+    _emitStreaming(projection.streaming);
+    final turn = projection.turn;
+    _setWorking(
+      turn.status == TranscriptTurnStatus.working ||
+          turn.status == TranscriptTurnStatus.streaming,
+      replyTo: turn.replyTo,
+    );
+    await _writeProjectionDiff(projection);
+  }
+
+  Future<void> _writeProjectionDiff(TranscriptProjection projection) async {
     final epk = _activeEpk;
     if (epk == null) return;
     final room = _activeRoomId;
-    final incomingStartedAt = h.sessionStartedAt;
-
-    // Reject stale pre-clear replay from older sessions.
-    if (_acceptedSessionStartedAtHighWater != null &&
-        incomingStartedAt < _acceptedSessionStartedAtHighWater!) {
-      return;
-    }
-
-    final rows = _convertHistory(h.events);
-    final historyIds = {for (final r in rows) _key(r.role, r.id)};
+    final desired = <MessageRecord>[
+      for (var i = 0; i < projection.messages.length; i++)
+        _recordFromProjectedMessage(projection.messages[i], i),
+    ];
     await _enqueue(() async {
       if (_activeEpk != epk || _activeRoomId != room) return;
-      if (_acceptedSessionStartedAtHighWater != null &&
-          incomingStartedAt < _acceptedSessionStartedAtHighWater!) {
-        return;
-      }
-
-      final shouldAdvanceSessionHighWater =
-          _acceptedSessionStartedAtHighWater == null ||
-          incomingStartedAt > _acceptedSessionStartedAtHighWater!;
       final box = await _boxes.msgsBox(epk, room);
-      // Preserve local pending user rows the Pi hasn't echoed yet.
-      final preserved = <MessageRecord>[];
-      for (final v in box.values) {
-        final r = MessageRecord.fromJson(_coerce(v));
-        if (r.role == MsgRole.user &&
-            r.pending &&
-            !historyIds.contains(_key(r.role, r.id))) {
-          preserved.add(r);
-        }
-      }
-      // Desired ordered state: history (seq = index) then preserved pending.
-      final desired = <MessageRecord>[
-        for (var i = 0; i < rows.length; i++) rows[i].copyWith(seq: i),
-        for (var j = 0; j < preserved.length; j++)
-          preserved[j].copyWith(seq: rows.length + j),
-      ];
-      // Reconcile the box to `desired` with the MINIMUM number of writes.
-      //
-      // The old path did `box.clear()` + re-put every row. Hive emits a watch
-      // event per deleted AND per put key, so the read repo re-emitted ~2N
-      // times — tearing the whole list down to EMPTY and rebuilding it — on
-      // EVERY SessionHistory the relay re-delivered (which it does on every
-      // reconnect). That was the flicker/"embaralha e some". Diffing instead
-      // means a re-sent identical history produces ZERO box writes → ZERO
-      // emits → no rebuild; a changed history only rewrites the rows that
-      // actually differ.
       for (final k in box.keys.toList()) {
         if ((k as num).toInt() >= desired.length) {
           await box.delete(k);
@@ -797,8 +803,6 @@ class SyncService extends Service {
       for (var i = 0; i < desired.length; i++) {
         final newJson = desired[i].toJson();
         final curRaw = box.get(i);
-        // Normalise the stored value through fromJson→toJson so the compare is
-        // independent of however Hive ordered the persisted map.
         final curNorm = curRaw == null
             ? null
             : jsonEncode(MessageRecord.fromJson(_coerce(curRaw)).toJson());
@@ -806,117 +810,172 @@ class SyncService extends Service {
           await box.put(i, newJson);
         }
       }
-      if (shouldAdvanceSessionHighWater) {
-        _acceptedSessionStartedAtHighWater = incomingStartedAt;
-        _updateIndex(
-          (cur) => cur.copyWith(
-            sessionStartedAt: DateTime.fromMillisecondsSinceEpoch(
-              incomingStartedAt,
-            ),
-          ),
-        );
-      }
-      if (_activeEpk == epk && _activeRoomId == room) {
-        _idToSeq
-          ..clear()
-          ..addEntries([
-            for (var i = 0; i < desired.length; i++)
-              MapEntry(_key(desired[i].role, desired[i].id), i),
-          ]);
-        _nextSeq = desired.length;
-        _indexLoaded = true;
-      }
+      _idToSeq
+        ..clear()
+        ..addEntries([
+          for (var i = 0; i < desired.length; i++)
+            MapEntry(_key(desired[i].role, desired[i].id), i),
+        ]);
+      _nextSeq = desired.length;
+      _indexLoaded = true;
     });
   }
 
-  List<MessageRecord> _convertHistory(List<SessionHistoryEvent> events) {
-    final out = <MessageRecord>[];
-    var seq = 0;
+  MessageRecord _recordFromProjectedMessage(ChatMessage message, int seq) {
+    final now = DateTime.now();
+    return switch (message) {
+      UserMsg() => MessageRecord(
+        id: message.id,
+        seq: seq,
+        role: MsgRole.user,
+        text: message.text,
+        image: message.image,
+        pending: message.status == UserMsgStatus.pending,
+        ts: now,
+      ),
+      AssistantMsg() => MessageRecord(
+        id: message.id,
+        seq: seq,
+        role: MsgRole.assistant,
+        text: message.text,
+        ts: now,
+      ),
+      ToolEvent() => MessageRecord(
+        id: message.id,
+        seq: seq,
+        role: MsgRole.tool,
+        ts: now,
+        tool: ToolEventData(
+          toolCallId: message.toolCallId,
+          tool: message.tool,
+          args: message.args,
+          status: message.status,
+          result: message.result,
+          error: message.error,
+        ),
+      ),
+      CompactionMsg() => MessageRecord(
+        id: message.id,
+        seq: seq,
+        role: MsgRole.compaction,
+        text: message.summary,
+        tokensBefore: message.tokensBefore,
+        ts: now,
+      ),
+    };
+  }
+
+  Future<void> _applyHistory(SessionHistory h) async {
+    final epk = _activeEpk;
+    if (epk == null) return;
+    final room = _activeRoomId;
+    final incomingStartedAt = h.sessionStartedAt;
+
+    if (_acceptedSessionStartedAtHighWater != null &&
+        incomingStartedAt < _acceptedSessionStartedAtHighWater!) {
+      return;
+    }
+
+    final sessionId = _activeTranscriptSessionId();
+    await _seedPendingTranscriptEvents(epk, room, sessionId);
+    await _appendTranscriptEvents(
+      _historyToTranscriptEvents(h.events, sessionId),
+    );
+
+    final shouldAdvanceSessionHighWater =
+        _acceptedSessionStartedAtHighWater == null ||
+        incomingStartedAt > _acceptedSessionStartedAtHighWater!;
+    if (shouldAdvanceSessionHighWater) {
+      _acceptedSessionStartedAtHighWater = incomingStartedAt;
+      _updateIndex(
+        (cur) => cur.copyWith(
+          sessionStartedAt: DateTime.fromMillisecondsSinceEpoch(
+            incomingStartedAt,
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _seedPendingTranscriptEvents(
+    String epk,
+    String room,
+    String sessionId,
+  ) async {
+    final box = await _boxes.msgsBox(epk, room);
+    final pending = <TranscriptEvent>[];
+    for (final value in box.values) {
+      final record = MessageRecord.fromJson(_coerce(value));
+      if (record.role != MsgRole.user || !record.pending) continue;
+      pending.add(
+        UserMessageSubmitted(
+          eventId: 'local:user_submitted:${record.id}',
+          sessionId: sessionId,
+          ts: record.ts,
+          clientMessageId: record.id,
+          text: record.text,
+          image: record.image,
+        ),
+      );
+    }
+    await _appendTranscriptEvents(pending);
+  }
+
+  Iterable<TranscriptEvent> _historyToTranscriptEvents(
+    List<SessionHistoryEvent> events,
+    String sessionId,
+  ) sync* {
     for (final e in events) {
+      final ts = DateTime.fromMillisecondsSinceEpoch(e.ts);
       switch (e) {
         case UserInputEvt(:final id, :final text, :final image):
-          out.add(
-            MessageRecord(
-              id: id,
-              seq: seq++,
-              role: MsgRole.user,
-              text: text,
-              image: image == null
-                  ? null
-                  : MessageImage(data: image.data, mime: image.mime),
-              ts: DateTime.fromMillisecondsSinceEpoch(e.ts),
-            ),
+          yield UserMessageConfirmed(
+            eventId: 'history:user_confirmed:$id',
+            sessionId: sessionId,
+            ts: ts,
+            clientMessageId: id,
+            text: text,
+            image: image == null
+                ? null
+                : MessageImage(data: image.data, mime: image.mime),
           );
         case AgentMessageEvt(:final inReplyTo, :final text):
-          out.add(
-            MessageRecord(
-              id: inReplyTo,
-              seq: seq++,
-              role: MsgRole.assistant,
-              text: text,
-              ts: DateTime.fromMillisecondsSinceEpoch(e.ts),
-            ),
+          yield AssistantMessageCommitted(
+            eventId: 'history:assistant_committed:$inReplyTo:${e.ts}',
+            sessionId: sessionId,
+            ts: ts,
+            messageId: 'agent_history_${inReplyTo}_${e.ts}',
+            replyTo: inReplyTo,
+            text: text,
           );
         case ToolRequestEvt(:final toolCallId, :final tool, :final args):
-          out.add(
-            MessageRecord(
-              id: toolCallId,
-              seq: seq++,
-              role: MsgRole.tool,
-              ts: DateTime.fromMillisecondsSinceEpoch(e.ts),
-              tool: ToolEventData(
-                toolCallId: toolCallId,
-                tool: tool,
-                args: args,
-              ),
-            ),
+          yield ToolRequested(
+            eventId: 'history:tool_requested:$toolCallId',
+            sessionId: sessionId,
+            ts: ts,
+            toolCallId: toolCallId,
+            tool: tool,
+            args: args,
           );
         case ToolResultEvt(:final toolCallId, :final result, :final error):
-          final idx = out.lastIndexWhere(
-            (m) => m.role == MsgRole.tool && m.tool?.toolCallId == toolCallId,
+          yield ToolFinished(
+            eventId: 'history:tool_finished:$toolCallId',
+            sessionId: sessionId,
+            ts: ts,
+            toolCallId: toolCallId,
+            result: result,
+            error: error,
           );
-          final status = error != null
-              ? ToolEventStatus.failed
-              : ToolEventStatus.completed;
-          if (idx >= 0) {
-            out[idx] = out[idx].copyWith(
-              tool: out[idx].tool!.copyWith(
-                status: status,
-                result: result,
-                error: error,
-              ),
-            );
-          } else {
-            out.add(
-              MessageRecord(
-                id: toolCallId,
-                seq: seq++,
-                role: MsgRole.tool,
-                ts: DateTime.fromMillisecondsSinceEpoch(e.ts),
-                tool: ToolEventData(
-                  toolCallId: toolCallId,
-                  tool: 'unknown',
-                  status: status,
-                  result: result,
-                  error: error,
-                ),
-              ),
-            );
-          }
         case CompactionEvt(:final summary, :final tokensBefore):
-          out.add(
-            MessageRecord(
-              id: 'compaction_${e.ts}',
-              seq: seq++,
-              role: MsgRole.compaction,
-              text: summary,
-              tokensBefore: tokensBefore,
-              ts: DateTime.fromMillisecondsSinceEpoch(e.ts),
-            ),
+          yield CompactionRecorded(
+            eventId: 'history:compaction:${e.ts}',
+            sessionId: sessionId,
+            ts: ts,
+            summary: summary,
+            tokensBefore: tokensBefore,
           );
       }
     }
-    return out;
   }
 
   // ---------------------------------------------------------------------------
@@ -1091,62 +1150,10 @@ class SyncService extends Service {
   // Streaming (in-memory only)
   // ---------------------------------------------------------------------------
 
-  void _flushChunks() {
-    if (_chunkBuffer.isEmpty) return;
-    final delta = _chunkBuffer.toString();
-    _chunkBuffer.clear();
-    final cur = _streaming;
-    if (cur != null && cur.inReplyTo == _chunkReplyTo) {
-      _emitStreaming(cur.appendDelta(delta));
-    } else {
-      _emitStreaming(StreamingMessage(inReplyTo: _chunkReplyTo, buffer: delta));
-    }
-  }
-
-  /// Persist the accumulated streaming text as a standalone assistant row
-  /// (unique id, in chronological seq order) and clear the live cursor.
-  /// Called at every tool boundary AND on agent_done so text/tool/text
-  /// renders sequentially. No-op (just clears the cursor) when there's no
-  /// text — so a tool-only or empty turn never leaves a blank bubble.
-  /// Returns the finalized text (empty if none).
-  String _finalizeSegment() {
-    // Drain any coalesced delta still sitting in the 16ms buffer.
-    _flushTimer?.cancel();
-    _flushTimer = null;
-    if (_chunkBuffer.isNotEmpty) {
-      final delta = _chunkBuffer.toString();
-      _chunkBuffer.clear();
-      final cur = _streaming;
-      _streaming = (cur != null && cur.inReplyTo == _chunkReplyTo)
-          ? cur.appendDelta(delta)
-          : StreamingMessage(inReplyTo: _chunkReplyTo, buffer: delta);
-    }
-    final text = _streaming?.buffer ?? '';
-    if (text.isNotEmpty) {
-      final id = 'agent_${uuid7()}';
-      // ignore: discarded_futures
-      _upsert(
-        MsgRole.assistant,
-        id,
-        (seq, _) => MessageRecord(
-          id: id,
-          seq: seq,
-          role: MsgRole.assistant,
-          text: text,
-          ts: DateTime.now(),
-        ),
-      );
-    }
-    _chunkReplyTo = '';
-    _emitStreaming(null);
-    return text;
-  }
-
   void _discardStreamingState() {
     _flushTimer?.cancel();
     _flushTimer = null;
     _chunkBuffer.clear();
-    _chunkReplyTo = '';
     _emitStreaming(null);
   }
 
