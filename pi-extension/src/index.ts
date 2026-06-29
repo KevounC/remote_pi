@@ -584,9 +584,6 @@ function _persistModelDefault(provider: string, modelId: string): void {
 // Per-turn messaging state
 let _turn: TurnSnapshot = initialTurnSnapshot();
 
-type QueuedMessage = { id: string; text: string };
-let _queuedMessage: QueuedMessage | null = null;
-
 function _turnProjection(): TurnProjection {
   return projectTurn(_turn);
 }
@@ -705,9 +702,10 @@ function _broadcastToActive(msg: ServerMessage): void {
 }
 
 function _queuedMessageState(): Extract<ServerMessage, { type: "queued_message_state" }> {
-  return _queuedMessage
-    ? _withCurrentSession({ type: "queued_message_state", id: _queuedMessage.id, text: _queuedMessage.text })
-    : ({ type: "queued_message_state" } as Extract<ServerMessage, { type: "queued_message_state" }>);
+  const queued = _turnProjection().queuedMessage;
+  return queued
+    ? _withCurrentSession({ type: "queued_message_state", id: queued.id, text: queued.text })
+    : _withCurrentSession({ type: "queued_message_state" });
 }
 
 function _broadcastQueuedMessageState(): void {
@@ -816,7 +814,6 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
   _applyTurnAndPublish({ type: "session_shutdown" });
   _resetTurnSnapshot();
   _publishWorking(false);
-  _queuedMessage = null;
 
   _relay?.close();
   _relay = null;
@@ -3396,9 +3393,9 @@ async function _deliverUserMessage(
 }
 
 function _maybeDrainQueuedMessage(): void {
-  if (!_queuedMessage || !_turnProjection().canDrainQueuedMessage) return;
-  const queued = _queuedMessage;
-  _queuedMessage = null;
+  const projection = _turnProjection();
+  const queued = projection.queuedMessage;
+  if (!queued || !projection.canDrainQueuedMessage) return;
   _applyTurnAndPublish({ type: "queued_message_clear" });
   _broadcastQueuedMessageState();
   void _deliverUserMessage(_withCurrentSession({ type: "user_message", id: queued.id, text: queued.text }), null, "normal");
@@ -3480,12 +3477,10 @@ export function _routeClientMessageFrom(
       });
       break;
     case "queued_message_set":
-      _queuedMessage = { id: msg.id, text: msg.text };
       _applyTurnAndPublish({ type: "queued_message_set", id: msg.id, text: msg.text });
       _broadcastQueuedMessageState();
       break;
     case "queued_message_clear":
-      _queuedMessage = null;
       _applyTurnAndPublish({ type: "queued_message_clear" });
       _broadcastQueuedMessageState();
       break;
@@ -3669,7 +3664,6 @@ function _buildSessionHistoryMessage(
  */
 function _resetSessionForNew(inReplyTo: string): void {
   _messageBuffer = [];
-  _queuedMessage = null;
   _applyTurnAndPublish({ type: "session_shutdown" });
   _resetTurnSnapshot();
   _publishWorking(false);

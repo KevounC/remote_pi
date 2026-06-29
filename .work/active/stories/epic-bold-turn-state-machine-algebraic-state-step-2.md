@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-algebraic-state-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-turn-state-machine-algebraic-state
 depends_on: [epic-bold-turn-state-machine-algebraic-state-step-1]
@@ -139,3 +139,10 @@ High. This touches the pi-extension's central lifecycle hooks and can regress st
 
 ## Rollback
 Revert `index.ts`, `relay_client.ts`, and the related tests to the previous boolean-based implementation. The pure reducer from step 1 can remain unused if integration must be backed out independently.
+
+## Implementation notes
+- Files changed: `pi-extension/src/index.ts`.
+- Tests added: none; existing reducer and session-gate tests exercise the projection paths touched here.
+- Discrepancies from design: the hook integration and `RoomMeta` typing had already landed before this stride; this pass completed the remaining queue migration by removing the duplicate `_queuedMessage` global and deriving queued state/drain from `projectTurn(_turn)`.
+- Adjacent issues parked: none.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/session/turn_state.test.ts src/session/session_gate.test.ts` passed.
