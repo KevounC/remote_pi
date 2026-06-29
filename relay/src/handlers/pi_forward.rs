@@ -9,10 +9,10 @@
 //! The relay authenticates Pi-A via the existing challenge-response (so we
 //! already trust `sender_peer_id` here), looks up the `mesh_versions` blob
 //! that lists Pi-A and confirms Pi-B is in the same Owner's member list, then
-//! forwards to Pi-B (any live conn) as:
+//! forwards to Pi-B's addressed room as:
 //!
 //! ```jsonc
-//! { "type": "pi_envelope_in", "from_pc": "<Pi-A-pubkey>", "envelope": <verbatim> }
+//! { "type": "pi_envelope_in", "from_pc": "<Pi-A-pubkey>", "to_room": "<room>", "envelope": <verbatim> }
 //! ```
 //!
 //! Failures don't use a custom error frame — the relay synthesizes an envelope
@@ -160,7 +160,7 @@ pub async fn handle_pi_envelope(
     let to_room = frame.get("to_room").and_then(|v| v.as_str());
     let envelope = frame.get("envelope");
 
-    let (to_pc, _to_room, envelope) = match (to_pc, to_room, envelope) {
+    let (to_pc, to_room, envelope) = match (to_pc, to_room, envelope) {
         (Some(pc), Some(room), Some(e)) if !pc.is_empty() && !room.is_empty() && e.is_object() => {
             (pc, room, e)
         }
@@ -182,11 +182,12 @@ pub async fn handle_pi_envelope(
     let outbound = serde_json::json!({
         "type": "pi_envelope_in",
         "from_pc": sender_peer_id,
+        "to_room": to_room,
         "envelope": envelope, // verbatim
     });
     let msg = Message::Text(outbound.to_string());
 
-    if registry.forward_to_peer(to_pc, msg) {
+    if registry.forward_to_room(to_pc, to_room, msg) {
         PiForwardResult::Forwarded
     } else {
         PiForwardResult::TransportError(make_transport_error(Some(envelope), "offline"))
@@ -535,5 +536,68 @@ mod tests {
     async fn valid_room_target_reaches_authorization_without_reading_body_session_id() {
         let frame = valid_frame();
         assert_eq!(transport_error_reason(frame).await, "not_authorized");
+    }
+
+    #[tokio::test]
+    async fn authorized_forward_targets_only_to_room() {
+        let registry = make_registry();
+        let (tx_main, mut rx_main) = tokio::sync::mpsc::unbounded_channel::<Message>();
+        let (tx_work, mut rx_work) = tokio::sync::mpsc::unbounded_channel::<Message>();
+        let _ = registry
+            .register(
+                "pi_b".to_string(),
+                crate::rooms::RoomMeta {
+                    room_id: "main".to_string(),
+                    name: None,
+                    cwd: None,
+                    session_id: None,
+                    model: None,
+                    thinking: None,
+                    working: false,
+                    started_at: 0,
+                },
+                tx_main,
+            )
+            .await;
+        let _ = registry
+            .register(
+                "pi_b".to_string(),
+                crate::rooms::RoomMeta {
+                    room_id: "work".to_string(),
+                    name: None,
+                    cwd: None,
+                    session_id: None,
+                    model: None,
+                    thinking: None,
+                    working: false,
+                    started_at: 0,
+                },
+                tx_work,
+            )
+            .await;
+
+        let store = MeshStore::open_in_memory().unwrap();
+        let cache = MeshAuthCache::new();
+        let owner = make_owner_key();
+        write_owner_blob(&store, &owner, &["pi_a", "pi_b"], 1);
+        let mut frame = valid_frame();
+        frame["to_room"] = serde_json::Value::String("work".to_string());
+
+        match handle_pi_envelope("pi_a", &frame, &registry, &store, &cache).await {
+            PiForwardResult::Forwarded => {}
+            PiForwardResult::TransportError(_) => panic!("authorized room target should forward"),
+        }
+
+        assert!(
+            rx_main.try_recv().is_err(),
+            "main room must not receive work target"
+        );
+        let Message::Text(text) = rx_work.try_recv().unwrap() else {
+            panic!("forwarded message must be text");
+        };
+        let forwarded: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(forwarded["type"], "pi_envelope_in");
+        assert_eq!(forwarded["to_room"], "work");
+        assert_eq!(forwarded["envelope"], frame["envelope"]);
     }
 }

@@ -376,23 +376,12 @@ impl PeerRegistry {
         }
     }
 
-    /// Sends `msg` to every live connection of `peer_id`, regardless of room.
-    /// Returns `true` iff at least one recipient successfully accepted it.
-    /// Used by `pi_envelope` cross-PC forwarding (plan 25) where the relay
-    /// has Pi-B's pubkey but not its room_id.
-    pub fn forward_to_peer(&self, peer_id: &str, msg: Message) -> bool {
-        let lock = self.senders.lock().unwrap();
-        let mut delivered = false;
-        for ((p, _), v) in lock.iter() {
-            if p == peer_id {
-                for (_, _, tx) in v.iter() {
-                    if tx.send(msg.clone()).is_ok() {
-                        delivered = true;
-                    }
-                }
-            }
-        }
-        delivered
+    /// Sends `msg` to every live connection at one explicit `(peer, room)`.
+    /// Cross-PC data-plane forwarding must be room-targeted; peer-wide fanout
+    /// is reserved for private control-plane subscription pushes above.
+    pub fn forward_to_room(&self, peer_id: &str, room_id: &str, msg: Message) -> bool {
+        const EXTERNAL_CONN_ID: u64 = u64::MAX;
+        self.forward(peer_id, room_id, msg, EXTERNAL_CONN_ID)
     }
 }
 
@@ -449,6 +438,25 @@ mod tests {
         assert!(!reg.forward(&peer, "work", Message::Text("gone".into()), EXTERNAL));
         assert!(reg.forward(&peer, "main", Message::Text("still_there".into()), EXTERNAL));
         let _ = rx_main.try_recv();
+    }
+
+    #[tokio::test]
+    async fn forward_to_room_targets_one_room_not_every_room_for_peer() {
+        let reg = make_registry();
+        let peer = "peer_a".to_string();
+
+        let (tx_main, mut rx_main) = mpsc::unbounded_channel::<Message>();
+        let (tx_work, mut rx_work) = mpsc::unbounded_channel::<Message>();
+
+        let _ = reg.register(peer.clone(), make_meta("main"), tx_main).await;
+        let _ = reg.register(peer.clone(), make_meta("work"), tx_work).await;
+
+        assert!(reg.forward_to_room(&peer, "work", Message::Text("to_work".into())));
+        assert!(
+            rx_main.try_recv().is_err(),
+            "main room must not receive work target"
+        );
+        assert_eq!(rx_work.try_recv().unwrap().to_text().unwrap(), "to_work");
     }
 
     /// Two conns at the same (peer, room) now coexist. `forward` with the first

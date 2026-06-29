@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-relay-opaque-targeting-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-canonical-session-relay-opaque-targeting
 depends_on: [epic-bold-canonical-session-relay-opaque-targeting-step-1]
@@ -63,3 +63,10 @@ High. This is the behavior-switch step that retires legacy peer-wide cross-PC de
 ## Rollback
 
 Restore `forward_to_peer` and the old `pi_forward` call. This cleanly reopens fanout and should only be used as an emergency rollback.
+
+## Implementation notes
+- Files changed: `relay/src/peers/registry.rs`, `relay/src/handlers/pi_forward.rs`.
+- Tests added: targeted registry regression for two live rooms under one peer; targeted `pi_envelope` regression proving authorized forwarding reaches only `to_room` and carries the opaque envelope unchanged.
+- Discrepancies from design: included `to_room` on `pi_envelope_in` while switching the data-plane route so the receiver has the explicit target metadata expected by the next step; relay still treats `session_id` as opaque body data.
+- Adjacent issues parked: none.
+- Verification: `cargo fmt --check` passed; `cargo test authorized_forward_targets_only_to_room` passed; `cargo test forward_to_room_targets_one_room_not_every_room_for_peer` passed.
