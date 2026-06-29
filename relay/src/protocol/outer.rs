@@ -5,17 +5,13 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
-fn default_room() -> String {
-    "main".to_string()
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OuterEnvelope {
     pub peer: String,
-    /// Optional sub-channel (plano 17). Absent in legacy frames → "main".
-    #[serde(default = "default_room")]
+    /// Required relay room target. Clean-room routing fails closed when absent;
+    /// legacy no-room frames must not be normalized into peer-wide fanout.
     pub room: String,
-    pub ct: String, // base64 — nunca decodificado aqui
+    pub ct: String, // base64 — never decoded or inspected here
 }
 
 /// Nome da env var que sobrescreve o teto do outer envelope (inteiro em MiB).
@@ -78,12 +74,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_minimal_envelope() {
+    fn rejects_missing_room() {
         let line = r#"{"peer":"abc","ct":"AAA="}"#;
-        let env = parse_line(line).unwrap();
-        assert_eq!(env.peer, "abc");
-        assert_eq!(env.room, "main"); // defaults to "main" when absent
-        assert_eq!(env.ct, "AAA=");
+        assert!(matches!(parse_line(line), Err(ParseError::InvalidJson(_))));
     }
 
     #[test]
@@ -94,11 +87,19 @@ mod tests {
     }
 
     #[test]
+    fn preserves_opaque_ct_that_mentions_session_id() {
+        let ct = "eyJzZXNzaW9uX2lkIjoib3BhcXVlIiwidGV4dCI6ImhlbGxvIn0=";
+        let line = format!(r#"{{"peer":"abc","room":"main","ct":"{}"}}"#, ct);
+        let env = parse_line(&line).unwrap();
+        assert_eq!(env.ct, ct);
+    }
+
+    #[test]
     fn rejects_too_large() {
         // 12 MiB de "A" → estimativa 9 MiB, acima do default de 4 MiB.
         // (Antes era 2 MiB → 1,5 MiB estimado, que agora PASSARIA no default.)
         let big = "A".repeat(12 * 1024 * 1024);
-        let line = format!(r#"{{"peer":"abc","ct":"{}"}}"#, big);
+        let line = format!(r#"{{"peer":"abc","room":"main","ct":"{}"}}"#, big);
         assert!(matches!(parse_line(&line), Err(ParseError::TooLarge(..))));
     }
 
@@ -108,7 +109,7 @@ mod tests {
         // Sob o antigo teto de 1 MiB isto era dropado em silêncio (app travava
         // em "sending…"); sob o default atual de 4 MiB deve passar.
         let img = "A".repeat(3 * 1024 * 1024);
-        let line = format!(r#"{{"peer":"abc","ct":"{}"}}"#, img);
+        let line = format!(r#"{{"peer":"abc","room":"main","ct":"{}"}}"#, img);
         let env = parse_line(&line).expect("≈2 MB payload must pass under 4 MiB default");
         assert_eq!(env.peer, "abc");
     }
@@ -126,7 +127,7 @@ mod tests {
         // global (evita corrida com o OnceLock memoizado / testes paralelos).
         // ~2,25 MiB estimado: rejeitado por um teto de 1 MiB, aceito por 4 MiB.
         let payload = "A".repeat(3 * 1024 * 1024);
-        let line = format!(r#"{{"peer":"abc","ct":"{}"}}"#, payload);
+        let line = format!(r#"{{"peer":"abc","room":"main","ct":"{}"}}"#, payload);
 
         assert!(matches!(
             parse_line_with_max(&line, 1024 * 1024),
