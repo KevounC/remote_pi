@@ -7,23 +7,29 @@ void main() {
   const session = 'sess-a';
   final base = DateTime.utc(2026, 1, 1);
 
-  UserMessageSubmitted submitted(String id, String text, {String s = session}) =>
-      UserMessageSubmitted(
-        eventId: 'local:$id',
-        sessionId: s,
-        ts: base,
-        clientMessageId: id,
-        text: text,
-      );
+  UserMessageSubmitted submitted(
+    String id,
+    String text, {
+    String s = session,
+  }) => UserMessageSubmitted(
+    eventId: 'local:$id',
+    sessionId: s,
+    ts: base,
+    clientMessageId: id,
+    text: text,
+  );
 
-  UserMessageConfirmed confirmed(String id, String text, {String s = session}) =>
-      UserMessageConfirmed(
-        eventId: 'server:user:$id',
-        sessionId: s,
-        ts: base,
-        clientMessageId: id,
-        text: text,
-      );
+  UserMessageConfirmed confirmed(
+    String id,
+    String text, {
+    String s = session,
+  }) => UserMessageConfirmed(
+    eventId: 'server:user:$id',
+    sessionId: s,
+    ts: base,
+    clientMessageId: id,
+    text: text,
+  );
 
   UserMessageFailed failed(String id, String message, {String s = session}) =>
       UserMessageFailed(
@@ -70,17 +76,23 @@ void main() {
     expect(projection.messages, [const UserMsg(id: 'cli_1', text: 'hello')]);
   });
 
-  test('timeout marks pending local send failed while no confirmation exists', () {
-    final projection = deriveTranscriptProjection(
-      sessionId: session,
-      events: [submitted('cli_1', 'hello'), failed('cli_1', 'send timed out')],
-    );
+  test(
+    'timeout marks pending local send failed while no confirmation exists',
+    () {
+      final projection = deriveTranscriptProjection(
+        sessionId: session,
+        events: [
+          submitted('cli_1', 'hello'),
+          failed('cli_1', 'send timed out'),
+        ],
+      );
 
-    expect(projection.messages, [
-      const UserMsg(id: 'cli_1', text: 'hello', status: UserMsgStatus.failed),
-    ]);
-    expect(projection.turn.status, TranscriptTurnStatus.error);
-  });
+      expect(projection.messages, [
+        const UserMsg(id: 'cli_1', text: 'hello', status: UserMsgStatus.failed),
+      ]);
+      expect(projection.turn.status, TranscriptTurnStatus.error);
+    },
+  );
 
   test('foreign device authoritative message appears in server prefix', () {
     final projection = deriveTranscriptProjection(
@@ -125,6 +137,12 @@ void main() {
         result: 'ok',
       ),
     ]);
+    final tool = projection.messages.single as ToolEvent;
+    expect(tool.tool, 'Bash');
+    expect(tool.args, {'command': 'pwd'});
+    expect(tool.status, ToolEventStatus.completed);
+    expect(tool.result, 'ok');
+    expect(tool.error, isNull);
   });
 
   test('streaming deltas finalize on committed assistant message', () {
@@ -148,7 +166,10 @@ void main() {
       ],
     );
 
-    expect(streaming.streaming, const StreamingMessage(inReplyTo: 'cli_1', buffer: 'hello'));
+    expect(
+      streaming.streaming,
+      const StreamingMessage(inReplyTo: 'cli_1', buffer: 'hello'),
+    );
     expect(streaming.turn.status, TranscriptTurnStatus.streaming);
 
     final committed = deriveTranscriptProjection(
@@ -225,15 +246,26 @@ void main() {
     );
 
     expect(projection.messages, [
-      const CompactionMsg(id: 'server:compaction:1', summary: 'Short summary', tokensBefore: 123),
+      const CompactionMsg(
+        id: 'server:compaction:1',
+        summary: 'Short summary',
+        tokensBefore: 123,
+      ),
     ]);
   });
 
   test('duplicate server replay is idempotent by event id and message id', () {
     final event = confirmed('cli_1', 'hello');
+    final sameMessageDifferentEventId = UserMessageConfirmed(
+      eventId: 'server:user:cli_1:replay-2',
+      sessionId: session,
+      ts: base,
+      clientMessageId: 'cli_1',
+      text: 'hello again',
+    );
     final projection = deriveTranscriptProjection(
       sessionId: session,
-      events: [event, event, confirmed('cli_1', 'hello again')],
+      events: [event, event, sameMessageDifferentEventId],
     );
 
     expect(projection.messages, [const UserMsg(id: 'cli_1', text: 'hello')]);
