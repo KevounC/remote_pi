@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-algebraic-state-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-turn-state-machine-algebraic-state
 depends_on: []
@@ -101,3 +101,13 @@ Medium. The risk is choosing a state set that cannot represent existing edge cas
 
 ## Rollback
 Delete the new `turn_state.ts` and `turn_state.test.ts` files. No production call sites should depend on this story alone.
+
+## Implementation Notes
+Implemented the pure `pi-extension/src/session/turn_state.ts` reducer/projection module and deterministic Vitest coverage in `pi-extension/src/session/turn_state.test.ts`. The algebra has the six designed states (`idle`, `working`, `awaiting_tool`, `streaming`, `done`, `error`), explicit queued-message and late-attach projections, and keeps all ID generation external via event payloads.
+
+Covered normal app turns, local/RPC fallback turns, steering preserving the active turn id, tool boundaries, provider/delivery/cancel/shutdown terminal convergence, compaction as a synthetic turn, late attach collection, queued drain gating, and session shutdown clearing stale ownership. No production runtime imports this module yet, so behavior is unchanged.
+
+Verification:
+- `corepack pnpm vitest run src/session/turn_state.test.ts` — passed (11 tests).
+- `corepack pnpm typecheck` — passed.
+- `corepack pnpm test -- turn_state` was attempted first, but Vitest treated the extra argument as a broad run and hit pre-existing environment-sensitive daemon/cwd-lock/leader-election/e2e failures plus timeout; the targeted test command above isolates this story's suite.
