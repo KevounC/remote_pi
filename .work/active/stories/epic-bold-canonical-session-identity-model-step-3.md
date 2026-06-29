@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-identity-model-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-canonical-session-identity-model
 depends_on: [epic-bold-canonical-session-identity-model-step-2]
@@ -81,3 +81,13 @@ Disable the session gate behind one internal constant, then revert the validatio
 - Discrepancies from design: limited this delegated pi-extension stride to the extension fail-closed boundary; app fail-closed gating was already present in `app/lib/data/sync/session_gate.dart` and `sync_service.dart`.
 - Adjacent issues parked: none.
 - Verification: `corepack pnpm typecheck` passed from `pi-extension/`. An attempted `corepack pnpm test -- src/extension.test.ts --runInBand` was misparsed by Vitest and ran the broader suite; it timed out after 120s with pre-existing filesystem/UDS-heavy failures outside the touched session-gate path, so it is not claimed green.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Inspected implementation commit `349d818`; extension gate now rejects missing/mismatched session-scoped client commands before Pi SDK routing. App-side session gate and contamination regression tests already exist for the story's app half. Verification run: `corepack pnpm --config.store-dir=/tmp/remote-pi-pnpm-store typecheck`; targeted Vitest `src/session/remote_session.test.ts src/session/session_gate.test.ts src/protocol/codec.test.ts src/actions/handlers.test.ts`; targeted Flutter session-gate/sync contamination tests. Full `corepack pnpm test` still fails on pre-existing UDS/cwd-lock/leader-election environment failures (`listen EPERM`, lock acquisition, leader election) and is not treated as a regression.
