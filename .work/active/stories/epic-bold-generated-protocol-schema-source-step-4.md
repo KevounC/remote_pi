@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-schema-source-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, cockpit, pi-extension]
 parent: epic-bold-generated-protocol-schema-source
 depends_on: [epic-bold-generated-protocol-schema-source-step-3]
@@ -140,3 +140,11 @@ Model the current compatibility encoding and the target structured command/event
 ## Rollback
 
 Revert `cockpit-control.schema.json` and cockpit fixtures. Runtime behavior remains unchanged because the schema is side-by-side until the sibling migration consumes it.
+
+## Implementation notes
+
+- Replaced the cockpit-control placeholder with a schema namespace for the current NUL-prefixed `prompt` compatibility encoding, target structured `remote_pi_control` commands, and Remote Pi custom message/event payloads.
+- Covered relay control verbs, rename, relay-state, name-assigned, pair-code, paired, and mesh-revoked custom event strings. The schema keeps full Pi RPC request/response out of scope.
+- Added `protocol/fixtures/cockpit/cockpit-control.jsonl` with compatibility prompt commands, structured command examples, custom event payload examples, and the current `role:"custom"` message shape.
+- No `pi-extension` or `cockpit` runtime code changed; source files were read as references only.
+- Verification: parsed every `protocol/**/*.json` and `protocol/**/*.jsonl` fixture with Python `json` successfully. Full schema validation remains deferred to step 5's AJV checker.

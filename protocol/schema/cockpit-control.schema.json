@@ -2,12 +2,181 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://remote-pi.dev/schemas/cockpit-control.schema.json",
   "title": "Remote Pi cockpit control overlay",
-  "description": "Placeholder family schema established by schema-source step 1. The current NUL-prefix compatibility and target structured commands are ported in step 4.",
-  "not": {},
+  "description": "Compatibility NUL-prefixed prompt commands plus the target structured Remote Pi control command/event vocabulary for Cockpit↔Pi custom events.",
+  "oneOf": [
+    { "$ref": "#/$defs/compatPrompt" },
+    { "$ref": "#/$defs/controlCommand" },
+    { "$ref": "#/$defs/customMessage" },
+    { "$ref": "#/$defs/relayStateEvent" },
+    { "$ref": "#/$defs/nameAssignedEvent" },
+    { "$ref": "#/$defs/pairCodeEvent" },
+    { "$ref": "#/$defs/pairedEvent" },
+    { "$ref": "#/$defs/meshRevokedEvent" }
+  ],
+  "$defs": {
+    "controlVerb": {
+      "oneOf": [
+        { "const": "relay:on" },
+        { "const": "relay:off" },
+        { "const": "relay:toggle" },
+        { "const": "relay:status" },
+        { "type": "string", "pattern": "^rename:.+" }
+      ],
+      "x-remote-pi": {
+        "compatEncoding": "nul-prefixed-prompt",
+        "prefix": "\u0000remote-pi-ctrl:"
+      }
+    },
+    "compatPrompt": {
+      "type": "object",
+      "required": ["type", "message"],
+      "properties": {
+        "type": { "const": "prompt" },
+        "message": {
+          "type": "string",
+          "pattern": "^\\u0000remote-pi-ctrl:(relay:(on|off|toggle|status)|rename:.+)$"
+        }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": {
+        "compatEncoding": "nul-prefixed-prompt",
+        "prefix": "\u0000remote-pi-ctrl:"
+      }
+    },
+    "controlCommand": {
+      "type": "object",
+      "required": ["type", "command"],
+      "properties": {
+        "type": { "const": "remote_pi_control" },
+        "command": {
+          "enum": ["relay_on", "relay_off", "relay_toggle", "relay_status", "rename"]
+        },
+        "name": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "command": { "const": "rename" } }, "required": ["command"] },
+          "then": { "required": ["name"] },
+          "else": { "not": { "required": ["name"] } }
+        }
+      ],
+      "x-remote-pi": { "targetEncoding": "structured-pi-custom-event" }
+    },
+    "relayStatus": { "enum": ["connected", "reconnecting", "disconnected"] },
+    "relayStateDetails": {
+      "type": "object",
+      "required": ["status", "connected"],
+      "properties": {
+        "status": { "$ref": "#/$defs/relayStatus" },
+        "connected": { "type": "boolean" },
+        "relayUrl": { "type": "string", "minLength": 1 },
+        "room": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "nameAssignedDetails": {
+      "type": "object",
+      "required": ["assigned", "changed"],
+      "properties": {
+        "requested": { "type": "string", "minLength": 1 },
+        "assigned": { "type": "string", "minLength": 1 },
+        "changed": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "pairCodeDetails": {
+      "type": "object",
+      "required": ["uri", "token", "expiresAt", "roomId", "name"],
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "token": { "type": "string", "minLength": 1 },
+        "expiresAt": { "type": "integer", "minimum": 0 },
+        "roomId": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "pairedDetails": {
+      "type": "object",
+      "required": ["name", "peerId", "pairedAt"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "peerId": { "type": "string", "minLength": 1 },
+        "pairedAt": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "relayStateEvent": {
+      "type": "object",
+      "required": ["customType", "details"],
+      "properties": {
+        "customType": { "const": "remote-pi:relay-state" },
+        "details": { "$ref": "#/$defs/relayStateDetails" }
+      },
+      "additionalProperties": false
+    },
+    "nameAssignedEvent": {
+      "type": "object",
+      "required": ["customType", "details"],
+      "properties": {
+        "customType": { "const": "remote-pi:name-assigned" },
+        "details": { "$ref": "#/$defs/nameAssignedDetails" }
+      },
+      "additionalProperties": false
+    },
+    "pairCodeEvent": {
+      "type": "object",
+      "required": ["customType", "details"],
+      "properties": {
+        "customType": { "const": "remote-pi:pair-code" },
+        "details": { "$ref": "#/$defs/pairCodeDetails" }
+      },
+      "additionalProperties": false
+    },
+    "pairedEvent": {
+      "type": "object",
+      "required": ["customType", "details"],
+      "properties": {
+        "customType": { "const": "remote-pi:paired" },
+        "details": { "$ref": "#/$defs/pairedDetails" }
+      },
+      "additionalProperties": false
+    },
+    "meshRevokedEvent": {
+      "type": "object",
+      "required": ["customType"],
+      "properties": {
+        "customType": { "const": "remote-pi:mesh-revoked" },
+        "details": true
+      },
+      "additionalProperties": false
+    },
+    "customMessage": {
+      "type": "object",
+      "required": ["role", "customType", "content"],
+      "properties": {
+        "role": { "const": "custom" },
+        "customType": {
+          "enum": [
+            "remote-pi:relay-state",
+            "remote-pi:name-assigned",
+            "remote-pi:pair-code",
+            "remote-pi:paired",
+            "remote-pi:mesh-revoked"
+          ]
+        },
+        "content": { "type": "string" },
+        "details": true,
+        "display": { "type": "boolean" }
+      },
+      "additionalProperties": false,
+      "x-remote-pi": { "compatEncoding": "pi-message-start-custom-role" }
+    }
+  },
   "x-remote-pi": {
     "family": "cockpitControl",
     "transport": "pi-custom-event",
-    "discriminator": "type",
-    "status": "placeholder"
+    "discriminator": "type"
   }
 }

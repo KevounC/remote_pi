@@ -1,0 +1,11 @@
+{"type":"prompt","message":"\u0000remote-pi-ctrl:relay:status"}
+{"type":"prompt","message":"\u0000remote-pi-ctrl:relay:on"}
+{"type":"prompt","message":"\u0000remote-pi-ctrl:rename:desk-agent"}
+{"type":"remote_pi_control","command":"relay_status"}
+{"type":"remote_pi_control","command":"rename","name":"desk-agent"}
+{"customType":"remote-pi:relay-state","details":{"status":"connected","connected":true,"relayUrl":"https://relay.example","room":"main"}}
+{"customType":"remote-pi:name-assigned","details":{"requested":"desk-agent","assigned":"desk-agent#2","changed":true}}
+{"customType":"remote-pi:pair-code","details":{"uri":"remote-pi://pair?token=abc","token":"abc","expiresAt":1760000000000,"roomId":"main","name":"desk-agent"}}
+{"customType":"remote-pi:paired","details":{"name":"Phone","peerId":"owner-peer","pairedAt":1760000000001}}
+{"customType":"remote-pi:mesh-revoked"}
+{"role":"custom","customType":"remote-pi:relay-state","content":"Relay connected","details":{"status":"connected","connected":true},"display":false}
