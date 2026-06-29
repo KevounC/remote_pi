@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-schema-source-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension, app]
 parent: epic-bold-generated-protocol-schema-source
 depends_on: [epic-bold-generated-protocol-schema-source-step-1]
@@ -103,11 +103,11 @@ The server schema must include the types missing from `codec.ts`'s registry:
 
 ## Acceptance Criteria
 
-- [ ] Every `ClientMessage["type"]` and `ServerMessage["type"]` from `pi-extension/src/protocol/types.ts` has exactly one schema definition.
-- [ ] Every `SessionHistoryEvent` variant has a schema definition and fixture coverage.
-- [ ] The schema validates existing `.orchestration/contracts/fixtures/*.jsonl` app-pi examples and the added fixtures for missing current types.
-- [ ] The schema clearly distinguishes current `compat` required fields from future `canonical-session` fields.
-- [ ] No live TypeScript or Dart runtime code is replaced in this step.
+- [x] Every `ClientMessage["type"]` and `ServerMessage["type"]` from `pi-extension/src/protocol/types.ts` has exactly one schema definition.
+- [x] Every `SessionHistoryEvent` variant has a schema definition and fixture coverage.
+- [x] The schema validates existing `.orchestration/contracts/fixtures/*.jsonl` app-pi examples and the added fixtures for missing current types.
+- [x] The schema clearly distinguishes current `compat` required fields from future `canonical-session` fields.
+- [x] No live TypeScript or Dart runtime code is replaced in this step.
 
 ## Rollback
 
@@ -119,3 +119,13 @@ Revert the new app-pi schema and fixture additions. Since no runtime consumer is
 - Preserved the `compat` profile as today's JSON wire while annotating future `canonical-session`/turn-state requirements through `x-remote-pi.profileRequired` metadata; no runtime TS/Dart/Rust consumer was switched in this step.
 - Added `protocol/fixtures/app-pi/client-messages.jsonl` and `protocol/fixtures/app-pi/server-messages.jsonl` covering all current `ClientMessage`, `ServerMessage`, and `SessionHistoryEvent` variants, including `user_message`, `compaction`, `action_ok`, `action_error`, and `models_list`.
 - Verification: `python3` JSON parse over all `protocol/schema/**/*.json` plus new app-pi fixtures passed. Full schema validation is intentionally deferred until step 5 adds the AJV check script.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review with direct commit/file verification. Reviewed commit `77067ca`; `protocol/schema/manifest.json` still enumerates the five expected families, the app↔Pi client/server schemas cover every current TS `ClientMessage`/`ServerMessage` type and every `SessionHistoryEvent` type, including `user_message`, `compaction`, `action_ok`, `action_error`, and `models_list`. Ran `python3 -m json.tool` over all 10 `protocol/schema/**/*.json` files and parsed all 35 new app-pi fixture lines; also ran a lightweight local schema check over `protocol/fixtures/app-pi/{client,server}-messages.jsonl`. Runtime consumers remain side-by-side: no `pi-extension/src` or `app/lib` runtime import of the new app-pi schemas was introduced.
