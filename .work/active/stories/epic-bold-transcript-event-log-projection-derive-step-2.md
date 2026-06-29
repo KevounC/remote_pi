@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-1]
@@ -127,3 +127,13 @@ Resolved the review blockers by strengthening `app/test/domain/transcript/transc
 Verification:
 - `cd app && HOME=/tmp /opt/flutter/bin/cache/dart-sdk/bin/dart analyze` completed with only the existing `axisAlignment` deprecation info in `lib/ui/chat/widgets/input_bar.dart`.
 - `cd app && HOME=/tmp /opt/flutter/bin/flutter test test/domain/transcript/transcript_projection_test.dart` could not start because the Flutter tool attempted to write `/opt/flutter/bin/cache/engine.*` and the install is read-only in this environment.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Re-review after bounce. Reviewed commit `551d489`; the requested changes were addressed, not merely recommitted: the tool collapse test now explicitly asserts `tool`, `args`, `status`, `result`, and `error` on the projected `ToolEvent`, and the duplicate replay test now includes a distinct `eventId` with the same `clientMessageId`, proving message-id dedupe beyond duplicate event-id filtering. Acceptance-critical projection cases remain covered in `app/test/domain/transcript/transcript_projection_test.dart`, and `MessageRecord` remains untouched as a later projection target. Verification attempted: `cd app && flutter analyze && flutter test` failed before analysis/tests because `/opt/flutter/bin/cache/*` is read-only; fallback `HOME=/tmp /opt/flutter/bin/cache/dart-sdk/bin/dart analyze` completed with only the pre-existing `axisAlignment` deprecation info, and fallback `dart test --no-pub test/domain/transcript/transcript_projection_test.dart` was blocked by a pub.dev proxy 403 during build hooks. No tests were weakened or skipped.
