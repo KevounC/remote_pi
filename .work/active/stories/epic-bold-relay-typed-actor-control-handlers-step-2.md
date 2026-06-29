@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-control-handlers-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-control-handlers
 depends_on: [epic-bold-relay-typed-actor-control-handlers-step-1]
@@ -99,3 +99,13 @@ Restore `parse_hello`/`verify_auth` plus the current raw hello `room_meta` extra
 - Discrepancies from design: implemented a typed `parse_hello_bootstrap` admission result in the current auth module rather than a full async `authenticate_peer` wrapper so the existing socket/challenge flow stays behavior-preserving. `handle_peer` no longer reparses `hello_text` as raw JSON after auth.
 - Adjacent issues parked: none.
 - Verification: `cargo fmt --check` passed; `cargo test auth::auth_test` passed; `cargo test authorized_forward_targets_only_to_room` passed as a cross-check that the prior relay targeting changes still compile.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Fast-lane story review. Implementation commit `acbc040` removes the post-auth raw `hello_text` reparse in `relay/src/handlers/peer.rs`, returns `AuthenticatedPeer`/`RoomMeta` from typed hello bootstrap parsing, and adds auth tests for explicit metadata plus `main`/`working:false` defaults. Verification run from `relay/`: `cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed.
