@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-settings-split-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-settings-split
 depends_on: [epic-bold-cockpit-workspace-projection-settings-split-step-2]
@@ -95,3 +95,10 @@ Medium — pairing and revoke spin up ephemeral `pi --mode rpc` controllers, so 
 
 ## Rollback
 Move the connectivity panel and helpers back into `settings_page.dart`, restore private names, and keep Steps 1-2 intact.
+
+## Implementation notes
+- Files changed: `cockpit/lib/app/settings/ui/settings_page.dart`, `cockpit/lib/app/settings/ui/categories/connectivity_settings_panel.dart`, `cockpit/test/settings/connectivity_settings_panel_test.dart`.
+- Tests added: import/instantiation coverage proving the connectivity panel compiles outside `settings_page.dart`.
+- Discrepancies from design: kept the existing `SingleChildScrollView`/`ConstrainedBox` shape because this checkout does not yet have a shared `SettingsPanelScroll` component; behavior/layout remains a direct move.
+- Adjacent issues parked: none.
+- Verification: `/opt/flutter/bin/cache/dart-sdk/bin/dart format` completed for changed files. `HOME=/tmp/pi-dart-home flutter analyze` / `flutter test` still cannot start because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`); `dart test` cannot fetch packages due `403 Forbidden` from the pub proxy.
