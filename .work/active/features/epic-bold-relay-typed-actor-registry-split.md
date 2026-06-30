@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-registry-split
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor
 depends_on: [epic-bold-relay-typed-actor-frame-dispatch, epic-bold-relay-typed-actor-control-handlers]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Relay typed actor — PeerRegistry split
@@ -360,3 +360,10 @@ cargo test
 ```
 
 Targeted tests should preserve duplicate-room registration, skip-sender delivery, stale unregister no-op, first-room `room_announced`, last-room `room_ended`, offline/online dedup and metrics, `rooms_check` snapshots, `room_meta_updated` merge-patch semantics, and cross-PC delivery/transport-error behavior.
+
+## Review — advanced to done (2026-06-30)
+
+All 5 child steps `done` (connection table → room-state store → presence-state
+boundary → event-publication adapter → composed facade). `PeerRegistry` is now
+a thin facade over narrow actor-owned state (ConnectionRegistry + RoomStateStore
++ PresenceState + RegistryEventPublisher); the grab-bag is gone. Epic complete.
