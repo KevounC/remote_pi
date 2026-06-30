@@ -2,7 +2,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
 function usage() {
@@ -10,6 +10,7 @@ function usage() {
     'Usage:',
     '  node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema <ir.json> --out <file.dart>',
     '  node tools/protocol-codegen/bin/protocol-codegen.mjs --target rust --schema <list-types.json|-> --out-dir <dir> [--check true]',
+    '  node tools/protocol-codegen/bin/protocol-codegen.mjs --target rust --schema <relay-outer.schema.json> --out <file.rs>',
   ].join('\n');
 }
 
@@ -553,18 +554,128 @@ function emitRustCrossPc(entries) {
   return `${lines.join('\n')}\n`;
 }
 
-function emitRustOuter() {
+function requireObject(value, label) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value;
+}
+
+function fragmentLookup(schema, fragment) {
+  if (!fragment || fragment === '#') return schema;
+  const parts = fragment.replace(/^#\/?/, '').split('/').filter(Boolean);
+  let current = schema;
+  for (const rawPart of parts) {
+    const part = rawPart.replaceAll('~1', '/').replaceAll('~0', '~');
+    current = requireObject(current, `schema fragment ${fragment}`)[part];
+  }
+  return current;
+}
+
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function readJsonSchemaRef(ref, schemaPath) {
+  const [refPath = '', fragment = ''] = String(ref).split('#');
+  if (refPath.length === 0) {
+    if (!schemaPath || schemaPath === '-') {
+      throw new Error(`Cannot resolve in-document schema ref ${JSON.stringify(ref)} without a schema file`);
+    }
+    const schema = readSchemaInput(schemaPath);
+    return fragmentLookup(schema, `#${fragment}`);
+  }
+
+  const candidates = [];
+  if (isAbsolute(refPath)) {
+    candidates.push(refPath);
+  } else {
+    if (schemaPath && schemaPath !== '-') candidates.push(join(dirname(schemaPath), refPath));
+    candidates.push(join(process.cwd(), refPath));
+    if (refPath.startsWith('./')) {
+      candidates.push(join(process.cwd(), 'schema', refPath.slice(2)));
+      candidates.push(join(process.cwd(), 'protocol', 'schema', refPath.slice(2)));
+    } else {
+      candidates.push(join(process.cwd(), 'schema', refPath));
+      candidates.push(join(process.cwd(), 'protocol', 'schema', refPath));
+    }
+  }
+
+  let lastError;
+  for (const path of unique(candidates)) {
+    try {
+      const schema = JSON.parse(readFileSync(path, 'utf8'));
+      return fragmentLookup(schema, fragment ? `#${fragment}` : '#');
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw new Error(
+    `Unable to resolve schema ref ${JSON.stringify(ref)} from ${schemaPath}: ${
+      lastError instanceof Error ? lastError.message : String(lastError)
+    }`,
+  );
+}
+
+function resolveOuterEnvelopeSchema(schema, schemaPath) {
+  if (Array.isArray(schema)) {
+    const entry = schema.find(
+      (candidate) =>
+        candidate &&
+        typeof candidate === 'object' &&
+        candidate.family === 'relayControl' &&
+        candidate.type === 'outer_envelope' &&
+        typeof candidate.schemaRef === 'string',
+    );
+    if (!entry) {
+      throw new Error('Rust outer generation requires a relayControl outer_envelope entry in the shared IR');
+    }
+    return resolveOuterEnvelopeSchema(readJsonSchemaRef(entry.schemaRef, schemaPath), schemaPath);
+  }
+
+  const root = requireObject(schema, 'relay outer schema');
+  if (typeof root.$ref === 'string') {
+    return requireObject(fragmentLookup(root, root.$ref), root.$ref);
+  }
+  if (requireObject(root.$defs ?? {}, 'relay outer schema.$defs').outerEnvelope) {
+    return requireObject(root.$defs.outerEnvelope, 'relay outer schema.$defs.outerEnvelope');
+  }
+  return root;
+}
+
+function assertRustFieldIdentifier(value, label) {
+  if (typeof value !== 'string' || !/^[a-z_][A-Za-z0-9_]*$/.test(value)) {
+    throw new Error(`${label} must be a Rust field identifier, got ${JSON.stringify(value)}`);
+  }
+}
+
+function rustTypeForOuterField(fieldName, fieldSchema) {
+  const field = requireObject(fieldSchema, `OuterEnvelope.${fieldName}`);
+  if (field.type === 'string') return 'String';
+  throw new Error(`Unsupported OuterEnvelope.${fieldName} schema type ${JSON.stringify(field.type)}`);
+}
+
+function emitRustOuter(schema, schemaPath) {
+  const outerSchema = resolveOuterEnvelopeSchema(schema, schemaPath);
+  const properties = requireObject(outerSchema.properties, 'OuterEnvelope.properties');
+  const requiredFields = new Set(requireArray(outerSchema.required ?? [], 'OuterEnvelope.required').map(String));
   const lines = rustHeader('outer');
   lines.push('use serde::{Deserialize, Serialize};');
   lines.push('');
-  lines.push('fn default_room() -> String { "main".to_owned() }');
-  lines.push('');
   lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
+  if (outerSchema.additionalProperties === false) {
+    lines.push('#[serde(deny_unknown_fields)]');
+  }
   lines.push('pub struct OuterEnvelope {');
-  lines.push('    pub peer: String,');
-  lines.push('    #[serde(default = "default_room")]');
-  lines.push('    pub room: String,');
-  lines.push('    pub ct: String,');
+  for (const [fieldName, fieldSchema] of Object.entries(properties)) {
+    assertRustFieldIdentifier(fieldName, `OuterEnvelope field ${fieldName}`);
+    if (!requiredFields.has(fieldName)) {
+      throw new Error(
+        `OuterEnvelope.${fieldName} is optional in schema; update the schema/IR or teach the Rust generator the intended optional/default semantics`,
+      );
+    }
+    lines.push(`    pub ${fieldName}: ${rustTypeForOuterField(fieldName, fieldSchema)},`);
+  }
   lines.push('}');
   lines.push('');
   return `${lines.join('\n')}\n`;
@@ -627,7 +738,7 @@ function emitRustMod() {
   ].join('\n');
 }
 
-function emitRust(schema) {
+function emitRust(schema, schemaPath) {
   const entries = requireArray(schema, 'list-types catalog');
   const byModule = new Map();
   for (const entry of entries) {
@@ -639,7 +750,7 @@ function emitRust(schema) {
   }
   return new Map([
     ['mod.rs', emitRustMod()],
-    ['outer.rs', emitRustOuter()],
+    ['outer.rs', emitRustOuter(schema, schemaPath)],
     ['room.rs', emitRustRoom()],
     ['control.rs', emitRustControl((byModule.get('control') ?? []).sort((a, b) => a.type.localeCompare(b.type)))],
     ['cross_pc.rs', emitRustCrossPc((byModule.get('cross_pc') ?? []).sort((a, b) => a.type.localeCompare(b.type)))],
@@ -705,9 +816,15 @@ function main() {
   }
 
   if (target === 'rust') {
-    if (!schemaPath || !outDir) throw new Error(usage());
+    if (!schemaPath || (!outDir && !outPath)) throw new Error(usage());
     const rawSchema = readSchemaInput(schemaPath);
-    const outputs = emitRust(rawSchema);
+    if (outPath) {
+      const content = rustfmtContent(emitRustOuter(rawSchema, schemaPath));
+      mkdirSync(dirname(outPath), { recursive: true });
+      writeFileSync(outPath, content, 'utf8');
+      return;
+    }
+    const outputs = emitRust(rawSchema, schemaPath);
     writeRustOutputs(outputs, outDir, check);
     return;
   }

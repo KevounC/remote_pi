@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-rust-codegen-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-generated-protocol-rust-codegen
 depends_on: [epic-bold-generated-protocol-rust-codegen-step-1, epic-bold-generated-protocol-schema-source-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 2: Generate `OuterEnvelope` and preserve the opaque payload parser
@@ -102,3 +102,16 @@ Revert the generated `OuterEnvelope` consumption and restore the handwritten str
 - `cd /home/agent/forks/remote_pi/relay && cargo fmt --check` — pass (no output).
 - `cd /home/agent/forks/remote_pi/relay && cargo clippy -- -D warnings` — pass (`Finished dev profile`).
 - `cd /home/agent/forks/remote_pi/relay && cargo test` — pass: 63 unit tests, integration/mesh/pi-forward/presence/rooms suites, and doc-tests all passed.
+
+## Implementation notes (rework 2026-06-30)
+
+- Files changed: `tools/protocol-codegen/bin/protocol-codegen.mjs`, `protocol/schema/relay-outer.schema.json`, `.work/active/stories/epic-bold-generated-protocol-rust-codegen-step-2.md`; regenerated `relay/src/protocol/generated/outer.rs` from the tool and confirmed it is unchanged from the already-committed hand edit.
+- Moved the hand-edited generated-file behavior into the generator: `emitRustOuter()` now resolves the relay outer schema/IR, emits fields from schema properties/required fields, refuses unsupported optional/default semantics, and derives `#[serde(deny_unknown_fields)]` from `additionalProperties: false`.
+- Updated the relay outer schema so `room` is required and has no compatibility default; regenerated output therefore preserves the fail-closed missing-room behavior and deny-unknown-fields behavior from schema-driven generation instead of a hand-edited generated file.
+- Verification:
+  - `cd /home/agent/projects/remote_pi && node --check tools/protocol-codegen/bin/protocol-codegen.mjs` — passed.
+  - `cd /home/agent/projects/remote_pi && node tools/protocol-codegen/bin/protocol-codegen.mjs --target rust --schema protocol/schema/relay-outer.schema.json --out relay/src/protocol/generated/outer.rs` — passed; regenerated `outer.rs` from the tool.
+  - `cd /home/agent/projects/remote_pi && node tools/protocol-codegen/bin/protocol-codegen.mjs --target rust --schema protocol/schema/relay-outer.schema.json --out /tmp/_check.rs && diff -u /tmp/_check.rs relay/src/protocol/generated/outer.rs` — passed with empty diff.
+  - `cd /home/agent/projects/remote_pi/protocol && COREPACK_HOME=/tmp/remote-pi-corepack XDG_CACHE_HOME=/tmp/remote-pi-xdg PNPM_HOME=/tmp/remote-pi-pnpm-home corepack pnpm --config.store-dir=/home/agent/projects/remote_pi/.pnpm-store --config.state-dir=/tmp/remote-pi-pnpm-state generate:rust:check` — passed (with a temporary local `pnpm-workspace.yaml` allowing the already-approved `esbuild` build script, removed afterward; pnpm warned about unreadable `/home/agent/.npmrc`).
+  - `cd /home/agent/projects/remote_pi/protocol && COREPACK_HOME=/tmp/remote-pi-corepack XDG_CACHE_HOME=/tmp/remote-pi-xdg PNPM_HOME=/tmp/remote-pi-pnpm-home corepack pnpm --config.store-dir=/home/agent/projects/remote_pi/.pnpm-store --config.state-dir=/tmp/remote-pi-pnpm-state check` — passed, validated 5 protocol schema fixture families (same temporary workspace note as above; pnpm warned about unreadable `/home/agent/.npmrc`).
+  - `cd /home/agent/projects/remote_pi/relay && cargo fmt --check && cargo clippy -- -D warnings && cargo test` — passed; clippy finished cleanly; cargo test passed 64 lib tests, 3 integration tests, 13 mesh tests, 6 pi-forward tests, 10 presence tests, 19 rooms tests, and doc-tests.
