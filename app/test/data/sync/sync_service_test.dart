@@ -361,6 +361,30 @@ void main() {
     },
   );
 
+  test('applyHistory defensively ignores bypassed foreign history', () async {
+    final s = await setup();
+    s.ch.push(UserInput(id: 'u1', text: 'keep me'));
+    await _settle();
+    final beforeRows = [for (final m in messages(s.epk)) m.toJson()];
+    final beforeIndex = index(s.epk);
+
+    await s.sync.debugApplyHistory(
+      SessionHistory(
+        sessionId: 'foreign-session',
+        inReplyTo: 'direct-foreign',
+        sessionStartedAt: DateTime.now().millisecondsSinceEpoch,
+        events: const [UserInputEvt(ts: 2, id: 'foreign', text: 'drop me')],
+        eos: true,
+      ),
+    );
+    await _settle();
+
+    expect([for (final m in messages(s.epk)) m.toJson()], beforeRows);
+    expect(index(s.epk), beforeIndex);
+    s.conn.dispose();
+    s.sync.dispose();
+  });
+
   test(
     'session gate drops foreign chunks, done, tools, queued, error, and compaction',
     () async {
@@ -1032,6 +1056,44 @@ void main() {
     },
   );
 
+  test('history replay missing older local rows preserves them', () async {
+    final s = await setup();
+    s.ch.push(
+      SessionHistory(
+        inReplyTo: 'sync-full-prefix',
+        sessionStartedAt: 0,
+        events: const [
+          UserInputEvt(ts: 1, id: 'older', text: 'older row'),
+          AgentMessageEvt(ts: 2, inReplyTo: 'older', text: 'older answer'),
+        ],
+        eos: true,
+      ),
+    );
+    await _settle();
+    expect(messages(s.epk).map((row) => row.text), <String>[
+      'older row',
+      'older answer',
+    ]);
+
+    s.ch.push(
+      SessionHistory(
+        inReplyTo: 'sync-suffix-only',
+        sessionStartedAt: 0,
+        events: const [UserInputEvt(ts: 3, id: 'newer', text: 'newer row')],
+        eos: true,
+      ),
+    );
+    await _settle();
+
+    expect(messages(s.epk).map((row) => row.text), <String>[
+      'older row',
+      'older answer',
+      'newer row',
+    ]);
+    s.conn.dispose();
+    s.sync.dispose();
+  });
+
   test(
     'duplicate history replay through projection emits no Hive churn',
     () async {
@@ -1386,7 +1448,9 @@ void main() {
       await _settle();
       expect(messages(s.epk).map((r) => r.id), ['fresh']);
 
-      // (e) same boundary replay is accepted to keep reconnect replay semantics.
+      // (e) same boundary replay is accepted to keep reconnect replay semantics,
+      // but replay is additive: omitted rows are not deleted just because a
+      // same-session payload does not include them.
       s.ch.push(
         SessionHistory(
           inReplyTo: 'sync-current-equal',
@@ -1398,7 +1462,7 @@ void main() {
         ),
       );
       await _settle();
-      expect(messages(s.epk).map((r) => r.id), ['equal']);
+      expect(messages(s.epk).map((r) => r.id), ['fresh', 'equal']);
 
       s.conn.dispose();
       s.sync.dispose();
@@ -1842,6 +1906,39 @@ void main() {
             events: const [
               UserInputEvt(ts: 1, id: 'u_history', text: 'hi'),
               AgentMessageEvt(ts: 2, inReplyTo: 'u_history', text: 'done'),
+            ],
+            eos: true,
+          ),
+        );
+        await _settle();
+
+        expect(s.sync.turnProjection.working, isFalse);
+        expect(s.sync.turnProjection.cancelTargetId, isNull);
+        expect(s.sync.streaming, isNull);
+        s.conn.dispose();
+        s.sync.dispose();
+      },
+    );
+
+    test(
+      'compaction replay projects idle after a previously active turn',
+      () async {
+        final s = await setup();
+        s.ch.push(AgentChunk(inReplyTo: 'u_history_compact', delta: 'partial'));
+        await _settle();
+        expect(s.sync.turnProjection.working, isTrue);
+
+        s.ch.push(
+          SessionHistory(
+            sessionId: s.sessionId,
+            inReplyTo: 'sync-history-compaction-terminal',
+            sessionStartedAt: DateTime.now().millisecondsSinceEpoch,
+            events: const [
+              CompactionEvt(
+                ts: 1,
+                summary: 'compacted from replay',
+                tokensBefore: 1000,
+              ),
             ],
             eos: true,
           ),

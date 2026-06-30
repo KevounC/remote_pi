@@ -1,14 +1,14 @@
 ---
 id: epic-bold-canonical-session-app-attribution-hydration-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-canonical-session-app-attribution-hydration
 depends_on: [epic-bold-canonical-session-app-attribution-hydration-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Hydrate by replaying session history through the transcript event seam
@@ -72,3 +72,9 @@ High. This changes the app's hydration reducer. The step should be a single, iso
 
 ## Rollback
 Revert `_applyHistory` to the current diff-to-desired implementation while keeping Step 1's session gate. If rollback is necessary, document that hydration is temporarily same-session replacement rather than replay.
+
+## Implementation
+- Reducer approach: `_applyHistory` now fail-closes on direct `session_id` mismatch, seeds the in-memory transcript seam from existing active-box rows for compatibility, appends deterministic `historyToTranscriptEvents(...)`, and writes the derived projection diff. History events are no longer removed/replaced on replay.
+- Idempotency guarantee: duplicate history event ids are deduped before projection; identical replay produces no additional Hive writes, while partial same-session replay preserves older local rows and local pending submissions.
+- Test coverage: focused direct `_applyHistory` foreign-session bypass regression; same-session duplicate replay/no-churn; replay missing older rows; pending + authoritative echo; late confirm after timeout; tool request/result collapse; compaction replay; and working/streaming convergence false after terminal live and replay paths available in the current event model.
+- Deferred scope: `SessionHistoryEvent` currently has no explicit done/error/cancel history variants; replay convergence is covered through `AgentMessageEvt` and `CompactionEvt`, while live done/error/cancel convergence remains covered by sync tests.

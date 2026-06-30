@@ -360,6 +360,10 @@ class SyncService extends Service {
   @visibleForTesting
   TranscriptEventStore? get debugTranscriptEventStore => _transcriptEventStore;
 
+  @visibleForTesting
+  Future<void> debugApplyHistory(SessionHistory history) =>
+      _applyHistory(history);
+
   Future<void> setQueuedMessage(String text) async {
     final ch = _conn.channel;
     if (ch == null) return;
@@ -787,7 +791,9 @@ class SyncService extends Service {
     Iterable<TranscriptEvent> events, {
     bool preserveTurnState = false,
   }) async {
-    final sessionId = _activeTranscriptSessionId();
+    final ref = _activeRef;
+    if (ref == null) return;
+    final sessionId = ref.sessionId;
     var changed = false;
     for (final event in events) {
       if (event.sessionId != sessionId) continue;
@@ -805,38 +811,7 @@ class SyncService extends Service {
       _emitStreaming(projection.streaming);
       _setTurnView(projection.turn);
     }
-    await _writeProjectionDiff(projection);
-  }
-
-  Future<void> _replaceHistoryTranscriptEvents(
-    Iterable<TranscriptEvent> events,
-  ) async {
-    final sessionId = _activeTranscriptSessionId();
-    var changed = false;
-    _transcriptEvents.removeWhere((event) {
-      final remove =
-          event.sessionId == sessionId && event.eventId.startsWith('history:');
-      if (remove) {
-        _transcriptEventIds.remove(event.eventId);
-        changed = true;
-      }
-      return remove;
-    });
-    for (final event in events) {
-      if (event.sessionId != sessionId) continue;
-      if (_transcriptEventIds.add(event.eventId)) {
-        _transcriptEvents.add(event);
-        changed = true;
-      }
-    }
-    if (!changed) return;
-    final projection = deriveTranscriptProjection(
-      sessionId: sessionId,
-      events: _transcriptEvents,
-    );
-    _emitStreaming(projection.streaming);
-    _setTurnView(projection.turn);
-    await _writeProjectionDiff(projection);
+    await _writeProjectionDiff(ref, projection);
   }
 
   void _clearTranscriptEventBuffer() {
@@ -844,9 +819,10 @@ class SyncService extends Service {
     _transcriptEventIds.clear();
   }
 
-  Future<void> _writeProjectionDiff(TranscriptProjection projection) async {
-    final ref = _activeRef;
-    if (ref == null) return;
+  Future<void> _writeProjectionDiff(
+    RemoteSessionRef ref,
+    TranscriptProjection projection,
+  ) async {
     final desired = <MessageRecord>[
       for (var i = 0; i < projection.messages.length; i++)
         _recordFromProjectedMessage(projection.messages[i], i),
@@ -927,6 +903,7 @@ class SyncService extends Service {
   Future<void> _applyHistory(SessionHistory h) async {
     final ref = _activeRef;
     if (ref == null) return;
+    if (h.sessionId != ref.sessionId) return;
     final incomingStartedAt = h.sessionStartedAt;
 
     if (_acceptedSessionStartedAtHighWater != null &&
@@ -934,9 +911,9 @@ class SyncService extends Service {
       return;
     }
 
-    await _seedPendingTranscriptEvents(ref);
-    await _replaceHistoryTranscriptEvents(
-      _historyToTranscriptEvents(h.events, ref.sessionId),
+    await _seedExistingTranscriptEvents(ref);
+    await _appendTranscriptEvents(
+      historyToTranscriptEvents(h.events, sessionId: ref.sessionId),
     );
 
     final shouldAdvanceSessionHighWater =
@@ -954,81 +931,90 @@ class SyncService extends Service {
     }
   }
 
-  Future<void> _seedPendingTranscriptEvents(RemoteSessionRef ref) async {
+  Future<void> _seedExistingTranscriptEvents(RemoteSessionRef ref) async {
     final box = await _boxes.msgsBox(ref);
-    final pending = <TranscriptEvent>[];
+    final rows = <MessageRecord>[];
     for (final value in box.values) {
-      final record = MessageRecord.fromJson(_coerce(value));
-      if (record.role != MsgRole.user || !record.pending) continue;
-      pending.add(
-        UserMessageSubmitted(
-          eventId: 'local:user_submitted:${record.id}',
-          sessionId: ref.sessionId,
-          ts: record.ts,
-          clientMessageId: record.id,
-          text: record.text,
-          image: record.image,
-        ),
-      );
+      rows.add(MessageRecord.fromJson(_coerce(value)));
     }
-    await _appendTranscriptEvents(pending);
-  }
-
-  Iterable<TranscriptEvent> _historyToTranscriptEvents(
-    List<SessionHistoryEvent> events,
-    String sessionId,
-  ) sync* {
-    for (final e in events) {
-      final ts = DateTime.fromMillisecondsSinceEpoch(e.ts);
-      switch (e) {
-        case UserInputEvt(:final id, :final text, :final image):
-          yield UserMessageConfirmed(
-            eventId: 'history:user_confirmed:$id',
-            sessionId: sessionId,
-            ts: ts,
-            clientMessageId: id,
-            text: text,
-            image: image == null
-                ? null
-                : MessageImage(data: image.data, mime: image.mime),
+    rows.sort((a, b) => a.seq.compareTo(b.seq));
+    final seeded = <TranscriptEvent>[];
+    for (final record in rows) {
+      switch (record.role) {
+        case MsgRole.user:
+          if (record.pending) {
+            seeded.add(
+              UserMessageSubmitted(
+                eventId: 'local:user_submitted:${record.id}',
+                sessionId: ref.sessionId,
+                ts: record.ts,
+                clientMessageId: record.id,
+                text: record.text,
+                image: record.image,
+              ),
+            );
+          } else {
+            seeded.add(
+              UserMessageConfirmed(
+                eventId: 'server:user_confirmed:${record.id}',
+                sessionId: ref.sessionId,
+                ts: record.ts,
+                clientMessageId: record.id,
+                text: record.text,
+                image: record.image,
+              ),
+            );
+          }
+        case MsgRole.assistant:
+          seeded.add(
+            AssistantMessageCommitted(
+              eventId: 'seed:assistant_committed:${record.id}',
+              sessionId: ref.sessionId,
+              ts: record.ts,
+              messageId: record.id,
+              replyTo: record.id,
+              text: record.text,
+            ),
           );
-        case AgentMessageEvt(:final inReplyTo, :final text):
-          yield AssistantMessageCommitted(
-            eventId: 'history:assistant_committed:$inReplyTo:${e.ts}',
-            sessionId: sessionId,
-            ts: ts,
-            messageId: 'agent_history_${inReplyTo}_${e.ts}',
-            replyTo: inReplyTo,
-            text: text,
+        case MsgRole.tool:
+          final tool = record.tool;
+          if (tool == null) break;
+          seeded.add(
+            ToolRequested(
+              eventId: 'server:tool_requested:${tool.toolCallId}',
+              sessionId: ref.sessionId,
+              ts: record.ts,
+              toolCallId: tool.toolCallId,
+              tool: tool.tool,
+              args: _objectMap(tool.args),
+            ),
           );
-        case ToolRequestEvt(:final toolCallId, :final tool, :final args):
-          yield ToolRequested(
-            eventId: 'history:tool_requested:$toolCallId',
-            sessionId: sessionId,
-            ts: ts,
-            toolCallId: toolCallId,
-            tool: tool,
-            args: _objectMap(args),
-          );
-        case ToolResultEvt(:final toolCallId, :final result, :final error):
-          yield ToolFinished(
-            eventId: 'history:tool_finished:$toolCallId',
-            sessionId: sessionId,
-            ts: ts,
-            toolCallId: toolCallId,
-            result: result,
-            error: error,
-          );
-        case CompactionEvt(:final summary, :final tokensBefore):
-          yield CompactionRecorded(
-            eventId: 'history:compaction:${e.ts}',
-            sessionId: sessionId,
-            ts: ts,
-            summary: summary,
-            tokensBefore: tokensBefore,
+          if (tool.status == ToolEventStatus.completed ||
+              tool.status == ToolEventStatus.failed) {
+            seeded.add(
+              ToolFinished(
+                eventId: 'server:tool_finished:${tool.toolCallId}',
+                sessionId: ref.sessionId,
+                ts: record.ts,
+                toolCallId: tool.toolCallId,
+                result: tool.result,
+                error: tool.error,
+              ),
+            );
+          }
+        case MsgRole.compaction:
+          seeded.add(
+            CompactionRecorded(
+              eventId: record.id,
+              sessionId: ref.sessionId,
+              ts: record.ts,
+              summary: record.text,
+              tokensBefore: record.tokensBefore,
+            ),
           );
       }
     }
+    await _appendTranscriptEvents(seeded);
   }
 
   // ---------------------------------------------------------------------------
