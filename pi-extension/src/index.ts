@@ -47,13 +47,11 @@ import {
   listOwnerPubkeys,
   listPeers,
   removePeer,
-  type PeerRecord,
 } from "./pairing/storage.js";
 import { MeshClient } from "./mesh/client.js";
 import { SelfRevoke } from "./mesh/self_revoke.js";
 import type {
   ClientMessage,
-  PairErrorCode,
   ServerMessage,
   SessionHistoryEvent,
   ThinkingLevel,
@@ -185,6 +183,46 @@ const _owners = new OwnerMultiplexer({
     () => input.onDisconnect(input.peerId),
   ),
   refreshFooter: () => _refreshFooter(),
+  findKnownPeer: async (peerId) => {
+    const peers = await listPeers();
+    return peers.find((p) => p.remote_epk === peerId) ?? null;
+  },
+  consumePairToken: (token) => qrSession.consumeToken(token),
+  addPeer: (record) => addPeer(record),
+  onPeerPersisted: () => _refreshPairingsCache(),
+  currentPairingSession: () => {
+    const cwd = _currentCwd();
+    const sessionName = _displayName(cwd);
+    return {
+      sessionName,
+      sessionStartedAt: _sessionStartedAt ?? Date.now(),
+      sessionId: _currentRemoteSessionId(_lastEventCtx ?? _lastCtx),
+      roomId: _myRoomId ?? roomIdFor(cwd, sessionName),
+      harness: _HARNESS,
+      hostname: _HOSTNAME,
+    };
+  },
+  makeUnknownPeerError: () => _withCurrentSession({
+    type: "error",
+    code: "unknown_peer",
+    message: "Peer not paired — re-scan QR",
+  }),
+  onOwnerAttached: ({ peerId, peerName, activeCount }) => {
+    _applyTurnAndPublish({ type: "peer_attached", target: { kind: "owner", id: peerId } });
+    _notify(
+      `[remote-pi] Owner attached: peer=${peerId.slice(0, 8)}, name=${peerName} ` +
+      `(${activeCount} active)`,
+      "info",
+    );
+  },
+  onOwnerPaired: ({ peerId, peerName, pairedAt }) => {
+    _sendPiMessage({
+      customType: "remote-pi:paired",
+      content: `Paired with ${peerName}`,
+      details: { name: peerName, peerId, pairedAt },
+      display: false,
+    }, undefined, "paired");
+  },
 });
 // Plan/28 Wave D.1: `thinking` published alongside `model` so the app's
 // Quick Actions sheet hydrates the thinking segmented control on first
@@ -884,13 +922,6 @@ function _displayName(cwd: string): string {
   return local.agent_name || defaultAgentName(cwd);
 }
 
-// ── Peer lookup helpers ───────────────────────────────────────────────────────
-
-async function _findKnownPeer(appPeerIdStd: string): Promise<PeerRecord | null> {
-  const peers = await listPeers();
-  return peers.find((p) => p.remote_epk === appPeerIdStd) ?? null;
-}
-
 // ── Transition helpers ────────────────────────────────────────────────────────
 
 /**
@@ -1041,7 +1072,7 @@ async function _attemptReconnect(): Promise<void> {
   _attachBridgeIfReady();
 
   // _state stays "started"; peer reconnect (if previously paired) flows
-  // through _installAutoListener → _findKnownPeer → _promoteToPaired
+  // through _installAutoListener → OwnerMultiplexer.handleOuterLine
   // automatically when the app sends any inner.
   _emitRelayState();
 }
@@ -1152,124 +1183,32 @@ export function _onPeerDisconnect(appPeerId?: string): void {
   // Auto-listener stays up — same listener catches the reconnect on any peer.
 }
 
-/**
- * Attaches a new owner channel to the multi-owner set. Replaces the
- * pre-W2D singleton `_promoteToPaired` which set `_state = "paired"` and
- * a single `_peerChannel`. The relay state remains `started`; pairing
- * status is derived from `OwnerMultiplexer.activeCount()`.
- *
- * Idempotent for the same `appPeerId` (re-attaching tears down the prior
- * channel and installs a fresh one — covers reconnect from the same
- * device without leaking listeners).
- */
-function _attachOwner(
-  relay: RelayClient,
-  appPeerId: string,
-  peerName: string,
-  firstInner?: ClientMessage,
-): PlainPeerChannel {
-  const peerShort = appPeerId.slice(0, 8);
-
-  const channel = _owners.attach({
-    relay,
-    peerId: appPeerId,
-    roomId: _myRoomId ?? undefined,
-    turnActive: _turnProjection().working,
-    onMessage: (msg, sender) => _routeClientMessageFrom(sender as PlainPeerChannel, msg, _lastEventCtx ?? _lastCtx ?? _noopCtx),
-    onDisconnect: (peerId) => _onPeerDisconnect(peerId),
-  }) as PlainPeerChannel;
-  _applyTurnAndPublish({ type: "peer_attached", target: { kind: "owner", id: appPeerId } });
-
-  _notify(
-    `[remote-pi] Owner attached: peer=${peerShort}, name=${peerName} ` +
-    `(${_owners.activeCount()} active)`,
-    "info",
-  );
-
-  if (firstInner) {
-    // The PlainPeerChannel listener fired on the same line that triggered
-    // attachment in some flows; we route explicitly here too to ensure the
-    // inner reaches the handler exactly once.
-    void firstInner;
-  }
-  return channel;
-}
-
 // ── Auto-listener ─────────────────────────────────────────────────────────────
 //
-// Installed while in 'started' state. Decodes the outer envelope as
-// base64(JSON) and dispatches per sender peer_id:
-//   • Sender already in OwnerMultiplexer → ignored here (the per-owner
-//     PlainPeerChannel listens on the same relay event and handles its own
-//     traffic via its `remotePeerId` filter)
-//   • `pair_request` from a new peer → validate token, persist peer, send
-//     pair_ok/pair_error, attach a new channel
-//   • Non-pair message from a known peer (peers.json) without an active
-//     channel yet → attach + route the inner (reconnect path)
-//   • Anything else (unknown peer + non-pair) → emit `error: unknown_peer`
+// Installed while in 'started' state. The raw relay subscription remains in the
+// extension root, but pairing/reconnect/unknown-peer ingress decisions live in
+// OwnerMultiplexer so the owner boundary owns all app-owner admission paths.
 
 function _isCurrentStartedRelay(relay: RelayClient): boolean {
   return !_disposed && _state === "started" && relay === _relay;
 }
 
+function _sendToPeer(relay: RelayClient, peerId: string, msg: ServerMessage): void {
+  const ct = Buffer.from(JSON.stringify(msg)).toString("base64");
+  relay.send(JSON.stringify({ peer: peerId, ct }));
+}
+
 function _installAutoListener(relay: RelayClient): () => void {
-  const onMsg = async (line: string) => {
-    let outer: { peer?: string; ct?: string };
-    try { outer = JSON.parse(line) as { peer?: string; ct?: string }; }
-    catch { return; }
-
-    if (!outer.peer || !outer.ct) return;
-
-    if (_state !== "started") return;
-    // Already-attached owners: their PlainPeerChannel handles routing.
-    if (_owners.has(outer.peer)) return;
-
-    // Decode inner envelope (base64 JSON)
-    let inner: ClientMessage;
-    try {
-      const plaintext = Buffer.from(outer.ct, "base64").toString("utf8");
-      const parsed = JSON.parse(plaintext) as unknown;
-      if (
-        !parsed ||
-        typeof parsed !== "object" ||
-        typeof (parsed as Record<string, unknown>).type !== "string"
-      ) return;
-      inner = parsed as ClientMessage;
-    } catch { return; }
-
-    const appPeerId = outer.peer;
-
-    if (inner.type === "pair_request") {
-      await _handlePairRequest(relay, appPeerId, inner);
-      return;
-    }
-
-    // Reconnect path: known peer (peers.json) without an active channel
-    // sends a non-pair message → attach + route through the new channel.
-    // See pairing.md §Reconexão.
-    const known = await _findKnownPeer(appPeerId);
-    if (!_isCurrentStartedRelay(relay)) return;
-    if (known) {
-      const channel = _attachOwner(relay, appPeerId, known.name);
-      // The PlainPeerChannel listener for this owner won't have seen the
-      // line that triggered the attach (we already consumed it); route
-      // it explicitly via the new channel so the sender gets a reply.
-      _routeClientMessageFrom(channel, inner, _lastEventCtx ?? _lastCtx ?? _noopCtx);
-      return;
-    }
-
-    // Unknown peer with non-pair_request inner — signal so the app can react
-    // (peer was revoked / never paired). pair_request from unknown peer was
-    // already handled above as a legitimate path. We never log inner contents,
-    // only inner.type.
-    const errReply: ServerMessage = _withCurrentSession({
-      type: "error",
-      code: "unknown_peer",
-      message: "Peer not paired — re-scan QR",
-    });
-    const errCt = Buffer.from(JSON.stringify(errReply)).toString("base64");
-    relay.send(JSON.stringify({ peer: appPeerId, ct: errCt }));
-  };
+  const onMsg = (line: string) => _owners.handleOuterLine({
+    line,
+    relay,
+    roomId: _myRoomId ?? undefined,
+    turnActive: () => _turnProjection().working,
+    isCurrent: () => _isCurrentStartedRelay(relay),
+    onMessage: (msg, sender) => _routeClientMessageFrom(sender as PlainPeerChannel, msg, _lastEventCtx ?? _lastCtx ?? _noopCtx),
+    onDisconnect: (peerId) => _onPeerDisconnect(peerId),
+    sendToPeer: (peerId, msg) => _sendToPeer(relay, peerId, msg),
+  });
 
   relay.on("message", onMsg);
   return () => relay.off("message", onMsg);
@@ -1298,88 +1237,6 @@ const _HARNESS = {
   version: _readExtensionVersion(),
 } as const;
 const _HOSTNAME = hostname();
-
-async function _handlePairRequest(
-  relay: RelayClient,
-  appPeerId: string,
-  inner: Extract<ClientMessage, { type: "pair_request" }>,
-): Promise<void> {
-  const sendInner = (msg: ServerMessage) => {
-    const ct = Buffer.from(JSON.stringify(msg)).toString("base64");
-    relay.send(JSON.stringify({ peer: appPeerId, ct }));
-  };
-
-  const sendError = (code: PairErrorCode, message: string) => {
-    sendInner({ type: "pair_error", in_reply_to: inner.id, code, message });
-  };
-
-  const status = qrSession.consumeToken(inner.token);
-  if (status !== "ok") {
-    const code: PairErrorCode =
-      status === "expired"  ? "token_expired"
-      : status === "consumed" ? "token_consumed"
-      : "token_unknown";
-    const msg =
-      code === "token_expired"  ? "Ephemeral token expired. Generate a new QR with /remote-pi pair."
-      : code === "token_consumed" ? "Token already consumed by another pair_request."
-      : "Token was not issued by this Pi.";
-    sendError(code, msg);
-    return;
-  }
-
-  const pairedAt = new Date().toISOString();
-  try {
-    await addPeer({
-      name: inner.device_name,
-      remote_epk: appPeerId,
-      paired_at: pairedAt,
-    });
-    _refreshPairingsCache();
-  } catch (err) {
-    if (_isCurrentStartedRelay(relay)) {
-      sendError("internal_error", `Failed to persist peer: ${String(err)}`);
-    }
-    return;
-  }
-  if (!_isCurrentStartedRelay(relay)) return;
-
-  const cwd = _currentCwd();
-  // Prefer the user-configured agent_name (with broker suffix when on the
-  // mesh) over the legacy parent/folder path — matches what the user sees
-  // in the terminal title and in /remote-pi status.
-  const sessionName = _displayName(cwd);
-
-  _attachOwner(relay, appPeerId, inner.device_name);
-
-  sendInner({
-    type: "pair_ok",
-    in_reply_to: inner.id,
-    session_name: sessionName,
-    session_started_at: _sessionStartedAt ?? Date.now(),
-    session_id: _currentRemoteSessionId(_lastEventCtx ?? _lastCtx),
-    // App uses this to address subsequent inner messages to the right room
-    // when this Pi runs alongside others with the same epk. Defensive fallback
-    // to roomIdFor(cwd, name) covers the edge case where pair_request lands
-    // before _cmdStart could set _myRoomId (shouldn't happen in practice) —
-    // and stays plan/41-consistent (same (cwd, name) derivation as the announce).
-    room_id: _myRoomId ?? roomIdFor(cwd, sessionName),
-    // Plan/27 Wave A — surface the host coding-agent identity + machine
-    // hostname so the app can render a meaningful device row (and tell
-    // two PCs apart even when nicknames collide).
-    harness: _HARNESS,
-    hostname: _HOSTNAME,
-  });
-
-  // Notify local RPC clients (e.g. Cockpit) that pairing completed, so they can
-  // close the QR screen and show the new device. Pure data event (display:false)
-  // — still emitted to the RPC stdout via the session stream.
-  _sendPiMessage({
-    customType: "remote-pi:paired",
-    content: `Paired with ${inner.device_name}`,
-    details: { name: inner.device_name, peerId: appPeerId, pairedAt },
-    display: false,
-  }, undefined, "paired");
-}
 
 // ── Extension factory (default export) ───────────────────────────────────────
 

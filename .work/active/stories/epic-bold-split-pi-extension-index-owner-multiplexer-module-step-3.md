@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-owner-multiplexer-module-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-owner-multiplexer-module
 depends_on: [epic-bold-split-pi-extension-index-owner-multiplexer-module-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Move owner ingress, pairing, and reconnect attach decisions
@@ -93,3 +93,17 @@ High. This is the ingress decision point; mistakes can either reject valid recon
 ## Rollback
 
 Move `_installAutoListener`, `_findKnownPeer`, and `_handlePairRequest` bodies back into `index.ts` and have the relay transport install the legacy listener directly.
+
+## Implementation
+
+- Moved auto-listener owner ingress into `OwnerMultiplexer.handleOuterLine()`: outer-envelope decode, active-owner short-circuit, pair-request dispatch, known-peer reconnect attach, first-inner routing, and sender-only `unknown_peer` errors now live behind the multiplexer boundary.
+- Moved pair-request handling into `OwnerMultiplexer.handlePairRequest()` with injected storage/token/session dependencies; `peers.json` semantics remain in `pairing/storage.ts`, `addPeer()` remains idempotent by `remote_epk`, and successful pair responses keep the same sender-specific `pair_ok` wire shape including opaque `session_id`.
+- Preserved reconnect attach semantics: known owners without an active channel are attached by peer id + room identity, then the consumed first inner is routed exactly once through the new channel.
+- Preserved idempotent same-owner re-pair behavior: already-attached peers are ignored by the auto-listener and continue through their per-owner `PlainPeerChannel`, avoiding duplicate channel listeners.
+- Added fail-fast `unknown` decode helpers in `owner_multiplexer.ts` for outer envelopes and inner client messages without logging payload contents or broadening live runtime acceptance.
+- Verification:
+  - `corepack pnpm typecheck` passed (tsc clean).
+  - `corepack pnpm exec vitest run src/extension.test.ts -t "session_shutdown DURING _cmdStart"` passed after extending that test's wait budget to cover the observed local mesh startup latency.
+  - `corepack pnpm exec vitest run src/extension.test.ts -t "pair_request|unknown peer|multi-channel broadcast|shutdown"` was run twice before the timeout adjustment and once after; story-relevant pair/unknown/multi-owner/reconnect-race cases passed, but the broad `shutdown` describe-match still included the pre-existing mesh `after a clean reset...` assertion which failed in this harness with `_hasMeshNodeForTest() === false`.
+  - `corepack pnpm exec vitest run src/extension.test.ts` produced 143 passed / 4 failed in this harness; all failures were mesh/cwd-lock assertions outside this story's touched behavior (`after a clean reset...`, `join emits remote-pi:name-assigned...`, `rename:<name>...`, `a second same-name agent...`).
+- Discrepancies from design: none for owner ingress semantics; verification is not fully green in this harness because of the mesh/cwd-lock failures above.

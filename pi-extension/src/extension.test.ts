@@ -3338,7 +3338,7 @@ describe("session_shutdown teardown", () => {
     // Kick off the connect but do NOT await — it blocks inside relay.connect().
     const connecting = _connectForTest(makeMockCtx());
     // Wait until _cmdJoin finished and _cmdStart constructed + called connect.
-    await vi.waitFor(() => expect(relayRef.current).not.toBeNull());
+    await vi.waitFor(() => expect(relayRef.current).not.toBeNull(), { timeout: 3000 });
     const relay = relayRef.current!;
     expect(_getState()).toBe("idle");  // still mid-connect — not yet "started"
 
