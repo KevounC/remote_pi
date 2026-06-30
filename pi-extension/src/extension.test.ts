@@ -485,6 +485,33 @@ describe("state machine + pair_request flow", () => {
     });
   });
 
+  test("pair_ok captures opaque Pi SDK session_id from sessionManager", async () => {
+    _setRemoteSessionIdForTest(null);
+    _setSessionStartedAtForTest(null);
+    const APP_PEER_ID = "sdk-session-peer";
+    const ctx = {
+      ...makeMockCtx("/tmp/remote-pi-sdk-session-capture"),
+      sessionManager: { getSessionId: () => "sdk-session-captured" },
+    };
+
+    captureHandler("remote-pi");
+    await _connectForTest(ctx);
+    relayRef.current!.emit("message", makeInnerLine(APP_PEER_ID, {
+      type: "pair_request",
+      id: "req-sdk-session",
+      token: "test-token",
+      device_name: "Phone",
+    }));
+
+    await vi.waitFor(() => expect(_getState()).toBe("paired"), { timeout: 2000 });
+    const pairOk = relayRef.current!.send.mock.calls
+      .map((c) => c[0] as string)
+      .map(decodeSentCt)
+      .find((d) => d.inner.type === "pair_ok");
+    expect(pairOk?.inner["session_id"]).toBe("sdk-session-captured");
+    expect(_getRemoteSessionIdForTest()).toBe("sdk-session-captured");
+  });
+
   test("expired token → pair_error{token_expired} + state stays started", async () => {
     _tokenStatus = "expired";
     const APP_PEER_ID = "stale-token-peer";
@@ -1630,6 +1657,12 @@ describe("multi-channel broadcast (W2D)", () => {
       sendMessage: vi.fn(() => { throw new Error(staleMessage); }),
     });
 
+    _setSessionStartedAtForTest(1_700_001_000_000);
+    _setMessageBufferForTest([
+      { role: "user", content: "old history", timestamp: 1_700_001_000_100 },
+      { role: "assistant", content: [{ type: "text", text: "old reply" }], timestamp: 1_700_001_000_200 },
+    ]);
+
     const freshSendUserMessage = vi.fn(async () => undefined);
     const freshSendMessage = vi.fn(async () => undefined);
     const ctx = {
@@ -1638,6 +1671,7 @@ describe("multi-channel broadcast (W2D)", () => {
         await opts?.withSession?.({
           ...makeMockCtx("/tmp/remote-pi-session-new-fresh-message-api"),
           newSession: vi.fn(),
+          sessionManager: { getSessionId: () => "fresh-sdk-session-after-new" },
           sendUserMessage: freshSendUserMessage,
           sendMessage: freshSendMessage,
         });
@@ -1660,6 +1694,18 @@ describe("multi-channel broadcast (W2D)", () => {
     // session_new swapped the canonical session: the next user_message must
     // carry the freshly-captured id, not the pre-new one.
     const freshSessionId = _getRemoteSessionIdForTest()!;
+    expect(freshSessionId).toBe("fresh-sdk-session-after-new");
+    const resetHistory = relayRef.current!.send.mock.calls
+      .map((c) => c[0] as string)
+      .map(decodeSentCt)
+      .reverse()
+      .find((d) => d.inner.type === "session_history" && d.inner["in_reply_to"] === "new-fresh-api");
+    expect(resetHistory?.inner).toMatchObject({
+      type: "session_history",
+      session_id: "fresh-sdk-session-after-new",
+      events: [],
+      truncated: false,
+    });
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
@@ -4039,12 +4085,24 @@ describe("relay reconnect", () => {
     }
   });
 
-  test("successful reconnect preserves _sessionStartedAt and _transcriptEvents", async () => {
+  test("successful reconnect preserves session_id, sessionStartedAt, and transcript history", async () => {
     vi.useFakeTimers();
     try {
-      captureHandler("remote-pi");
-      await _connectForTest(makeMockCtx());
+      const APP_PEER_ID = "known-preserve-peer";
+      _setRemoteSessionIdForTest(null);
+      _setSessionStartedAtForTest(null);
       const sessionTs = 1_700_000_000_000;
+      const ctx = {
+        ...makeMockCtx("/tmp/remote-pi-reconnect-session-preserve"),
+        sessionManager: { getSessionId: () => "sdk-session-preserve" },
+      };
+      captureHandler("remote-pi");
+      await _connectForTest(ctx);
+      relayInstances[0]!.emit("message", makeInnerLine(APP_PEER_ID, {
+        type: "pair_request", id: "req-preserve", token: "test-token", device_name: "Phone",
+      }));
+      await vi.waitFor(() => expect(_getState()).toBe("paired"), { timeout: 2000 });
+      expect(currentSessionIdFromSends()).toBe("sdk-session-preserve");
       _setSessionStartedAtForTest(sessionTs);
       _setMessageBufferForTest([
         { role: "user", content: "hi", timestamp: sessionTs + 100 },
@@ -4054,21 +4112,32 @@ describe("relay reconnect", () => {
       relayInstances[0]!.emit("close");
       await vi.advanceTimersByTimeAsync(1_000);
       expect(relayInstances).toHaveLength(2);
+      expect(_getRemoteSessionIdForTest()).toBe("sdk-session-preserve");
 
-      // Now issue session_sync — should still see the 2 events
+      relayInstances[1]!.emit("message", makeInnerLine(APP_PEER_ID, {
+        type: "ping", id: "after-reconnect-preserve",
+      }));
+      await vi.waitFor(() => expect(_getState()).toBe("paired"), { timeout: 2000 });
+
       const sendsBefore = relayInstances[1]!.send.mock.calls.length;
-      routeClientMessage(
-        { type: "session_sync", id: "post-reconnect" },
-        { abort: () => undefined },
-      );
-      // _peerChannel is null after reconnect (peer hadn't reconnected yet), so
-      // session_sync's reply goes through the relay only if a channel exists.
-      // After reconnect we're 'started' without peer — sanity: state stays started
-      expect(_getState()).toBe("started");
-      void sendsBefore;
-      // The internal _sessionStartedAt / _transcriptEvents were preserved if we
-      // can still answer session_sync once the peer reconnects. That path is
-      // covered indirectly: we check the values weren't reset by the close.
+      relayInstances[1]!.emit("message", makeInnerLine(APP_PEER_ID, {
+        type: "session_sync", id: "post-reconnect", session_id: "sdk-session-preserve", limit: 50,
+      }));
+
+      const sent = relayInstances[1]!.send.mock.calls.slice(sendsBefore)
+        .map((c) => c[0] as string)
+        .map(decodeSentCt);
+      const history = sent.find((d) => d.inner.type === "session_history");
+      expect(history?.inner).toMatchObject({
+        type: "session_history",
+        session_id: "sdk-session-preserve",
+        in_reply_to: "post-reconnect",
+        session_started_at: sessionTs,
+      });
+      expect(history?.inner["events"]).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: "user_input", text: "hi" }),
+        expect.objectContaining({ type: "agent_message", text: "yo" }),
+      ]));
     } finally {
       vi.useRealTimers();
     }
