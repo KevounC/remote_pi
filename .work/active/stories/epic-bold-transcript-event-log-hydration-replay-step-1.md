@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-hydration-replay-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-hydration-replay
 depends_on: [epic-bold-transcript-event-log-store]
@@ -84,3 +84,20 @@ Remove the adapter/tests. Existing `_convertHistory` row conversion remains unti
 - Test coverage: added `app/test/data/sync/session_history_replay_test.dart` covering user input with image, assistant message replay, tool request/result replay, compaction token replay, request-id-independent event ids, duplicate-id stability, unsupported future history event rejection, and missing canonical session id fail-fast behavior.
 - Verification: targeted `flutter test test/data/sync/session_history_replay_test.dart` passed 8/8. Full `flutter test` passed 608/608. `flutter analyze` reported only the known unrelated `axisAlignment` deprecation at `lib/ui/chat/widgets/input_bar.dart:802`.
 - Discrepancies from design: assistant usage is not present on the current generated `AgentMessageEvt` wire DTO, so the adapter preserves all currently generated assistant fields and leaves usage unset.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: **app tests 608 passed (up from 600
+— the agent's 8 new replay tests)**; `flutter analyze` clean except the known-unrelated
+`axisAlignment` deprecation at `lib/ui/chat/widgets/input_bar.dart:802`. Commit
+`0e8aa04` scoped to app only (session_history_replay.dart +148 + sync_service +
+transcript_event + tests); collision guard held (pi-ext agent was disjoint).
+
+Adapter verified: pure data/sync→domain adapter (0 Hive/UI/ViewModel imports —
+ports/adapters discipline). Determinism: eventIds are
+`server:<session_id>:<history-type>:<stable-key>:<ts>`, deliberately ignore the
+outer `SessionHistory.inReplyTo` request id; duplicate identical server facts produce
+identical event ids for store dedupe; `UserInputEvt` → `UserMessageConfirmed` with
+`clientMessageId` set to the wire event id (confirms by client id). 8 tests cover
+user/image, assistant, tool request/result, compaction, request-id-independence,
+duplicate-id stability, unsupported-event fail-fast, missing-session-id fail-fast.
