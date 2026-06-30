@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-settings-split-step-3
 kind: story
-stage: review
+stage: implementing
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-settings-split
 depends_on: [epic-bold-cockpit-workspace-projection-settings-split-step-2]
@@ -102,3 +102,15 @@ Move the connectivity panel and helpers back into `settings_page.dart`, restore 
 - Discrepancies from design: kept the existing `SingleChildScrollView`/`ConstrainedBox` shape because this checkout does not yet have a shared `SettingsPanelScroll` component; behavior/layout remains a direct move.
 - Adjacent issues parked: none.
 - Verification: `/opt/flutter/bin/cache/dart-sdk/bin/dart format` completed for changed files. `HOME=/tmp/pi-dart-home flutter analyze` / `flutter test` still cannot start because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp` / `engine.realm`); `dart test` cannot fetch packages due `403 Forbidden` from the pub proxy.
+
+## Review bounce (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blockers**:
+- `cockpit/test/settings/connectivity_settings_panel_test.dart:5`: the only added test is an import/instantiation assertion. The story acceptance criterion requires `flutter test test/settings/connectivity_settings_panel_test.dart` to pass with fake view model/gateway coverage for load, save, and controller disposal paths; this test does not exercise `ConnectivityViewModel.load`, relay save/check behavior, or pairing/revoke controller disposal.
+
+**Verification run**:
+- `cd /home/agent/forks/remote_pi && git show --stat --find-renames --find-copies da43c9d5 && git show --no-ext-diff --no-color --find-renames --find-copies da43c9d5 -- cockpit/lib/app/settings/ui/categories/connectivity_settings_panel.dart cockpit/lib/app/settings/ui/settings_page.dart cockpit/test/settings/connectivity_settings_panel_test.dart .work/active/stories/epic-bold-cockpit-workspace-projection-settings-split-step-3.md`: reviewed commit `da43c9d5` diff.
+- `cd /home/agent/forks/remote_pi/cockpit && flutter analyze`: failed before analysis because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp.17`, `engine.realm`).
+- `cd /home/agent/forks/remote_pi/cockpit && flutter test test/settings/connectivity_settings_panel_test.dart`: failed before test execution for the same read-only Flutter cache error.
