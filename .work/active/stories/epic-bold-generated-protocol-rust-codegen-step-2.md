@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-rust-codegen-step-2
 kind: story
-stage: review
+stage: implementing
 tags: [refactor, bold, relay]
 parent: epic-bold-generated-protocol-rust-codegen
 depends_on: [epic-bold-generated-protocol-rust-codegen-step-1, epic-bold-generated-protocol-schema-source-step-3]
@@ -89,3 +89,16 @@ Revert the generated `OuterEnvelope` consumption and restore the handwritten str
 - Discrepancies from design: none; the handwritten module now re-exports the generated `OuterEnvelope` and owns only parser limits/errors/tests.
 - Adjacent issues parked: none.
 - Verification: from `relay/`, `cargo fmt --check`, `cargo test protocol::outer`, `cargo clippy -- -D warnings`, and full `cargo test` all passed.
+
+## Review bounce (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blockers**:
+- `relay/src/protocol/generated/outer.rs:16` and `relay/src/protocol/outer.rs:65`: commit `dcf1a8b7` changes observable missing-room behavior from the pre-change `rejects_missing_room` serde error to defaulting `room` to `"main"`. That may match the stale compatibility text in this story, but it is not a pure `[refactor]` against the actual pre-commit relay wire boundary.
+- `tools/protocol-codegen/bin/protocol-codegen.mjs:556` and `protocol/schema/relay-outer.schema.json:15`: the generated `OuterEnvelope` is emitted by a hardcoded `emitRustOuter()` body rather than deriving fields/validation from the shared relay schema/IR. The schema says `additionalProperties: false`, but the generated struct lacks `#[serde(deny_unknown_fields)]`, so unknown outer-envelope fields are still accepted instead of failing fast at the boundary.
+
+**Verification run**:
+- `cd /home/agent/forks/remote_pi/relay && cargo fmt --check` — pass (no output).
+- `cd /home/agent/forks/remote_pi/relay && cargo clippy -- -D warnings` — pass (`Finished dev profile`).
+- `cd /home/agent/forks/remote_pi/relay && cargo test` — pass: 63 unit tests, integration/mesh/pi-forward/presence/rooms suites, and doc-tests all passed.
