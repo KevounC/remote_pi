@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-composition-root
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-split-pi-extension-index
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Split pi-extension index — composition root (riskiest — design first)
@@ -454,3 +454,11 @@ No project-specific `.agents/skills/refactor-conventions/` catalog exists. The p
 
 ## Atomic steps acknowledged
 No step intentionally changes public protocol or CLI API. Step 4 is the only semi-atomic route change because hook/command/app ingress must agree on the same runtime epoch. It remains rollbackable as one commit by restoring direct `index.ts` registration and callbacks.
+
+## Review — advanced to done (2026-06-30)
+
+All 5 child steps `done` (port definitions → legacy port construction → hook/command
+wiring → lifecycle/ingress routing through ports → test-harness seams locked).
+The `index.ts` god-file's composition root is now extracted into
+`composition_root.ts` (hooks/commands/ingress routed through ports) + `testing.ts`
+(named harness, legacy aliases preserved). Epic complete.
