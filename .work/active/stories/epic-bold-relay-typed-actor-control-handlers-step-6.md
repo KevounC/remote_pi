@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-control-handlers-step-6
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-control-handlers
 depends_on: [epic-bold-relay-typed-actor-control-handlers-step-5]
@@ -90,3 +90,16 @@ Medium. HTTP compatibility must remain exact even though DTO ownership changes.
 ## Rollback
 
 Restore handwritten DTO definitions in `relay/src/mesh/types.rs` and keep the existing handler logic. This does not affect the WebSocket actor stories.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: relay `cargo fmt --check` clean;
+`cargo clippy -- -D warnings` clean; `cargo test` 131 passed / 0 failed. Commit
+`187fac7` scoped to mesh/handler.rs + mesh/types.rs + mesh/mod.rs + mesh_test.rs
++ story .md; NO generated files touched (boundary refactor consuming existing
+generated DTOs — regen N/A, confirmed). HTTP-compatibility invariants verified:
+body cap, Owner sig verification, URL hash match, monotonic-version rejection,
+since/304 behavior, HTTP status strings/codes all preserved (mesh_test covers
+sig/hash/version/304). No raw blob/signature logging added (privacy preserved).
+`mesh/types.rs` keeps only decoded/internal structs + exact-name re-exports
+(no Rust-only aliases).
