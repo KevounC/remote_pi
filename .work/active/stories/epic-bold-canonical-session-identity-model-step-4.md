@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-identity-model-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-canonical-session-identity-model
 depends_on: [epic-bold-canonical-session-identity-model-step-3]
@@ -101,3 +101,21 @@ Restore `OuterEnvelope` default-room parsing and `forward_to_peer` usage. This r
 - Discrepancies from design: none; the relay remains session-blind and routes by peer/room. Hand-edited the generated outer mirror minimally because `parse_line` reexports it; did not regenerate schema/codegen in this stride per the coordination note.
 - Adjacent issues parked: rust-codegen story should regenerate the outer schema/mirror so the generated source of truth also records required `room` and `deny_unknown_fields` without hand edits.
 - Verification: `cd /home/agent/projects/remote_pi/relay && cargo fmt --check` — passed; `cd /home/agent/projects/remote_pi/relay && cargo clippy -- -D warnings` — passed; `cd /home/agent/projects/remote_pi/relay && cargo test` — passed (64 lib tests, 3 integration tests, 13 mesh tests, 6 pi-forward tests, 10 presence tests, 19 rooms tests, doc-tests all green).
+
+## Review (2026-06-30)
+
+**Verdict**: Approve — stage `review` → `done`.
+
+**Blockers**: None.
+
+**Important**: None.
+
+**Nits**: None.
+
+**Notes**:
+- Reviewed rework commit `41da53b` and generator follow-up `e4ec27e`; the current tree resolves the prior three bounce blockers.
+- Missing outer `room` now fails closed: generated `OuterEnvelope` has required `room` and `#[serde(deny_unknown_fields)]`; `parse_line` rejects missing room and unknown outer fields.
+- Relay `session_id`/`SessionId` domain ownership is gone from `relay/src/rooms.rs`, `relay/src/auth/challenge.rs`, and `relay/src/peers/registry.rs`; remaining `session_id` occurrences are opaque test payload fixtures.
+- `relay/tests/integration.rs` now forwards a base64 `ct` containing `{"session_id":"opaque-session","text":"hello"}` and asserts the relay rewrites only outer peer/room while preserving `ct` unchanged.
+- Generated-contract check: `node tools/protocol-codegen/bin/protocol-codegen.mjs --target rust --schema protocol/schema/relay-outer.schema.json --out /tmp/_rev_check.rs && diff -u /tmp/_rev_check.rs relay/src/protocol/generated/outer.rs` produced an empty diff.
+- Relay verification: `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` passed from `relay/` (64 lib tests, 3 integration tests, 13 mesh tests, 6 pi-forward tests, 10 presence tests, 19 rooms tests, doc-tests).
