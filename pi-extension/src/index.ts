@@ -1381,11 +1381,11 @@ function createIndexDeps(): LegacyIndexDeps {
         _captureRemoteSession(ctx);
       },
       clearStaleContexts: () => {
+        _sdkSessionProjection.clearStaleContexts();
         _lastCtx = null;
         _lastEventCtx = null;
         _messageApi = null;
         _pi = null;
-        _sdkSessionProjection.clearStaleContexts();
       },
       sendPiMessage: (...args) => _sendPiMessage(...args),
       wakeAgent: (...args) => _sdkSessionProjection.wakeAgent(...args),

@@ -76,6 +76,7 @@ export class PiForwardClient extends EventEmitter {
   }
 
   private _handleLine(line: string): void {
+    if (this.detached) return;
     // The relay multiplexes several frame types over the same WS; we only
     // care about `pi_envelope_in`. Other frames (outer-encrypted owner
     // envelopes, control replies) are silently ignored.
@@ -93,6 +94,7 @@ export class PiForwardClient extends EventEmitter {
     // Cheap shape check — full envelope parse happens downstream in broker_remote.
     const env = o.envelope as Envelope;
     if (typeof env.from !== "string" || typeof env.id !== "string") return;
+    if (this.detached) return;
     this.emit("envelope", env, o.from_pc);
   }
 }

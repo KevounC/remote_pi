@@ -4225,6 +4225,50 @@ describe("relay reconnect", () => {
     transport.stop("peer_stop");
   });
 
+  test("cross-PC bridge attach resolving after session_shutdown detaches and does not install stale bridge", async () => {
+    relayInstances.length = 0;
+    const keypair = { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) };
+    let releaseAttach!: () => void;
+    const attachGate = new Promise<void>((resolve) => { releaseAttach = resolve; });
+    let attachStarted!: () => void;
+    const attachStartedPromise = new Promise<void>((resolve) => { attachStarted = resolve; });
+    let isCurrentBeforeShutdown: boolean | undefined;
+    let isCurrentAfterShutdown: boolean | undefined;
+    let installed = false;
+    const meshNode = {
+      attachBridge: vi.fn(async (opts: { isCurrent?: () => boolean }) => {
+        isCurrentBeforeShutdown = opts.isCurrent?.();
+        attachStarted();
+        await attachGate;
+        isCurrentAfterShutdown = opts.isCurrent?.();
+        if (isCurrentAfterShutdown) installed = true;
+      }),
+      detachBridge: vi.fn(),
+    };
+    const transport = createRelayTransportPort({
+      createRelay: () => new MockRelay() as never,
+      toWebSocketUrl: (url) => url,
+      backoffMs: () => 1_000,
+      now: () => Date.now(),
+      setTimer: (cb, ms) => setTimeout(cb, ms),
+      clearTimer: (timer) => clearTimeout(timer),
+      emitRelayState: vi.fn(),
+    });
+
+    await transport.attachCrossPcBridge({ meshNode: () => meshNode, keypair: () => keypair });
+    await transport.start({ relayUrl: "https://relay.example.test", keypair, roomId: "room-a", roomMeta: { name: "n", cwd: "c" } });
+    await attachStartedPromise;
+    expect(isCurrentBeforeShutdown).toBe(true);
+
+    transport.stop("peer_stop");
+    expect(meshNode.detachBridge).toHaveBeenCalledTimes(1);
+
+    releaseAttach();
+    await vi.waitFor(() => expect(meshNode.detachBridge).toHaveBeenCalledTimes(2));
+    expect(isCurrentAfterShutdown).toBe(false);
+    expect(installed).toBe(false);
+  });
+
   test("successful reconnect re-attaches the cross-PC bridge when mesh is joined", async () => {
     vi.useFakeTimers();
     try {

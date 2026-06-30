@@ -40,7 +40,12 @@ export interface RelayStartResult {
 }
 
 export interface CrossPcBridgeMeshNode {
-  attachBridge(opts: { relay: RelayClient; relayUrl: string; keypair?: Ed25519Keypair }): Promise<void>;
+  attachBridge(opts: {
+    relay: RelayClient;
+    relayUrl: string;
+    keypair?: Ed25519Keypair;
+    isCurrent?: () => boolean;
+  }): Promise<void>;
   detachBridge(): void;
 }
 

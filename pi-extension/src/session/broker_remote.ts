@@ -217,6 +217,7 @@ export class BrokerRemote implements RemoteRouter {
    *  fires `peers_request` at any sibling that wasn't in the previous
    *  set so the cache warms up without waiting for their next push. */
   setSiblings(next: SiblingInfo[]): void {
+    if (this.detached) return;
     const prevPubkeys = new Set(this.siblingByPubkey.keys());
     this.siblingByLabel.clear();
     this.siblingByPubkey.clear();
@@ -304,6 +305,7 @@ export class BrokerRemote implements RemoteRouter {
    * sibling so their caches stay fresh without polling.
    */
   onLocalPeersChanged(_peers: string[]): void {
+    if (this.detached) return;
     // The arg is just a change TRIGGER — we push the broker's authoritative
     // inventory (`_localPeersBody`), not the caller's list, so a caller that
     // miscomputed "local" (e.g. a naive `:`-split on Windows) can't poison what
@@ -368,6 +370,7 @@ export class BrokerRemote implements RemoteRouter {
    * sender, authoritative — relay-checked).
    */
   handleIncoming(env: Envelope, fromPc: string): void {
+    if (this.detached) return;
     // ── transport_error from relay ─────────────────────────────────────────
     // The relay synthesises these with `from_pc = "_relay"` and
     // `envelope.from = "_relay"`. Inject locally as a system envelope
@@ -518,6 +521,7 @@ export class BrokerRemote implements RemoteRouter {
     toPc: string,
     body: PeersUpdateBody | PeersRequestBody,
   ): void {
+    if (this.detached) return;
     const env: Envelope = envelope(
       `${this.selfPcLabel}:_broker_remote`,
       `${this._labelForPubkey(toPc) ?? "?"}:_broker_remote`,

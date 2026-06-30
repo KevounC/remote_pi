@@ -3,6 +3,8 @@ import { EventEmitter } from "node:events";
 import { BrokerRemote, parseAddress } from "./broker_remote.js";
 import type { Broker, RemoteInjectStatus } from "./broker.js";
 import { envelope, type Envelope } from "./envelope.js";
+import { PlainPeerChannel } from "../transport/peer_channel.js";
+import { PiForwardClient } from "../transport/pi_forward_client.js";
 
 // ── Test doubles ─────────────────────────────────────────────────────────────
 
@@ -537,6 +539,78 @@ describe("BrokerRemote: transport_error from relay", () => {
       (s.env.body as { type?: string } | null)?.type === "ack",
     );
     expect(ackBack).toBeUndefined();
+  });
+});
+
+// ── detached no-op guards ───────────────────────────────────────────────────
+
+describe("detached cross-PC bridge components", () => {
+  test("BrokerRemote ignores inbound envelopes and outbound sends after detach", () => {
+    const fakePi = new FakePi();
+    const { broker, injectFromRemote, setRemoteRouter } = makeFakeBroker();
+    const br = new BrokerRemote({
+      broker, pi: fakePi as never,
+      selfPcLabel: "casa", selfPcPubkey: "K_A",
+      siblings: [{ pcLabel: "trab", pcPubkey: "K_B" }],
+    });
+    fakePi.sent.length = 0;
+
+    br.detach();
+    br.handleIncoming(envelope("trab:agent-1", "casa:sess-3", { hello: "after-detach" }), "K_B");
+    expect(injectFromRemote).not.toHaveBeenCalled();
+
+    const outbound = envelope("sess-3", "trab:agent-1", { hello: "after-detach" });
+    expect(br.tryRouteOutbound(outbound)).toBe(false);
+    expect(fakePi.sent).toHaveLength(0);
+    expect(setRemoteRouter.mock.calls.at(-1)?.[0]).toBeNull();
+  });
+
+  test("PlainPeerChannel ignores sends and already-queued inbound frames after detach", () => {
+    let queuedInbound: ((line: string) => void) | undefined;
+    const relay = {
+      send: vi.fn(),
+      on: vi.fn((_event: string, handler: (line: string) => void) => {
+        queuedInbound = handler;
+        return relay;
+      }),
+      off: vi.fn(() => relay),
+    };
+    const onMessage = vi.fn();
+    const channel = new PlainPeerChannel(relay as never, "app-peer", undefined, onMessage);
+    channel.detach();
+
+    channel.send({ type: "pong", in_reply_to: "ping-1" } as never);
+    expect(relay.send).not.toHaveBeenCalled();
+
+    const ct = Buffer.from(JSON.stringify({ type: "ping", id: "ping-2" })).toString("base64");
+    queuedInbound?.(JSON.stringify({ peer: "app-peer", ct }));
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
+  test("PiForwardClient ignores sends and already-queued inbound relay frames after detach", () => {
+    let queuedInbound: ((line: string) => void) | undefined;
+    const relay = {
+      send: vi.fn(),
+      on: vi.fn((_event: string, handler: (line: string) => void) => {
+        queuedInbound = handler;
+        return relay;
+      }),
+      off: vi.fn(() => relay),
+    };
+    const pi = new PiForwardClient(relay as never);
+    const onEnvelope = vi.fn();
+    pi.on("envelope", onEnvelope);
+
+    pi.detach();
+    pi.sendEnvelopeToPi("K_B", envelope("casa:sess", "trab:agent", { hello: "after-detach" }));
+    expect(relay.send).not.toHaveBeenCalled();
+
+    queuedInbound?.(JSON.stringify({
+      type: "pi_envelope_in",
+      from_pc: "K_B",
+      envelope: envelope("trab:agent", "casa:sess", { hello: "after-detach" }),
+    }));
+    expect(onEnvelope).not.toHaveBeenCalled();
   });
 });
 

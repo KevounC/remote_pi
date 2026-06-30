@@ -37,6 +37,7 @@ interface OuterEnvelope {
  */
 export class PlainPeerChannel implements PeerChannel {
   private readonly _unsubscribe: () => void;
+  private detached = false;
 
   constructor(
     private readonly relay: RelayClient,
@@ -61,6 +62,7 @@ export class PlainPeerChannel implements PeerChannel {
   // ── PeerChannel interface ──────────────────────────────────────────────────
 
   send(msg: ServerMessage): void {
+    if (this.detached) return;
     const ct = Buffer.from(JSON.stringify(msg)).toString("base64");
     // NOTE: `room` removed from the outer envelope until relay (W1.A) + app
     // (W1.C) accept the field. Multi-Pi multiplexing already works via
@@ -84,12 +86,15 @@ export class PlainPeerChannel implements PeerChannel {
 
   /** Detaches from relay (does not close the relay itself). */
   detach(): void {
+    if (this.detached) return;
+    this.detached = true;
     this._unsubscribe();
   }
 
   // ── Incoming line from relay ────────────────────────────────────────────────
 
   private _onLine(line: string): void {
+    if (this.detached) return;
     let outer: OuterEnvelope;
     try {
       outer = JSON.parse(line) as OuterEnvelope;
@@ -122,6 +127,7 @@ export class PlainPeerChannel implements PeerChannel {
       return;
     }
 
+    if (this.detached) return;
     this.onMessage(msg as ClientMessage);
   }
 }

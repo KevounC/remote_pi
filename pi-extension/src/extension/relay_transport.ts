@@ -90,9 +90,11 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
     relayUrl: string;
     meshNode: NonNullable<ReturnType<CrossPcBridgeInput["meshNode"]>>;
     keyId: string;
+    epoch: number;
     pending: Promise<void>;
   };
   let activeBridge: BridgeAttachment | null = null;
+  let bridgeEpoch = 0;
 
   function setLastStatus(status: RelayConnectivity): RelayConnectivity {
     if (status !== lastStatus) {
@@ -291,6 +293,23 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
       attachment.keyId === nextKeyId;
   }
 
+  function bridgeAttachmentIsCurrent(
+    epoch: number,
+    currentRelay: RelayClient,
+    currentRelayUrl: string,
+    meshNode: BridgeAttachment["meshNode"],
+    keyId: string,
+  ): boolean {
+    const attachment = activeBridge;
+    return !!attachment &&
+      attachment.epoch === epoch &&
+      sameBridgeAttachment(attachment, currentRelay, currentRelayUrl, meshNode, keyId) &&
+      relay === currentRelay &&
+      relayUrl === currentRelayUrl &&
+      !stopping &&
+      !isDisposed?.();
+  }
+
   async function attachCrossPcBridge(input: CrossPcBridgeInput): Promise<void> {
     crossPcBridgeInput = input;
     const currentRelay = relay;
@@ -310,26 +329,25 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
       activeBridge = null;
     }
 
+    const epoch = ++bridgeEpoch;
+    const isCurrent = () => bridgeAttachmentIsCurrent(epoch, currentRelay, currentRelayUrl, meshNode, keyId);
     const attachPromise = Promise.resolve().then(async () => {
       try {
         await meshNode.attachBridge({
           relay: currentRelay,
           relayUrl: currentRelayUrl,
           keypair: currentKeypair,
+          isCurrent,
         });
       } catch {
         // Best-effort: local UDS mesh and app pairing continue without the
         // cross-PC relay bridge.
-        if (activeBridge && sameBridgeAttachment(activeBridge, currentRelay, currentRelayUrl, meshNode, keyId)) {
-          activeBridge = null;
-        }
+        if (isCurrent()) activeBridge = null;
         return;
       }
-      if (relay !== currentRelay || relayUrl !== currentRelayUrl || stopping || isDisposed?.()) {
+      if (!isCurrent()) {
         try { meshNode.detachBridge(); } catch { /* best-effort stale bridge cleanup */ }
-        if (activeBridge && sameBridgeAttachment(activeBridge, currentRelay, currentRelayUrl, meshNode, keyId)) {
-          activeBridge = null;
-        }
+        if (activeBridge && activeBridge.epoch === epoch) activeBridge = null;
       }
     });
 
@@ -338,12 +356,14 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
       relayUrl: currentRelayUrl,
       meshNode,
       keyId,
+      epoch,
       pending: attachPromise,
     };
     await attachPromise;
   }
 
   function detachCrossPcBridge(): void {
+    bridgeEpoch += 1;
     const attachment = activeBridge;
     activeBridge = null;
     if (attachment) {
