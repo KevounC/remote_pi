@@ -31,14 +31,22 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type {
-  ExtensionAPI,
-  ExtensionCommandContext,
-  ExtensionContext,
-  ExtensionFactory,
+import {
+  SettingsManager,
+  type ExtensionAPI,
+  type ExtensionCommandContext,
+  type ExtensionContext,
+  type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
 import { qrSession } from "./pairing/qr.js";
-import { addPeer, listPeers, removePeer } from "./pairing/storage.js";
+import type { Ed25519Keypair } from "./pairing/crypto.js";
+import {
+  addPeer,
+  getOrCreateEd25519Keypair,
+  KeyringUnavailableError,
+  listPeers,
+  removePeer,
+} from "./pairing/storage.js";
 import type {
   ClientMessage,
   ServerMessage,
@@ -56,7 +64,7 @@ import {
   stringifyToolResult,
   type LegacyAgentMessage,
 } from "./session/transcript_projection.js";
-import { RelayClient } from "./transport/relay_client.js";
+import { RelayClient, RoomAlreadyOpenError } from "./transport/relay_client.js";
 import { PlainPeerChannel } from "./transport/peer_channel.js";
 import { OwnerMultiplexer } from "./extension/owner_multiplexer.js";
 import {
@@ -90,6 +98,11 @@ import { registerAgentTools } from "./session/tools.js";
 import { formatPeerInventory } from "./session/peer_inventory.js";
 import { MeshNode } from "./session/mesh_node.js";
 import { reachabilityBackoffMs } from "./reachability/reachability_contract.js";
+import {
+  createRelayTransportPort,
+  RelayStartAbortedError,
+  type RelayStateSnapshot,
+} from "./extension/relay_transport.js";
 import { RemoteSessionIssuer } from "./session/remote_session.js";
 import { validateClientSession } from "./session/session_gate.js";
 import {
@@ -148,17 +161,12 @@ import {
 export type RemoteState = "idle" | "started";
 
 let _state: RemoteState = "idle";
-let _relay: RelayClient | null = null;
 
-/** Relay connectivity as seen by an RPC client (Cockpit). Derived from
- *  `_state` + `_relay`: "disconnected" = relay off (idle); "connected" = live
+/** Relay connectivity as seen by an RPC client (Cockpit). Derived by the relay
+ *  transport adapter: "disconnected" = relay off (idle); "connected" = live
  *  WS; "reconnecting" = was on, WS dropped, retrying. Surfaced via the
  *  `remote-pi:relay-state` custom message (see `_emitRelayState`). */
 export type RelayConnectivity = "connected" | "reconnecting" | "disconnected";
-
-/** Last `RelayConnectivity` emitted, for change-dedup. Starts "disconnected"
- *  (the process boots with the relay down). */
-let _lastRelayStatus: RelayConnectivity | null = null;
 
 /** Sentinel prefix for a transparent control message an RPC client sends on the
  *  `prompt` channel (stdin). The `input` hook intercepts it, runs the action,
@@ -166,8 +174,17 @@ let _lastRelayStatus: RelayConnectivity | null = null;
  *  transcript entry. Starts with NUL so it can't collide with real user input
  *  and doesn't begin with "/" (which would route to the command parser). */
 export const CTRL_PREFIX = "\x00remote-pi-ctrl:";
-let _relayUrl: string | null = null;  // URL used by current _relay connection
 let _myRoomId: string | null = null;   // this Pi's room id (derived from cwd)
+
+const _relayTransport = createRelayTransportPort({
+  createRelay: (url, keypair) => new RelayClient(url, keypair),
+  toWebSocketUrl,
+  backoffMs: reachabilityBackoffMs,
+  now: () => Date.now(),
+  setTimer: (cb, delayMs) => setTimeout(cb, delayMs),
+  clearTimer: (timer) => clearTimeout(timer),
+  emitRelayState: (snapshot) => _sendRelayStateSnapshot(snapshot),
+});
 
 const _owners = new OwnerMultiplexer({
   createChannel: (input) => new PlainPeerChannel(
@@ -235,10 +252,10 @@ const ownerHarness: OwnerMultiplexerTestHarness = {
 const _pairingCoordinator = new PairingCoordinator({
   getState: () => _state,
   setState: (state) => { _state = state; },
-  relay: () => _relay,
-  setRelay: (relay) => { _relay = relay; },
-  relayUrl: () => _relayUrl,
-  setRelayUrl: (url) => { _relayUrl = url; },
+  relay: () => _relayTransport.currentRelayForOwnerChannels(),
+  setRelay: () => { /* relay ownership lives in relay_transport.ts */ },
+  relayUrl: () => _relayTransport.currentRelayUrl(),
+  setRelayUrl: () => { /* relay URL ownership lives in relay_transport.ts */ },
   roomId: () => _myRoomId,
   setRoomId: (roomId) => { _myRoomId = roomId; },
   roomMeta: () => _myRoomMeta,
@@ -287,6 +304,8 @@ const _pairingCoordinator = new PairingCoordinator({
   emitRelayState: (force) => _emitRelayState(force),
   setSiblings: (siblings) => { _meshNode?.setSiblings(siblings); },
 });
+_pairingCoordinator.startRelay = (ctx) => _startRelayViaTransport(ctx);
+
 const _pairingCommands = new PairingCommands(_pairingCoordinator);
 const _relayCommands = new RelayCommands(_pairingCoordinator);
 const _daemonCommands = new DaemonCommands();
@@ -353,10 +372,7 @@ function _currentModelName(): string | undefined {
  */
 function _setCurrentModel(name: string): void {
   _currentModel = name;
-  if (_myRoomMeta) _myRoomMeta = { ..._myRoomMeta, model: name };
-  if (_relay && _myRoomId) {
-    _relay.sendControl({ type: "room_meta_update", room_id: _myRoomId, meta: { model: name } });
-  }
+  _publishRoomMetaPatch({ model: name });
 }
 
 /**
@@ -374,9 +390,7 @@ function _publishRoomMetaPatch(
   patch: { session_id?: string; model?: string; thinking?: ThinkingLevel; working?: boolean },
 ): void {
   if (_myRoomMeta) _myRoomMeta = { ..._myRoomMeta, ...patch };
-  if (_relay && _myRoomId) {
-    _relay.sendControl({ type: "room_meta_update", room_id: _myRoomId, meta: patch });
-  }
+  _relayTransport.sendRoomMeta(patch);
 }
 
 // ── Cross-PC mesh wiring (plan/25 Wave B/C) ───────────────────────────────────
@@ -390,9 +404,11 @@ function _publishRoomMetaPatch(
  */
 function _attachBridgeIfReady(): void {
   const keypair = _pairingCoordinator.currentKeypair();
-  if (!_meshNode || !_relay || !_relayUrl || !keypair) return;
+  const relay = _relayTransport.currentRelayForOwnerChannels();
+  const relayUrl = _relayTransport.currentRelayUrl();
+  if (!_meshNode || !relay || !relayUrl || !keypair) return;
   void _meshNode
-    .attachBridge({ relay: _relay, relayUrl: _relayUrl, keypair })
+    .attachBridge({ relay, relayUrl, keypair })
     .catch(() => { /* best-effort — UDS mesh works regardless */ });
 }
 
@@ -787,10 +803,7 @@ function _recordArgs(value: unknown): Record<string, unknown> {
 
 function _captureRemoteSession(ctx: unknown): string {
   const sessionId = _remoteSessionIssuer.capture(ctx);
-  if (_myRoomMeta) _myRoomMeta = { ..._myRoomMeta, session_id: sessionId };
-  if (_relay && _myRoomId) {
-    _relay.sendControl({ type: "room_meta_update", room_id: _myRoomId, meta: { session_id: sessionId } });
-  }
+  _publishRoomMetaPatch({ session_id: sessionId });
   return sessionId;
 }
 
@@ -892,13 +905,12 @@ function _getSyncLimit(): number {
 }
 
 // ── Relay reconnect state ─────────────────────────────────────────────────────
-// Backoffs in ms: 1s, 2s, 5s, 10s, 30s, then stays at 30s.
-let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let _reconnectAttempt = 0;
+// Backoffs in ms: 1s, 2s, 5s, 10s, 30s, then stays at 30s; the transport
+// adapter owns the timer/counter and this test hook observes that owner.
 
 /** Test-only: exposes pending reconnect timer state. */
 export function _hasPendingReconnect(): boolean {
-  return _reconnectTimer !== null;
+  return _relayTransport.hasPendingReconnect();
 }
 
 /**
@@ -987,14 +999,6 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
     _owners.broadcast({ type: "bye", reason: byeReason });
   }
 
-  // Cancel any pending reconnect attempt. Critical: /remote-pi stop must
-  // win the race against a scheduled reconnect.
-  if (_reconnectTimer !== null) {
-    clearTimeout(_reconnectTimer);
-    _reconnectTimer = null;
-  }
-  _reconnectAttempt = 0;
-
   _pairingCoordinator.stopListener();
 
   // Tear down every per-owner channel and clear the multiplexer registry.
@@ -1003,16 +1007,16 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
   _resetTurnSnapshot();
   _publishWorking(false);
 
-  _relay?.close();
-  _relay = null;
-  _relayUrl = null;
+  // Cancel any pending reconnect attempt and close the live relay. Critical:
+  // /remote-pi stop must win the race against a scheduled reconnect.
+  _relayTransport.stop(byeReason);
 
   // Stop the mesh poller — it's bound to the relay-up lifecycle so a new
   // relay start will spin up a fresh instance (with potentially a new relay
   // URL if the user changed it via /remote-pi relay url).
   _pairingCoordinator.stopSelfRevoke();
 
-  // Cross-PC routing relies on _relay being up; tear it down here too.
+  // Cross-PC routing relies on the relay being up; tear it down here too.
   _meshNode?.detachBridge();
 
   // Preserve _sessionStartedAt + _transcriptEvents across stop/start cycles.
@@ -1029,8 +1033,7 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
 /**
  * Called when the relay WS closes unexpectedly (network drop, relay restart,
  * etc.). Does a **partial** teardown — keeps `_sessionStartedAt`, `_transcriptEvents`,
- * `_relayUrl`, and the coordinator-owned identity so the session can resume on reconnect —
- * and schedules an `_attemptReconnect`.
+ * and relay-transport-owned retry state so the session can resume on reconnect.
  *
  * Peer (app) reconnect after a successful relay reconnect is handled by the
  * existing auto-listener via `peers.json` lookup, so we don't need to track
@@ -1049,110 +1052,44 @@ function _onRelayClose(): void {
   _owners.detachAllForRelayDrop();
   if (!_turnProjection().working) _resetTurnSnapshot();
 
-  _relay = null;  // _relayUrl preserved for retry
-
-  // Cross-PC routing relies on _relay; bring it down. Will be re-instated
-  // by _attemptReconnect on success.
+  // Cross-PC routing relies on the relay; bring it down. The transport invokes
+  // the onConnected hook after reconnect, which re-installs the bridge.
   _meshNode?.detachBridge();
 
   _state = "started";
   _refreshFooter();
-  _emitRelayState();  // → reconnecting
-
-  _scheduleReconnect();
-}
-
-function _scheduleReconnect(): void {
-  if (_reconnectTimer !== null) return;  // already scheduled
-  if (!_pairingCoordinator.currentKeypair() || !_relayUrl) return;  // can't reconnect without these
-  if (getStateForTest() === "idle") return;  // stopped while we were here
-
-  const delay = reachabilityBackoffMs(_reconnectAttempt);
-  _reconnectAttempt += 1;
-
-  _reconnectTimer = setTimeout(() => {
-    _reconnectTimer = null;
-    void _attemptReconnect();
-  }, delay);
-}
-
-async function _attemptReconnect(): Promise<void> {
-  // `_state` may transition to "idle" between awaits via _goIdle; read via
-  // getStateForTest() to defeat TS narrowing on the module-level let.
-  if (getStateForTest() === "idle") return;
-  if (!_pairingCoordinator.currentKeypair() || !_relayUrl) return;
-
-  const edKp = _pairingCoordinator.currentKeypair()!;
-  const url = _relayUrl;
-  // _relayUrl is stored in canonical http(s):// form — convert at the
-  // WS boundary, same as _cmdStart.
-  const relay = new RelayClient(toWebSocketUrl(url), edKp);
-
-  try {
-    // Replay the same room identity from _cmdStart. Without this the relay
-    // would log this WS as a default-room peer and the app would see a
-    // phantom "legacy session" appear (regression of plano 17 + 18).
-    await relay.connect({
-      ...(_myRoomId ? { roomId: _myRoomId } : {}),
-      ...(_myRoomMeta ? { roomMeta: _myRoomMeta } : {}),
-    });
-  } catch {
-    if (getStateForTest() === "idle") return;
-    _scheduleReconnect();
-    return;
-  }
-
-  if (getStateForTest() === "idle") {
-    // Stop fired while connect was succeeding — drop the new relay.
-    relay.close();
-    return;
-  }
-
-  _relay = relay;
-  _reconnectAttempt = 0;
-
-  relay.on("close", _onRelayClose);
-  _pairingCoordinator.listenOn(relay);
-
-  // Plan/25 Wave B/C: relay is back; bring cross-PC routing back online.
-  _attachBridgeIfReady();
-
-  // _state stays "started"; peer reconnect (if previously paired) flows
-  // through PairingCoordinator.installAutoListener
-  // automatically when the app sends any inner.
-  _emitRelayState();
 }
 
 // ── Relay state event + transparent control channel (Cockpit toggle) ─────────
 
-/** Current relay connectivity, derived from `_state` + `_relay`. */
+/** Current relay connectivity, derived by the relay transport adapter. */
 function _relayStatus(): RelayConnectivity {
   if (getStateForTest() === "idle") return "disconnected";
-  return _relay ? "connected" : "reconnecting";
+  return _relayTransport.status();
 }
 
 /**
- * Emit the `remote-pi:relay-state` custom message so an RPC client (Cockpit)
- * can render a relay on/off indicator. Pure data (`display:false`) — never
- * shown in the transcript. De-duped on the connectivity value; pass
- * `force=true` to answer an explicit `relay:status` query regardless.
+ * Ask the relay transport to emit the `remote-pi:relay-state` custom message.
+ * The transport owns the dedupe and snapshot shape; index only bridges to Pi's
+ * message API.
  */
 function _emitRelayState(force = false): void {
-  const status = _relayStatus();
-  if (!force && status === _lastRelayStatus) return;
-  _lastRelayStatus = status;
+  _relayTransport.emitRelayState(force);
+}
+
+function _sendRelayStateSnapshot(snapshot: RelayStateSnapshot): void {
   // During session_shutdown we intentionally clear the message API before
   // tearing down relay state. There is no live Pi session to notify, and the
   // replacement instance / withSession rearm will publish its own fresh state.
   if (!_messageApi && !_pi) return;
   _sendPiMessage({
     customType: "remote-pi:relay-state",
-    content: `Relay ${status}`,
+    content: `Relay ${snapshot.status}`,
     details: {
-      status,
-      connected: status === "connected",
-      ...(_relayUrl ? { relayUrl: _relayUrl } : {}),
-      ...(_myRoomId ? { room: _myRoomId } : {}),
+      status: snapshot.status,
+      connected: snapshot.connected,
+      ...(snapshot.relayUrl ? { relayUrl: snapshot.relayUrl } : {}),
+      ...(snapshot.room ? { room: snapshot.room } : {}),
     },
     display: false,
   }, undefined, "relay-state");
@@ -1375,13 +1312,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     const level = event?.level as ThinkingLevel | undefined;
     if (!level) return;
     _currentThinking = level;
-    if (_myRoomMeta) _myRoomMeta = { ..._myRoomMeta, thinking: level };
-    if (!_relay || !_myRoomId) return;
-    _relay.sendControl({
-      type: "room_meta_update",
-      room_id: _myRoomId,
-      meta: { thinking: level },
-    });
+    _publishRoomMetaPatch({ thinking: level });
   });
 
   pi.on("message_update", (event) => {
@@ -1568,16 +1499,16 @@ function createIndexDeps(): LegacyIndexDeps {
   return {
     relay: {
       status: _relayStatus,
-      start: async (input) => {
-        const keypair = _pairingCoordinator.currentKeypair();
-        if (!keypair) throw new Error("remote-pi identity not loaded");
-        const relay = new RelayClient(toWebSocketUrl(input.relayUrl), keypair);
-        await relay.connect({ roomId: input.roomId, roomMeta: input.roomMeta });
-        _relay = relay;
-        _relayUrl = input.relayUrl;
-        if (input.roomId) _myRoomId = input.roomId;
-        return { relay, roomId: input.roomId };
-      },
+      start: (input) => _relayTransport.start({
+        ...input,
+        keypair: input.keypair ?? _pairingCoordinator.currentKeypair() ?? undefined,
+        isDisposed: () => _disposed,
+        onUnexpectedClose: () => _onRelayClose(),
+        onConnected: (relay) => {
+          _pairingCoordinator.listenOn(relay);
+          _attachBridgeIfReady();
+        },
+      }),
       stop: (reason) => { _goIdle(reason); },
       sendRoomMeta: (patch) => {
         _publishRoomMetaPatch({
@@ -1587,16 +1518,11 @@ function createIndexDeps(): LegacyIndexDeps {
           working: patch.working,
         });
       },
-      onOuterMessage: (handler) => {
-        const relay = _relay;
-        if (!relay) return () => undefined;
-        relay.on("message", handler);
-        return () => { relay.off("message", handler); };
-      },
+      onOuterMessage: (handler) => _relayTransport.onOuterMessage(handler),
       attachCrossPcBridge: async () => { _attachBridgeIfReady(); },
       detachCrossPcBridge: () => { _meshNode?.detachBridge(); },
-      relay: () => _relay,
-      setRelay: (relay) => { _relay = relay; },
+      relay: () => _relayTransport.currentRelayForOwnerChannels(),
+      setRelay: () => { /* relay ownership lives in relay_transport.ts */ },
     },
     owners: {
       activeCount: () => _owners.activeCount(),
@@ -1765,7 +1691,7 @@ const _localMeshCommands = new LocalMeshCommands({
  * visually consistent.
  */
 function _cmdStatus(ctx: Pick<ExtensionContext, "ui">): void {
-  const relayUrl = _relayUrl ?? resolveRelayUrl().url;
+  const relayUrl = _relayTransport.currentRelayUrl() ?? resolveRelayUrl().url;
   const ownerSnapshot = _owners.snapshot();
 
   // Mesh line
@@ -1807,8 +1733,118 @@ async function _cmdSetup(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
   await _localMeshCommands.setup(ctx);
 }
 
+type PairingCoordinatorRelayInternals = {
+  cachedEd25519: Ed25519Keypair | null;
+  ensureSelfRevoke(relayUrl: string, edKp: Ed25519Keypair): void;
+};
+
+function _pairingCoordinatorInternals(): PairingCoordinatorRelayInternals {
+  return _pairingCoordinator as unknown as PairingCoordinatorRelayInternals;
+}
+
+async function _startRelayViaTransport(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<void> {
+  if (_state !== "idle") {
+    ctx.ui.notify("[remote-pi] Already started.", "warning");
+    return;
+  }
+
+  let edKp: Ed25519Keypair;
+  try {
+    edKp = await getOrCreateEd25519Keypair();
+  } catch (err) {
+    if (err instanceof KeyringUnavailableError) {
+      ctx.ui.notify(
+        "[remote-pi] Could not read this machine's identity: the system " +
+        "keychain is locked or access was denied. Unlock it (open the app / " +
+        "log in) and run /remote-pi again. Your pairing is NOT lost. " +
+        "(Set REMOTE_PI_ALLOW_FILE_IDENTITY=1 only for headless hosts.)",
+        "error",
+      );
+      return;
+    }
+    throw err;
+  }
+  _pairingCoordinatorInternals().cachedEd25519 = edKp;
+
+  const { url: relayUrl, source } = resolveRelayUrl();
+  const myShort = Buffer.from(edKp.publicKey).toString("base64").slice(0, 8);
+  const cwd = "cwd" in ctx && typeof ctx.cwd === "string" ? ctx.cwd : process.cwd();
+  const sessionName = _displayName(cwd);
+  const roomId = roomIdFor(cwd, sessionName);
+
+  if (!_currentModelName()) {
+    try {
+      const c = ctx as Partial<ExtensionContext> & {
+        model?: { name?: string; id?: string };
+        getModel?: () => { name?: string; id?: string } | undefined;
+      };
+      const live = c.getModel?.() ?? c.model;
+      if (live) {
+        _currentModel = live.name ?? live.id ?? undefined;
+      } else {
+        const sm = SettingsManager.create(cwd);
+        const provider = sm.getDefaultProvider();
+        const modelId = sm.getDefaultModel();
+        if (modelId) {
+          const found = provider ? ensureModelRegistry().find(provider, modelId) : undefined;
+          _currentModel = found?.name ?? modelId;
+        }
+      }
+    } catch { /* defensive — never block start on a model lookup */ }
+  }
+
+  try {
+    _currentThinking = _pi?.getThinkingLevel() as ThinkingLevel | undefined;
+  } catch { /* defensive — never block /remote-pi start on this */ }
+
+  const sessionId = _currentRemoteSessionId(ctx);
+  const roomMeta = { name: sessionName, cwd, session_id: sessionId } as NonNullable<typeof _myRoomMeta>;
+  const modelName = _currentModelName();
+  if (modelName) roomMeta.model = modelName;
+  if (_currentThinking) roomMeta.thinking = _currentThinking;
+  _myRoomMeta = roomMeta;
+
+  ctx.ui.notify(`[remote-pi] Connecting to relay ${relayUrl} (source: ${source}, room: ${roomId})…`, "info");
+
+  try {
+    await _relayTransport.start({
+      relayUrl,
+      keypair: edKp,
+      roomId,
+      roomMeta,
+      isDisposed: () => _disposed,
+      onUnexpectedClose: () => _onRelayClose(),
+      onConnected: (relay) => {
+        _pairingCoordinator.listenOn(relay);
+        _attachBridgeIfReady();
+      },
+    });
+  } catch (err) {
+    if (err instanceof RelayStartAbortedError) return;
+    if (err instanceof RoomAlreadyOpenError) {
+      ctx.ui.notify(
+        "[remote-pi] Already running in this cwd. Stop the other terminal first.",
+        "error",
+      );
+      return;
+    }
+    _notify(`[remote-pi] relay connect failed: ${String(err)}`, "error", ctx);
+    return;
+  }
+
+  _myRoomId = roomId;
+  _state = "started";
+  if (_sessionStartedAt === null) _sessionStartedAt = Date.now();
+  _refreshFooter(ctx);
+
+  _pairingCoordinatorInternals().ensureSelfRevoke(relayUrl, edKp);
+  _attachBridgeIfReady();
+  _emitRelayState();
+  ctx.ui.notify(`[remote-pi] state: started (peer=${myShort}) — Connected to relay ${relayUrl}`, "info");
+}
+
 async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<void> {
-  await _relayCommands.start(ctx);
+  await _startRelayViaTransport(ctx);
 }
 
 /**

@@ -14,6 +14,26 @@ import type {
 } from "./ports.js";
 import type { RelayConnectivity } from "./types.js";
 
+export interface RelayStateSnapshot {
+  status: RelayConnectivity;
+  connected: boolean;
+  relayUrl?: string;
+  room?: string;
+}
+
+export interface RelayTransportStartInput extends RelayStartInput {
+  isDisposed?: () => boolean;
+  onUnexpectedClose?: () => void;
+  onConnected?: (relay: RelayClient) => void | Promise<void>;
+}
+
+export class RelayStartAbortedError extends Error {
+  constructor() {
+    super("relay start aborted");
+    this.name = "RelayStartAbortedError";
+  }
+}
+
 export interface RelayTransportDeps {
   createRelay(url: string, keypair: Ed25519Keypair): RelayClient;
   toWebSocketUrl(url: string): string;
@@ -21,9 +41,14 @@ export interface RelayTransportDeps {
   now(): number;
   setTimer(cb: () => void, delayMs: number): ReturnType<typeof setTimeout>;
   clearTimer(timer: ReturnType<typeof setTimeout>): void;
+  emitRelayState(snapshot: RelayStateSnapshot): void;
 }
 
-export interface RelayTransportAdapter extends RelayTransportPort {
+export interface RelayTransportAdapter extends Omit<RelayTransportPort, "start"> {
+  start(input: RelayTransportStartInput): Promise<RelayStartResult>;
+  emitRelayState(force?: boolean): void;
+  hasPendingReconnect(): boolean;
+  currentRelayUrl(): string | null;
   /**
    * @internal Temporary owner-channel bridge while legacy call sites still need
    * direct access to the live RelayClient. Remove when owner ingress is fully
@@ -48,9 +73,13 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempt = 0;
   let lastStatus: RelayConnectivity | null = null;
+  let lastEmittedStatus: RelayConnectivity | null = null;
   let lastStatusChangedAt = deps.now();
   let stopping = false;
   let crossPcBridgeInput: CrossPcBridgeInput | null = null;
+  let isDisposed: (() => boolean) | null = null;
+  let onUnexpectedClose: (() => void) | null = null;
+  let onConnected: ((relay: RelayClient) => void | Promise<void>) | null = null;
   const outerMessageHandlers = new Set<(line: string) => void | Promise<void>>();
 
   function setLastStatus(status: RelayConnectivity): RelayConnectivity {
@@ -65,6 +94,23 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
     void lastStatusChangedAt;
     if (!relayUrl) return setLastStatus("disconnected");
     return setLastStatus(relay ? "connected" : "reconnecting");
+  }
+
+  function snapshot(): RelayStateSnapshot {
+    const nextStatus = status();
+    return {
+      status: nextStatus,
+      connected: nextStatus === "connected",
+      ...(relayUrl ? { relayUrl } : {}),
+      ...(roomId ? { room: roomId } : {}),
+    };
+  }
+
+  function emitRelayState(force = false): void {
+    const nextStatus = status();
+    if (!force && nextStatus === lastEmittedStatus) return;
+    lastEmittedStatus = nextStatus;
+    deps.emitRelayState(snapshot());
   }
 
   function bindRelay(next: RelayClient): void {
@@ -89,13 +135,15 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
       unbindRelay(relay);
       relay = null;
     }
-    void status();
+    onUnexpectedClose?.();
+    emitRelayState();
     scheduleReconnect();
   }
 
   function scheduleReconnect(): void {
     if (reconnectTimer !== null) return;
     if (!relayUrl || !keypair) return;
+    if (status() === "disconnected") return;
     const delayMs = backoffMs(reconnectAttempt);
     reconnectAttempt += 1;
     reconnectTimer = deps.setTimer(() => {
@@ -105,7 +153,7 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
   }
 
   async function attemptReconnect(): Promise<void> {
-    if (!relayUrl || !keypair) return;
+    if (status() === "disconnected" || !relayUrl || !keypair) return;
     const nextRelay = deps.createRelay(deps.toWebSocketUrl(relayUrl), keypair);
     try {
       await nextRelay.connect({
@@ -113,11 +161,11 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
         ...(roomMeta ? { roomMeta } : {}),
       });
     } catch {
-      scheduleReconnect();
+      if (status() !== "disconnected") scheduleReconnect();
       return;
     }
 
-    if (!relayUrl) {
+    if (status() === "disconnected" || isDisposed?.()) {
       nextRelay.close();
       return;
     }
@@ -125,18 +173,23 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
     relay = nextRelay;
     reconnectAttempt = 0;
     bindRelay(nextRelay);
+    if (onConnected) void onConnected(nextRelay);
     if (crossPcBridgeInput) {
       void attachCrossPcBridge(crossPcBridgeInput);
     }
-    void status();
+    emitRelayState();
   }
 
-  async function start(input: RelayStartInput): Promise<RelayStartResult> {
+  async function start(input: RelayTransportStartInput): Promise<RelayStartResult> {
     if (!input.keypair) throw new Error("remote-pi identity not loaded");
     stopping = false;
     clearReconnectTimer();
     const nextRelay = deps.createRelay(deps.toWebSocketUrl(input.relayUrl), input.keypair);
     await nextRelay.connect({ roomId: input.roomId, roomMeta: input.roomMeta });
+    if (input.isDisposed?.()) {
+      nextRelay.close();
+      throw new RelayStartAbortedError();
+    }
     if (relay) {
       unbindRelay(relay);
       relay.close();
@@ -146,9 +199,13 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
     keypair = input.keypair;
     roomId = input.roomId ?? null;
     roomMeta = input.roomMeta ?? null;
+    isDisposed = input.isDisposed ?? null;
+    onUnexpectedClose = input.onUnexpectedClose ?? null;
+    onConnected = input.onConnected ?? null;
     reconnectAttempt = 0;
     bindRelay(nextRelay);
-    void status();
+    if (onConnected) void onConnected(nextRelay);
+    emitRelayState();
     return { relay: nextRelay, roomId: input.roomId };
   }
 
@@ -162,11 +219,14 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
     keypair = null;
     roomId = null;
     roomMeta = null;
+    crossPcBridgeInput = null;
+    onUnexpectedClose = null;
+    onConnected = null;
     if (current) {
       unbindRelay(current);
       current.close();
     }
-    void status();
+    emitRelayState();
   }
 
   function sendRoomMeta(
@@ -202,6 +262,9 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
     onOuterMessage,
     attachCrossPcBridge,
     detachCrossPcBridge,
+    emitRelayState,
+    hasPendingReconnect: () => reconnectTimer !== null,
+    currentRelayUrl: () => relayUrl,
     currentRelayForOwnerChannels: () => relay,
   };
 }

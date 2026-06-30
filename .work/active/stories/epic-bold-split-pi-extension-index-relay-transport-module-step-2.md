@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-relay-transport-module-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-relay-transport-module
 depends_on: [epic-bold-split-pi-extension-index-relay-transport-module-step-1]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 2: Move relay start, close, reconnect, and relay-state emission into the module
@@ -103,3 +103,13 @@ session and stop-vs-reconnect races are easy to regress.
 Move the start/close/reconnect/status functions back into `index.ts` and restore
 the previous relay globals. Because protocol and CLI shapes do not change, rollback
 is localized to `index.ts` plus the new adapter module.
+
+## Implementation
+- Moved live relay ownership into `pi-extension/src/extension/relay_transport.ts`: start, close, unexpected-close handling, reconnect scheduling/attempts, pending timer/counter state, and relay-state snapshot/dedupe now live in the adapter.
+- Updated `pi-extension/src/index.ts` to build the relay start input and delegate to `_relayTransport.start(...)`; `index.ts` no longer declares `_relay`, `_relayUrl`, `_reconnectTimer`, `_reconnectAttempt`, or `_lastRelayStatus`.
+- Preserved reconnect behavior: backoff remains `1s, 2s, 5s, 10s, 30s, 30s...`; transport `stop()` cancels a pending timer so `/remote-pi stop` wins; reconnect success resets the attempt counter; reconnect replays the same `roomId` + current `roomMeta`.
+- Preserved startup/shutdown guard: a relay that finishes `connect()` after the instance is disposed is closed and does not become current.
+- Preserved `remote-pi:relay-state` shape via transport-owned snapshots bridged by index: `details.status`, `details.connected`, `details.relayUrl`, and `details.room` are unchanged.
+- Kept SelfRevoke outside the transport module; index still starts it after a successful relay start.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; `corepack pnpm exec vitest run src/extension.test.ts -t "relay reconnect|reconnect replays"` passed `6 passed | 143 skipped | 0 failed`.
+- Full requested targeted expression `relay reconnect|relay control channel|reconnect replays` produced the known false-alarm signature in the `relay control channel` group (`rename:<name>` / mesh-node setup), while the reconnect subset passed.
