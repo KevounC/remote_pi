@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, cockpit]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-4]
@@ -81,3 +81,15 @@ Medium. Cockpit uses process/RPC lifecycle; a projection rewrite must not break 
 ## Rollback
 
 Restore `TmTool` mutation and direct `_entries` folding. App/pi-extension event projection remains unaffected.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran `flutter test
+test/data/rpc_data_mapper_transcript_projection_test.dart` → 3/3; whole-cockpit
+`flutter analyze` 0 issues. Commit `aaafa59` (agent self-amended `f5993ad`→
+`aaafa59`; diff is 4 lines in the story .md only — code intact) scoped to owned
+files; collision guard held — did NOT touch cockpit_viewmodel.dart/
+workspace_projection.dart/pane_item.dart (owned by parallel
+workspace-document-step-6). Shared projection reducer (history + live) and
+immutable ProjectedToolMessage value objects verified; `session_id` used only
+as opaque mapper metadata, session-path naming kept separate as required.
