@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-agent-session-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-agent-session
 depends_on: [epic-bold-cockpit-workspace-projection-agent-session-step-1, epic-bold-transcript-event-log-projection-derive-step-5]
@@ -116,3 +116,22 @@ Restore `TranscriptMessage` / `TmTool` mutation and the direct `_entries` / `_op
 - Preserved optimistic local-send dedupe: `send()` still appends a local submitted event immediately, and the matching `RpcUserMessage` echo is suppressed so the projected UI keeps a single user row.
 - Added/updated tests for get-messages event replay, live streaming delta accumulation, tool start/result collapse, optimistic echo dedupe, and history reload clearing prior projected text/tool rows.
 - Verification confirms the refactor preserves public transcript UI behavior: `flutter analyze` reports zero issues and full `flutter test` passes.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: whole-cockpit `flutter analyze` →
+No issues found; full `flutter test` → 216/216 (incl. 6 new tests). Commit
+`677d999` scoped to cockpit only (agent_session + rpc_data_mapper + the
+rpc_process_gateway contract + pi_rpc_process so getMessages returns events +
+tests + story .md); no cross-subproject collision. The two extra adapter/
+contract files are legitimate (getMessages now returns transcript events).
+
+Single-reducer unification verified directly: `AgentSession` stores
+`_transcriptEvents`; both live RPC events (via `_appendTranscriptEvent`) AND
+`get_messages` replay (clear + append + derive) flow through the shared
+`deriveCockpitTranscript` — no parallel fold. Mutable open buffers
+(`_openText`/`_openThinking`/`_openTools`/`TmTool`) fully removed from
+agent_session.dart; `AgentEntry`/`ToolEntry` remain only as UI compat adapter
+output. Optimistic-send dedupe preserved (test `local optimistic user send
+suppresses matching rpc echo`). Tests cover replay, streaming, tool collapse,
+dedupe, history-reload clearing.
