@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-sdk-session-projection-module-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-sdk-session-projection-module
 depends_on: [epic-bold-split-pi-extension-index-sdk-session-projection-module-step-1]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 2: Move RemoteSession identity and transcript snapshot into the module
@@ -82,3 +82,15 @@ Medium. The public wire shape should not change, but history reset/preservation 
 
 ## Rollback
 Move `RemoteSessionIssuer`, `sessionStartedAt`, `messageBuffer`, and history helpers back into `index.ts`; remove the module history API.
+
+## Implementation
+- Moved the runtime `RemoteSessionIssuer`, `sessionStartedAt`, transcript event log, delivered-user dedupe map, legacy SDK-message mapping adapter, session history builder, and successful `session_new` reset fan-out into `pi-extension/src/session/sdk_session_projection.ts`; `session/remote_session.ts` remains the canonical identity helper.
+- Left `index.ts` as a thin integration layer: `pair_ok`, room metadata/reconnect hello, current-session stamping, `session_sync`, late-attach history, compaction/tool/user transcript recording, and tests delegate through `SdkSessionProjection`.
+- Preserved relay stop/start and reconnect behavior by not clearing projection-owned session identity/history in `_goIdle` or `_onRelayClose`; successful app `session_new` now recaptures the fresh SDK session id and resets projection-owned history/clock before broadcasting empty `session_history`.
+- Tests added/strengthened in `pi-extension/src/extension.test.ts`: SDK `sessionManager.getSessionId()` capture into `pair_ok`, reconnect preservation of `session_id`/`session_started_at`/history, and `session_new` fresh id recapture plus empty-history reset.
+- Verification:
+  - `corepack pnpm typecheck`: passed.
+  - `corepack pnpm build`: passed.
+  - Focused vitest (`corepack pnpm exec vitest run src/extension.test.ts --testNamePattern "known peer reconnect|relay reconnect detaches|successful reconnect preserves session_id|pair_ok captures|session_new uses fresh"`): 4 passed, 150 skipped; the existing listener-count invariant tests were not changed and passed with `toBe(1)`/`toBe(2)` and `toBe(2)`/`toBe(0)`/`toBe(1)`/`toBe(2)`.
+  - Required targeted command (`corepack pnpm exec vitest run src/extension.test.ts src/session/remote_session.test.ts`): 154 passed, 4 failed, 0 skipped across both files. All session-projection, `session_id`, history, listener-count, delivery, and `paired` state-transition tests passed. The 4 failures are the known environment/fixture false-alarm class, not session-projection regressions: `after a clean reset, connect works again (flag is per-instance, not sticky)`, `join emits remote-pi:name-assigned with requested + assigned + changed`, `rename:<name> renames live (broker re-register + relay swap), process/session survive`, and `a second same-name agent joins as <name>#2 instead of being refused`.
+- Discrepancies from design: the existing codebase already uses transcript events rather than the story's older `BufferMsg` name, so the projection module owns the transcript event buffer/history API instead of reintroducing `BufferMsg`.

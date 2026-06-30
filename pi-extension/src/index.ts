@@ -55,12 +55,7 @@ import type {
 } from "./protocol/types.js";
 import type { TranscriptEvent } from "./session/transcript_event.js";
 import {
-  appendTranscriptEvent,
   deterministicTranscriptEventId,
-  imagesFromContent,
-  mapLegacyAgentMessagesToTranscriptEvents,
-  projectSessionHistory,
-  stringifyContent,
   stringifyToolResult,
   type LegacyAgentMessage,
 } from "./session/transcript_projection.js";
@@ -103,7 +98,6 @@ import {
   RelayStartAbortedError,
   type RelayStateSnapshot,
 } from "./extension/relay_transport.js";
-import { RemoteSessionIssuer } from "./session/remote_session.js";
 import { validateClientSession } from "./session/session_gate.js";
 import {
   initialTurnSnapshot,
@@ -186,7 +180,7 @@ const _relayTransport = createRelayTransportPort({
   emitRelayState: (snapshot) => _sendRelayStateSnapshot(snapshot),
 });
 
-const _owners = new OwnerMultiplexer({
+const _owners: OwnerMultiplexer = new OwnerMultiplexer({
   createChannel: (input) => _relayTransport.createPeerChannel({
     peerId: input.peerId,
     roomId: input.roomId ?? _myRoomId ?? undefined,
@@ -207,7 +201,7 @@ const _owners = new OwnerMultiplexer({
     const sessionName = _displayName(cwd);
     return {
       sessionName,
-      sessionStartedAt: _sessionStartedAt ?? Date.now(),
+      sessionStartedAt: _sdkSessionProjection.sessionStartedAtOrNow(),
       sessionId: _currentRemoteSessionId(_lastEventCtx ?? _lastCtx),
       roomId: _myRoomId ?? roomIdFor(cwd, sessionName),
       harness: _HARNESS,
@@ -319,8 +313,8 @@ const _pairingCoordinator = new PairingCoordinator({
   setRoomId: (roomId) => { _myRoomId = roomId; },
   roomMeta: () => _myRoomMeta,
   setRoomMeta: (meta) => { _myRoomMeta = meta as typeof _myRoomMeta; },
-  sessionStartedAt: () => _sessionStartedAt,
-  setSessionStartedAt: (ts) => { _sessionStartedAt = ts; },
+  sessionStartedAt: () => _sdkSessionProjection.sessionStartedAtValue(),
+  setSessionStartedAt: (ts) => { _sdkSessionProjection.setSessionStartedAt(ts); },
   currentModel: () => _currentModel,
   setCurrentModel: (model) => { _currentModel = model; },
   currentThinking: () => _currentThinking,
@@ -589,22 +583,9 @@ function _refreshFooter(ctx?: RemotePiUiContext): void {
   );
 }
 
-// Epoch ms when the state machine entered 'started' (last /remote-pi start).
-// Used by session_sync to let the app detect Pi restarts (and force a full
-// replay). Cleared on _goIdle.
-let _sessionStartedAt: number | null = null;
-const _remoteSessionIssuer = new RemoteSessionIssuer();
-
-// Append-only transcript event log for session_sync history projection.
-// Preserved across relay stop/reconnect because the Pi agent session outlives
-// the relay connection. Cleared only when a new Pi session is created.
-let _transcriptEvents: TranscriptEvent[] = [];
-
-// App-origin user messages are echoed immediately after SDK acceptance, before
-// the SDK's later message_end persistence callback. Keep a small deterministic
-// signature map so that callback appends the same event id and the event log
-// deduper treats it as replay rather than a duplicate user bubble.
-const _deliveredUserEventIds = new Map<string, { clientMessageId: string; eventId: string }[]>();
+// SDK session identity, session clock, and transcript replay state are owned by
+// SdkSessionProjection. Index keeps only thin compatibility wrappers for legacy
+// command/test surfaces.
 
 /**
  * Test-only: emulate what `/remote-pi` does on the returning-user path
@@ -656,58 +637,41 @@ export async function _startRelayForTest(ctx: unknown): Promise<void> {
 
 // Legacy test adapter: accepts old SDK-message fixtures but stores transcript events.
 export function _setMessageBufferForTest(msgs: unknown[]): void {
-  _deliveredUserEventIds.clear();
-  _lastTranscriptUserId = null;
-  _transcriptEvents = mapLegacyAgentMessagesToTranscriptEvents({
-    sessionId: _currentRemoteSessionId(),
-    messages: msgs as LegacyAgentMessage[],
-  });
-  const lastUser = [..._transcriptEvents].reverse().find((event) =>
-    event.kind === "user_confirmed" || event.kind === "user_submitted"
-  );
-  _lastTranscriptUserId = lastUser?.clientMessageId ?? null;
+  _sdkSessionProjection.setLegacyMessageBufferForTest(msgs);
 }
 
 export function _setTranscriptEventsForTest(events: TranscriptEvent[]): void {
-  _deliveredUserEventIds.clear();
-  _transcriptEvents = [...events];
-  const lastUser = [..._transcriptEvents].reverse().find((event) =>
-    event.kind === "user_confirmed" || event.kind === "user_submitted"
-  );
-  _lastTranscriptUserId = lastUser?.clientMessageId ?? null;
+  _sdkSessionProjection.setTranscriptEventsForTest(events);
 }
 
 /** Test-only accessor: returns a defensive copy of the transcript event log. */
 export function _getTranscriptEventsForTest(): TranscriptEvent[] {
-  return [..._transcriptEvents];
+  return _sdkSessionProjection.getTranscriptEventsForTest();
 }
 
 /** Test-only override of session started timestamp. */
 export function _setSessionStartedAtForTest(ts: number | null): void {
-  _sessionStartedAt = ts;
+  _sdkSessionProjection.setSessionStartedAt(ts);
 }
 
 export function _getRemoteSessionIdForTest(): string | null {
-  return _remoteSessionIssuer.current();
+  return _sdkSessionProjection.currentSessionIdForTest();
 }
 
 export function _setRemoteSessionIdForTest(id: string | null): void {
-  if (id === null) _remoteSessionIssuer.clear();
-  else _remoteSessionIssuer.capture({ sessionManager: { getSessionId: () => id } });
+  _sdkSessionProjection.setSessionIdForTest(id);
 }
 
 function _currentRemoteSessionId(ctx?: unknown): string {
-  return _remoteSessionIssuer.currentOrCapture(ctx ?? _lastEventCtx ?? _lastCtx ?? undefined);
+  return _sdkSessionProjection.currentRemoteSessionId(ctx ?? _lastEventCtx ?? _lastCtx ?? undefined);
 }
 
 function _withCurrentSession<T extends object>(msg: T): T & { session_id: string } {
-  return { ...msg, session_id: _currentRemoteSessionId() };
+  return _sdkSessionProjection.currentSessionMessage(msg);
 }
 
-let _lastTranscriptUserId: string | null = null;
-
 function _appendTranscriptEvent(event: TranscriptEvent): void {
-  _transcriptEvents = appendTranscriptEvent(_transcriptEvents, event);
+  _sdkSessionProjection.appendTranscriptEvent(event);
 }
 
 function _rememberDeliveredUserEvent(
@@ -716,29 +680,7 @@ function _rememberDeliveredUserEvent(
   clientMessageId: string,
   eventId: string,
 ): void {
-  const key = _userContentSignature(text, images);
-  const existing = _deliveredUserEventIds.get(key) ?? [];
-  existing.push({ clientMessageId, eventId });
-  _deliveredUserEventIds.set(key, existing);
-}
-
-function _consumeDeliveredUserEvent(
-  text: string,
-  images: readonly { data: string; mime: string }[] | undefined,
-): { clientMessageId: string; eventId: string } | undefined {
-  const key = _userContentSignature(text, images);
-  const existing = _deliveredUserEventIds.get(key);
-  if (!existing || existing.length === 0) return undefined;
-  const match = existing.shift();
-  if (existing.length === 0) _deliveredUserEventIds.delete(key);
-  return match;
-}
-
-function _userContentSignature(
-  text: string,
-  images: readonly { data: string; mime: string }[] | undefined,
-): string {
-  return JSON.stringify({ text, images: images ?? [] });
+  _sdkSessionProjection.rememberDeliveredUserEvent(text, images, clientMessageId, eventId);
 }
 
 function _appendUserConfirmedTranscriptEvent(input: {
@@ -750,111 +692,15 @@ function _appendUserConfirmedTranscriptEvent(input: {
   streamingBehavior?: Extract<TranscriptEvent, { kind: "user_confirmed" }>["streamingBehavior"];
   eventId?: string;
 }): void {
-  const eventId = input.eventId
-    ?? deterministicTranscriptEventId(input.sessionId, "user_confirmed", input.clientMessageId);
-  _appendTranscriptEvent({
-    kind: "user_confirmed",
-    eventId,
-    sessionId: input.sessionId,
-    ts: input.ts,
-    clientMessageId: input.clientMessageId,
-    text: input.text,
-    ...(input.images && input.images.length > 0 ? { images: [...input.images] } : {}),
-    ...(input.streamingBehavior ? { streamingBehavior: input.streamingBehavior } : {}),
-  });
-  _lastTranscriptUserId = input.clientMessageId;
+  _sdkSessionProjection.appendUserConfirmedTranscriptEvent(input);
 }
 
 function _appendLegacySdkMessageToTranscript(message: LegacyAgentMessage): void {
-  const sessionId = _currentRemoteSessionId();
-  const ts = typeof message.timestamp === "number" ? message.timestamp : Date.now();
-  if (message.role === "user") {
-    const text = stringifyContent(message.content);
-    const images = imagesFromContent(message.content);
-    const matched = _consumeDeliveredUserEvent(text, images);
-    const clientMessageId = matched?.clientMessageId ?? `sync_${ts}`;
-    _appendUserConfirmedTranscriptEvent({
-      sessionId,
-      ts,
-      clientMessageId,
-      text,
-      ...(images.length > 0 ? { images } : {}),
-      ...(matched ? { eventId: matched.eventId } : {}),
-    });
-    return;
-  }
-
-  if (message.role === "assistant") {
-    const content = Array.isArray(message.content) ? message.content : [];
-    const usage = message.usage
-      ? { input_tokens: message.usage.input ?? 0, output_tokens: message.usage.output ?? 0 }
-      : undefined;
-    for (const [blockIndex, raw] of content.entries()) {
-      if (!raw || typeof raw !== "object") continue;
-      const block = raw as { type?: string; text?: unknown; id?: unknown; name?: unknown; arguments?: unknown };
-      if (block.type === "text") {
-        const text = String(block.text ?? "");
-        if (!text) continue;
-        const messageId = `sync_${ts}:assistant:${blockIndex}`;
-        _appendTranscriptEvent({
-          kind: "assistant_committed",
-          eventId: deterministicTranscriptEventId(sessionId, "assistant_committed", messageId),
-          sessionId,
-          ts,
-          messageId,
-          replyTo: _lastTranscriptUserId ?? `sync_${ts}`,
-          text,
-          ...(usage ? { usage } : {}),
-        });
-      } else if (block.type === "toolCall") {
-        const toolCallId = String(block.id ?? `sync_${ts}:tool:${blockIndex}`);
-        _appendTranscriptEvent({
-          kind: "tool_requested",
-          eventId: deterministicTranscriptEventId(sessionId, "tool_requested", toolCallId),
-          sessionId,
-          ts,
-          toolCallId,
-          tool: String(block.name ?? ""),
-          args: _recordArgs(block.arguments),
-        });
-      }
-    }
-    return;
-  }
-
-  if (message.role === "toolResult") {
-    const toolCallId = String(message.toolCallId ?? `sync_${ts}:tool-result`);
-    const text = stringifyToolResult(message.content);
-    _appendTranscriptEvent(message.isError
-      ? {
-          kind: "tool_finished",
-          eventId: deterministicTranscriptEventId(sessionId, "tool_finished", toolCallId),
-          sessionId,
-          ts,
-          toolCallId,
-          error: text,
-        }
-      : {
-          kind: "tool_finished",
-          eventId: deterministicTranscriptEventId(sessionId, "tool_finished", toolCallId),
-          sessionId,
-          ts,
-          toolCallId,
-          result: text,
-        });
-  }
-}
-
-function _recordArgs(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  _sdkSessionProjection.appendLegacySdkMessageToTranscript(message);
 }
 
 function _captureRemoteSession(ctx: unknown): string {
-  const sessionId = _remoteSessionIssuer.capture(ctx);
-  _publishRoomMetaPatch({ session_id: sessionId });
-  return sessionId;
+  return _sdkSessionProjection.captureRemoteSession(ctx);
 }
 
 /** Test-only: reset the cached model name (between tests). */
@@ -940,19 +786,6 @@ function _activeReplyTarget(): string | null {
 
 // Module-level pi reference
 let _pi: ExtensionAPI | null = null;
-
-// ── Session sync limit (mirror cache cap) ─────────────────────────────────────
-//
-// Configurable via REMOTE_PI_SYNC_LIMIT env var (positive int, default 30).
-// Read on every session_sync so QA can `export REMOTE_PI_SYNC_LIMIT=N` between
-// runs without restarting the extension. The value is also clamped against
-// the client-provided `limit` (server is authoritative).
-const SYNC_LIMIT_DEFAULT = 30;
-function _getSyncLimit(): number {
-  const raw = process.env["REMOTE_PI_SYNC_LIMIT"];
-  const parsed = raw ? parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : SYNC_LIMIT_DEFAULT;
-}
 
 // ── Relay reconnect state ─────────────────────────────────────────────────────
 // Backoffs in ms: 1s, 2s, 5s, 10s, 30s, then stays at 30s; the transport
@@ -1066,11 +899,11 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
   // URL if the user changed it via /remote-pi relay url).
   _pairingCoordinator.stopSelfRevoke();
 
-  // Preserve _sessionStartedAt + _transcriptEvents across stop/start cycles.
-  // The Pi agent session outlives the relay connection — `message_end` keeps
-  // firing for terminal turns even while idle, and the transcript event log
-  // must survive so those turns appear in the next session_sync. Only a Pi
-  // process restart resets these (init-time values).
+  // Preserve projection-owned sessionStartedAt + transcript events across
+  // stop/start cycles. The Pi agent session outlives the relay connection —
+  // `message_end` keeps firing for terminal turns even while idle, and the
+  // transcript event log must survive so those turns appear in session_sync.
+  // Only Pi session replacement resets these.
 
   _state = "idle";
   _refreshFooter();
@@ -1079,8 +912,8 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
 
 /**
  * Called when the relay WS closes unexpectedly (network drop, relay restart,
- * etc.). Does a **partial** teardown — keeps `_sessionStartedAt`, `_transcriptEvents`,
- * and relay-transport-owned retry state so the session can resume on reconnect.
+ * etc.). Does a **partial** teardown — keeps projection-owned session clock,
+ * transcript events, and relay-transport-owned retry state so the session can resume on reconnect.
  *
  * Peer (app) reconnect after a successful relay reconnect is handled by the
  * existing auto-listener via `peers.json` lookup, so we don't need to track
@@ -1240,7 +1073,7 @@ function _currentPairingSessionSnapshot() {
   const sessionName = _displayName(cwd);
   return {
     sessionName,
-    sessionStartedAt: _sessionStartedAt ?? Date.now(),
+    sessionStartedAt: _sdkSessionProjection.sessionStartedAtOrNow(),
     sessionId: _currentRemoteSessionId(_lastEventCtx ?? _lastCtx),
     roomId: _myRoomId ?? roomIdFor(cwd, sessionName),
     harness: _HARNESS,
@@ -1281,7 +1114,7 @@ function _isAgentMessageApi(value: unknown): value is AgentMessageApi {
   return typeof candidate.sendMessage === "function" && typeof candidate.sendUserMessage === "function";
 }
 
-const _sdkSessionProjection = new SdkSessionProjection({
+const _sdkSessionProjection: SdkSessionProjection = new SdkSessionProjection({
   outputs: {
     broadcast: (message) => _owners.broadcast(message),
     sendTo: (sender, message) => sender.send(message),
@@ -1875,7 +1708,7 @@ async function _startRelayViaTransport(ctx: Pick<ExtensionContext, "ui" | "cwd">
 
   _myRoomId = roomId;
   _state = "started";
-  if (_sessionStartedAt === null) _sessionStartedAt = Date.now();
+  _sdkSessionProjection.ensureSessionStarted();
   _refreshFooter(ctx);
 
   _pairingCoordinatorInternals().ensureSelfRevoke(relayUrl, edKp);
@@ -2273,8 +2106,8 @@ export function _routeClientMessageFrom(
       // Source-of-truth rebroadcast (plan/24 W2D fix). Echo the message
       // back to every attached owner (sender included) after the SDK accepts
       // the handoff, so optimistic app bubbles only confirm on real delivery.
-      // The user_message is also recorded in _transcriptEvents after SDK
-      // acceptance, so a later `session_sync` returns it in history.
+      // The user_message is also recorded in the projection transcript after
+      // SDK acceptance, so a later `session_sync` returns it in history.
       void _deliverUserMessage(msg, sender).catch((err: unknown) => {
         const detail = err instanceof Error ? err.message : String(err);
         _sendDeliveryError(sender, msg.id, detail);
@@ -2349,9 +2182,9 @@ export function _routeClientMessageFrom(
         },
       ).then((created) => {
         // Pi-side reset is durable only here: handleSessionNew swaps the SDK
-        // session, but the app's session_sync log (_transcriptEvents) and the
-        // session clock (_sessionStartedAt) live in this module. Reset them +
-        // fan out an empty history so every owner drops the stale conversation
+        // session, but the app's session_sync log and session clock live in
+        // SdkSessionProjection. Reset them + fan out an empty history so every
+        // owner drops the stale conversation
         // — not just the sender, who also clears locally on action_ok.
         if (created) _resetSessionForNew(msg.id);
       });
@@ -2422,18 +2255,6 @@ function _handleSessionSync(
 ): void {
   sender.send(_queuedMessageState());
 
-  if (_sessionStartedAt === null) {
-    sender.send(_withCurrentSession({
-      type: "session_history",
-      in_reply_to: msg.id,
-      session_started_at: 0,
-      events: [],
-      eos: true,
-      truncated: false,
-    }));
-    return;
-  }
-
   sender.send(_buildSessionHistoryMessage(msg.id, msg.limit));
 }
 
@@ -2441,34 +2262,15 @@ function _buildSessionHistoryMessage(
   inReplyTo: string,
   limit: number | undefined,
 ): Extract<ServerMessage, { type: "session_history" }> {
-  // Mirror semantics: always return the last N events. App SUBSTITUTES its
-  // local cache with this response — no delta/since_ts logic.
-  const serverLimit = _getSyncLimit();
-  const requested = limit ?? serverLimit;
-  const effectiveLimit = Math.min(requested, serverLimit);  // server clamps
-
-  const projection = projectSessionHistory({
-    sessionId: _currentRemoteSessionId(),
-    events: _transcriptEvents,
-    limit: effectiveLimit,
-  });
-
-  return _withCurrentSession({
-    type: "session_history",
-    in_reply_to: inReplyTo,
-    session_started_at: _sessionStartedAt ?? 0,
-    events: projection.events,
-    eos: true,
-    truncated: projection.truncated,
-  });
+  return _sdkSessionProjection.buildSessionHistoryMessage(inReplyTo, limit);
 }
 
 /**
  * Resets the Pi-side session view after a SUCCESSFUL `session_new`. The app's
  * New Session clears its local store on `action_ok`, but that alone isn't
- * durable: `_transcriptEvents` (which answers `session_sync`) is append-only and
- * `_sessionStartedAt` is stamped once, so a later reconnect/restart would
- * replay the OLD history. We clear the transcript event log, restamp the clock, and
+ * durable: the projection transcript (which answers `session_sync`) is append-only
+ * and sessionStartedAt is stamped once, so a later reconnect/restart would replay
+ * the OLD history. We clear the transcript event log, restamp the clock, and
  * broadcast an EMPTY `session_history` — the exact shape `_handleSessionSync`
  * sends, just with `events: []` — so every attached owner drops the stale
  * conversation. The app's `_applyHistory` substitutes its cache wholesale, so
@@ -2479,22 +2281,11 @@ function _buildSessionHistoryMessage(
  * so every owner must see the reset.
  */
 function _resetSessionForNew(inReplyTo: string): void {
-  _transcriptEvents = [];
-  _deliveredUserEventIds.clear();
-  _lastTranscriptUserId = null;
   _applyTurnAndPublish({ type: "session_shutdown" });
   _resetTurnSnapshot();
   _publishWorking(false);
   _broadcastQueuedMessageState();
-  _sessionStartedAt = Date.now();
-  _owners.broadcast(_withCurrentSession({
-    type: "session_history",
-    in_reply_to: inReplyTo,
-    session_started_at: _sessionStartedAt,
-    events: [],
-    eos: true,
-    truncated: false,
-  }));
+  _sdkSessionProjection.resetSessionForNew(inReplyTo);
 }
 
 type ToolArgs = Record<string, unknown>;
@@ -2644,18 +2435,12 @@ function _stringArg(args: ToolArgs, keys: string[]): string {
 }
 
 /** Legacy adapter retained for tests and compatibility probes. The history
- * projection itself is now `mapLegacyAgentMessagesToTranscriptEvents` followed
- * by `projectSessionHistory`, so SDK-message mapping rules live in
- * `session/transcript_projection.ts` instead of this runtime module. */
+ * projection itself lives behind SdkSessionProjection, so SDK-message mapping
+ * rules live in `session/transcript_projection.ts` instead of this runtime module. */
 export function _mapAgentMessagesToEvents(
   messages: LegacyAgentMessage[],
 ): SessionHistoryEvent[] {
-  const sessionId = _currentRemoteSessionId();
-  return projectSessionHistory({
-    sessionId,
-    events: mapLegacyAgentMessagesToTranscriptEvents({ sessionId, messages }),
-    limit: Number.MAX_SAFE_INTEGER,
-  }).events;
+  return _sdkSessionProjection.mapAgentMessagesToEvents(messages);
 }
 
 // ── Standalone CLI ────────────────────────────────────────────────────────────
