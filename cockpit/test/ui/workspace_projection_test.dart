@@ -18,7 +18,7 @@ import 'package:cockpit/app/cockpit/domain/entities/prompt_image.dart';
 import 'package:cockpit/app/cockpit/domain/entities/rpc_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/session_info.dart';
 import 'package:cockpit/app/cockpit/domain/entities/thinking_level.dart';
-import 'package:cockpit/app/cockpit/domain/entities/transcript_message.dart';
+import 'package:cockpit/app/cockpit/domain/entities/transcript_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/workspace_document.dart';
 import 'package:cockpit/app/cockpit/domain/entities/workspace_tab.dart';
 import 'package:cockpit/app/cockpit/domain/exceptions/rpc_error.dart';
@@ -284,8 +284,9 @@ final class _RpcGateway implements RpcProcessGateway {
   void dispose() => unawaited(_events.close());
 
   @override
-  Future<Result<List<TranscriptMessage>, RpcError>> getMessages() async =>
-      const Success([]);
+  Future<Result<List<CockpitTranscriptEvent>, RpcError>> getMessages({
+    required String sessionId,
+  }) async => const Success([]);
 
   @override
   Future<Result<ContextUsage?, RpcError>> sessionStats() async =>

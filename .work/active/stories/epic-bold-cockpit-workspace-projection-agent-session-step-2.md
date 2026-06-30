@@ -1,14 +1,14 @@
 ---
 id: epic-bold-cockpit-workspace-projection-agent-session-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-agent-session
 depends_on: [epic-bold-cockpit-workspace-projection-agent-session-step-1, epic-bold-transcript-event-log-projection-derive-step-5]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 2: Feed AgentSession from the transcript event-log projection
@@ -107,3 +107,12 @@ Medium. This touches transcript display behavior, but the public UI output is in
 ## Rollback
 
 Restore `TranscriptMessage` / `TmTool` mutation and the direct `_entries` / `_openText` / `_openThinking` / `_openTools` fold in `AgentSession`. Keep Step 1's projection contract if it remains unused and side-by-side.
+
+## Implementation
+
+- Removed the `get_messages` projected-message replay path from `AgentSession`; `RpcProcessGateway.getMessages` now returns `CockpitTranscriptEvent`s, and `_populateTranscript()` replaces `_transcriptEvents` for the selected Pi session before deriving the UI transcript once.
+- Added `RpcDataMapper.transcriptEvents(...)` so history replay emits the same user/thinking/text/tool request/tool finish events as live RPC handling. The compatibility `transcriptMessages(...)` helper now derives from those events instead of owning a separate fold.
+- Kept mutable `AgentEntry`/`ToolEntry` objects as UI compatibility adapter output only; live and replay domain truth comes from `deriveCockpitTranscript(...)`, and `ToolEntry.done` is populated from the immutable projected tool status.
+- Preserved optimistic local-send dedupe: `send()` still appends a local submitted event immediately, and the matching `RpcUserMessage` echo is suppressed so the projected UI keeps a single user row.
+- Added/updated tests for get-messages event replay, live streaming delta accumulation, tool start/result collapse, optimistic echo dedupe, and history reload clearing prior projected text/tool rows.
+- Verification confirms the refactor preserves public transcript UI behavior: `flutter analyze` reports zero issues and full `flutter test` passes.

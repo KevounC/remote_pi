@@ -123,17 +123,23 @@ class RpcDataMapper {
     );
   }
 
-  /// Converte `get_messages` (`{messages:[AgentMessage]}`) numa projeção
-  /// imutável do transcript. O histórico e o stream ao vivo usam
-  /// [deriveCockpitTranscript] como única regra para user/text/thinking/tool.
-  List<TranscriptMessage> transcriptMessages(Object? data) {
+  /// Converte `get_messages` (`{messages:[AgentMessage]}`) em eventos do
+  /// transcript. Histórico e stream ao vivo passam pelo mesmo reducer em
+  /// [deriveCockpitTranscript]; este adapter não publica uma segunda projeção
+  /// mutável de mensagens/tools.
+  List<CockpitTranscriptEvent> transcriptEvents(
+    Object? data, {
+    required String sessionId,
+  }) {
     if (data is! Map || data['messages'] is! List) {
-      return const <TranscriptMessage>[];
+      return const <CockpitTranscriptEvent>[];
     }
-    final sessionId = data['session_id'] as String? ?? 'get_messages';
+    final effectiveSessionId = sessionId.isNotEmpty
+        ? sessionId
+        : data['session_id'] as String? ?? 'get_messages';
     final events = <CockpitTranscriptEvent>[];
     var index = 0;
-    String nextEventId() => '$sessionId:history:${index++}';
+    String nextEventId() => '$effectiveSessionId:history:${index++}';
     final ts = DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 
     for (final raw in data['messages'] as List) {
@@ -142,12 +148,13 @@ class RpcDataMapper {
         case 'user':
           final text = _contentText(raw['content']);
           if (text.isNotEmpty) {
+            final eventId = nextEventId();
             events.add(
               CockpitUserMessageConfirmed(
-                eventId: nextEventId(),
-                sessionId: sessionId,
+                eventId: eventId,
+                sessionId: effectiveSessionId,
                 ts: ts,
-                clientMessageId: raw['id'] as String? ?? nextEventId(),
+                clientMessageId: raw['id'] as String? ?? eventId,
                 text: text,
               ),
             );
@@ -155,6 +162,7 @@ class RpcDataMapper {
         case 'assistant':
           final content = raw['content'];
           if (content is! List) break;
+          final messageId = raw['id'] as String? ?? '';
           for (final block in content) {
             if (block is! Map) continue;
             switch (block['type']) {
@@ -164,9 +172,9 @@ class RpcDataMapper {
                   events.add(
                     CockpitThinkingDeltaReceived(
                       eventId: nextEventId(),
-                      sessionId: sessionId,
+                      sessionId: effectiveSessionId,
                       ts: ts,
-                      replyTo: raw['id'] as String? ?? '',
+                      replyTo: messageId,
                       delta: text,
                     ),
                   );
@@ -174,13 +182,14 @@ class RpcDataMapper {
               case 'text':
                 final text = block['text'] as String? ?? '';
                 if (text.isNotEmpty) {
+                  final eventId = nextEventId();
                   events.add(
                     CockpitAssistantMessageCommitted(
-                      eventId: nextEventId(),
-                      sessionId: sessionId,
+                      eventId: eventId,
+                      sessionId: effectiveSessionId,
                       ts: ts,
-                      messageId: raw['id'] as String? ?? nextEventId(),
-                      replyTo: raw['id'] as String? ?? '',
+                      messageId: messageId.isNotEmpty ? messageId : eventId,
+                      replyTo: messageId,
                       text: text,
                     ),
                   );
@@ -190,7 +199,7 @@ class RpcDataMapper {
                 events.add(
                   CockpitToolRequested(
                     eventId: nextEventId(),
-                    sessionId: sessionId,
+                    sessionId: effectiveSessionId,
                     ts: ts,
                     toolCallId: id,
                     tool: block['name'] as String? ?? '?',
@@ -200,21 +209,32 @@ class RpcDataMapper {
             }
           }
         case 'toolResult':
+          final resultText = _contentText(raw['content']);
           events.add(
             CockpitToolFinished(
               eventId: nextEventId(),
-              sessionId: sessionId,
+              sessionId: effectiveSessionId,
               ts: ts,
               toolCallId: raw['toolCallId'] as String? ?? '',
-              result: _contentText(raw['content']),
-              error: raw['isError'] == true
-                  ? _contentText(raw['content'])
-                  : null,
+              result: resultText,
+              error: raw['isError'] == true ? resultText : null,
             ),
           );
       }
     }
-    return deriveCockpitTranscript(events).entries;
+    return List<CockpitTranscriptEvent>.unmodifiable(events);
+  }
+
+  /// Compatibility helper for callers that still ask for projected history.
+  /// New session code should request [transcriptEvents] and derive once at the
+  /// presentation boundary.
+  List<TranscriptMessage> transcriptMessages(Object? data) {
+    final sessionId = data is Map
+        ? data['session_id'] as String? ?? 'get_messages'
+        : 'get_messages';
+    return deriveCockpitTranscript(
+      transcriptEvents(data, sessionId: sessionId),
+    ).entries;
   }
 
   String _contentText(Object? content) {

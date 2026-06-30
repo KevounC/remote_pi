@@ -11,8 +11,10 @@ import 'package:cockpit/app/cockpit/domain/entities/pi_model.dart';
 import 'package:cockpit/app/cockpit/domain/entities/prompt_image.dart';
 import 'package:cockpit/app/cockpit/domain/entities/rpc_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/thinking_level.dart';
+import 'package:cockpit/app/cockpit/domain/entities/transcript_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/transcript_message.dart';
 import 'package:cockpit/app/cockpit/domain/exceptions/rpc_error.dart';
+import 'package:cockpit/app/cockpit/ui/session/agent_entry.dart';
 import 'package:cockpit/app/cockpit/ui/session/agent_session.dart';
 import 'package:cockpit/app/core/domain/result.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -100,7 +102,7 @@ void main() {
   });
 
   test('restored history load clears a legacy streaming snapshot', () async {
-    final messages = Completer<List<TranscriptMessage>>();
+    final messages = Completer<List<CockpitTranscriptEvent>>();
     final (session, gateway) = await _bootSession(
       stateTurn: const AgentTurnProjection(status: AgentTurnStatus.streaming),
       restoreSessionPath: '/sessions/restored.jsonl',
@@ -113,7 +115,7 @@ void main() {
     expect(session.turn.status, AgentTurnStatus.streaming);
     expect(session.isBusy, isTrue);
 
-    messages.complete(const <TranscriptMessage>[]);
+    messages.complete(const <CockpitTranscriptEvent>[]);
     await pumpEventQueue();
 
     expect(session.sessionPath, '/sessions/restored.jsonl');
@@ -124,6 +126,175 @@ void main() {
 
     await session.dispose();
   });
+
+  test(
+    'get_messages replay replaces transcript through projection events',
+    () async {
+      final messages = Completer<List<CockpitTranscriptEvent>>();
+      final (session, gateway) = await _bootSession(
+        restoreSessionPath: '/sessions/restored.jsonl',
+        messages: messages,
+        settle: false,
+      );
+
+      final replayed = <CockpitTranscriptEvent>[
+        CockpitUserMessageConfirmed(
+          eventId: 'history:u1',
+          sessionId: '/sessions/restored.jsonl',
+          ts: _ts,
+          clientMessageId: 'u1',
+          text: 'hello history',
+        ),
+        CockpitAssistantMessageCommitted(
+          eventId: 'history:a1',
+          sessionId: '/sessions/restored.jsonl',
+          ts: _ts,
+          messageId: 'a1',
+          replyTo: 'u1',
+          text: 'hello back',
+        ),
+      ];
+      messages.complete(replayed);
+      await pumpEventQueue();
+
+      expect(gateway.getMessagesSessionIds, <String>[
+        '/sessions/restored.jsonl',
+      ]);
+      expect(_transcriptEntries(session), hasLength(2));
+      expect(
+        _transcriptEntries(session)[0],
+        isA<UserEntry>().having((entry) => entry.text, 'text', 'hello history'),
+      );
+      expect(
+        _transcriptEntries(session)[1],
+        isA<AssistantTextEntry>().having(
+          (entry) => entry.text,
+          'text',
+          'hello back',
+        ),
+      );
+
+      await session.dispose();
+    },
+  );
+
+  test(
+    'live streaming text deltas accumulate through transcript projection',
+    () async {
+      final (session, gateway) = await _bootSession();
+
+      gateway
+        ..emit(const RpcTextDelta('hel'))
+        ..emit(const RpcTextDelta('lo'));
+
+      final textEntries = _transcriptEntries(
+        session,
+      ).whereType<AssistantTextEntry>();
+      expect(textEntries, hasLength(1));
+      expect(textEntries.single.text, 'hello');
+      expect(
+        session.projection.transcript.entries.single,
+        isA<ProjectedAssistantTextMessage>(),
+      );
+
+      await session.dispose();
+    },
+  );
+
+  test(
+    'live tool start and result collapse into one projected tool row',
+    () async {
+      final (session, gateway) = await _bootSession();
+
+      gateway
+        ..emit(
+          const RpcToolStart(
+            toolCallId: 'tool-1',
+            toolName: 'read_file',
+            args: <String, dynamic>{'path': 'README.md'},
+          ),
+        )
+        ..emit(
+          const RpcToolEnd(
+            toolCallId: 'tool-1',
+            toolName: 'read_file',
+            isError: false,
+            resultText: 'ok',
+          ),
+        );
+
+      final tools = _transcriptEntries(session).whereType<ToolEntry>();
+      expect(tools, hasLength(1));
+      expect(tools.single.toolCallId, 'tool-1');
+      expect(tools.single.done, isTrue);
+      expect(tools.single.isError, isFalse);
+      expect(tools.single.resultText, 'ok');
+
+      await session.dispose();
+    },
+  );
+
+  test('local optimistic user send suppresses matching rpc echo', () async {
+    final (session, gateway) = await _bootSession();
+
+    await session.send('hello');
+    gateway.emit(const RpcUserMessage('hello'));
+
+    final users = _transcriptEntries(session).whereType<UserEntry>();
+    expect(users, hasLength(1));
+    expect(users.single.text, 'hello');
+
+    await session.dispose();
+  });
+
+  test(
+    'history reload clears prior open projected text and tool rows',
+    () async {
+      final messages = Completer<List<CockpitTranscriptEvent>>();
+      final (session, gateway) = await _bootSession(messages: messages);
+
+      gateway
+        ..emit(const RpcTextDelta('old partial'))
+        ..emit(
+          const RpcToolStart(
+            toolCallId: 'old-tool',
+            toolName: 'old_tool',
+            args: <String, dynamic>{},
+          ),
+        )
+        ..emit(const RpcAgentEnd());
+      expect(
+        _transcriptEntries(session).whereType<AssistantTextEntry>(),
+        hasLength(1),
+      );
+      expect(_transcriptEntries(session).whereType<ToolEntry>(), hasLength(1));
+
+      final load = session.loadHistory('/sessions/new.jsonl');
+      messages.complete(<CockpitTranscriptEvent>[
+        CockpitUserMessageConfirmed(
+          eventId: 'new:u1',
+          sessionId: '/sessions/new.jsonl',
+          ts: _ts,
+          clientMessageId: 'new-u1',
+          text: 'new history',
+        ),
+      ]);
+      await load;
+
+      expect(gateway.getMessagesSessionIds, <String>['/sessions/new.jsonl']);
+      expect(
+        _transcriptEntries(session).whereType<AssistantTextEntry>(),
+        isEmpty,
+      );
+      expect(_transcriptEntries(session).whereType<ToolEntry>(), isEmpty);
+      expect(
+        _transcriptEntries(session).single,
+        isA<UserEntry>().having((entry) => entry.text, 'text', 'new history'),
+      );
+
+      await session.dispose();
+    },
+  );
 
   test('new session clears prior terminal turn error', () async {
     final (session, gateway) = await _bootSession();
@@ -198,10 +369,22 @@ void main() {
   );
 }
 
+final _ts = DateTime.utc(2026, 6, 30);
+
+List<AgentEntry> _transcriptEntries(AgentSession session) => session.entries
+    .where(
+      (entry) =>
+          entry is UserEntry ||
+          entry is AssistantTextEntry ||
+          entry is ThinkingEntry ||
+          entry is ToolEntry,
+    )
+    .toList(growable: false);
+
 Future<(AgentSession, _RpcGateway)> _bootSession({
   AgentTurnProjection stateTurn = AgentTurnProjection.idle,
   String? restoreSessionPath,
-  Completer<List<TranscriptMessage>>? messages,
+  Completer<List<CockpitTranscriptEvent>>? messages,
   bool settle = true,
 }) async {
   final factory = _RpcFactory(
@@ -233,11 +416,12 @@ final class _RpcGateway implements RpcProcessGateway {
 
   final _events = StreamController<RpcEvent>.broadcast(sync: true);
   final AgentTurnProjection stateTurn;
-  final Completer<List<TranscriptMessage>>? messages;
+  final Completer<List<CockpitTranscriptEvent>>? messages;
   var stateCount = 0;
   var abortCount = 0;
   var newSessionCount = 0;
   var killCount = 0;
+  final getMessagesSessionIds = <String>[];
   var _running = false;
   String? _cwd;
 
@@ -284,8 +468,12 @@ final class _RpcGateway implements RpcProcessGateway {
   void dispose() => unawaited(_events.close());
 
   @override
-  Future<Result<List<TranscriptMessage>, RpcError>> getMessages() async =>
-      Success(await (messages?.future ?? Future.value(const [])));
+  Future<Result<List<CockpitTranscriptEvent>, RpcError>> getMessages({
+    required String sessionId,
+  }) async {
+    getMessagesSessionIds.add(sessionId);
+    return Success(await (messages?.future ?? Future.value(const [])));
+  }
 
   @override
   Future<Result<ContextUsage?, RpcError>> sessionStats() async =>

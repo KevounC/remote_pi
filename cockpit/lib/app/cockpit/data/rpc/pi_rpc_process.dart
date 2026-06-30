@@ -15,7 +15,7 @@ import 'package:cockpit/app/cockpit/domain/entities/pi_model.dart';
 import 'package:cockpit/app/cockpit/domain/entities/prompt_image.dart';
 import 'package:cockpit/app/cockpit/domain/entities/rpc_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/thinking_level.dart';
-import 'package:cockpit/app/cockpit/domain/entities/transcript_message.dart';
+import 'package:cockpit/app/cockpit/domain/entities/transcript_event.dart';
 import 'package:cockpit/app/cockpit/data/rpc/pi_process_registry.dart';
 import 'package:cockpit/app/cockpit/domain/exceptions/rpc_error.dart';
 import 'package:cockpit/app/core/domain/result.dart';
@@ -374,11 +374,12 @@ class PiRpcProcess implements RpcProcessGateway {
       });
 
   @override
-  Future<Result<List<TranscriptMessage>, RpcError>> getMessages() =>
-      _guard(() async {
-        final response = await _request({'type': 'get_messages'});
-        return _dataMapper.transcriptMessages(response['data']);
-      });
+  Future<Result<List<CockpitTranscriptEvent>, RpcError>> getMessages({
+    required String sessionId,
+  }) => _guard(() async {
+    final response = await _request({'type': 'get_messages'});
+    return _dataMapper.transcriptEvents(response['data'], sessionId: sessionId);
+  });
 
   static const _ctrlPrefix = '\x00remote-pi-ctrl:';
 

@@ -393,14 +393,15 @@ class AgentSession extends PaneItem {
     final gateway = _gateway;
     if (gateway == null) return;
 
-    final result = await gateway.getMessages();
+    final result = await gateway.getMessages(sessionId: sessionPath);
     result.fold(
-      (messages) {
+      (events) {
         _entries.clear();
         this.sessionPath = sessionPath;
+        _awaitingUserEcho.clear();
         _transcriptEvents
           ..clear()
-          ..addAll(_eventsFromProjectedMessages(messages));
+          ..addAll(events);
         _replaceProjectedTranscript();
         _status = AgentStatus.idle;
         _pendingSend = false;
@@ -735,66 +736,6 @@ class AgentSession extends PaneItem {
         replyTo: id,
       ),
     );
-  }
-
-  Iterable<CockpitTranscriptEvent> _eventsFromProjectedMessages(
-    List<TranscriptMessage> messages,
-  ) sync* {
-    for (final message in messages) {
-      switch (message) {
-        case ProjectedUserMessage(:final text, :final images):
-          yield CockpitUserMessageSubmitted(
-            eventId: _nextTranscriptEventId(),
-            sessionId: _transcriptSessionId,
-            ts: DateTime.now(),
-            clientMessageId: _nextTranscriptEventId(),
-            text: text,
-            images: images,
-          );
-        case ProjectedAssistantTextMessage(:final text):
-          yield CockpitAssistantMessageCommitted(
-            eventId: _nextTranscriptEventId(),
-            sessionId: _transcriptSessionId,
-            ts: DateTime.now(),
-            messageId: _nextTranscriptEventId(),
-            replyTo: id,
-            text: text,
-          );
-        case ProjectedThinkingMessage(:final text):
-          yield CockpitThinkingDeltaReceived(
-            eventId: _nextTranscriptEventId(),
-            sessionId: _transcriptSessionId,
-            ts: DateTime.now(),
-            replyTo: id,
-            delta: text,
-          );
-        case ProjectedToolMessage(
-          :final callId,
-          :final name,
-          :final args,
-          :final status,
-          :final resultText,
-        ):
-          yield CockpitToolRequested(
-            eventId: _nextTranscriptEventId(),
-            sessionId: _transcriptSessionId,
-            ts: DateTime.now(),
-            toolCallId: callId,
-            tool: name,
-            args: args,
-          );
-          if (status != ToolProjectionStatus.running) {
-            yield CockpitToolFinished(
-              eventId: _nextTranscriptEventId(),
-              sessionId: _transcriptSessionId,
-              ts: DateTime.now(),
-              toolCallId: callId,
-              result: resultText,
-              error: status == ToolProjectionStatus.error ? resultText : null,
-            );
-          }
-      }
-    }
   }
 
   void _replaceProjectedTranscript() {

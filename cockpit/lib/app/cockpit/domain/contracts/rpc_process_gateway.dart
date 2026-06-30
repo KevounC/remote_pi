@@ -6,7 +6,7 @@ import 'package:cockpit/app/cockpit/domain/entities/pi_model.dart';
 import 'package:cockpit/app/cockpit/domain/entities/prompt_image.dart';
 import 'package:cockpit/app/cockpit/domain/entities/rpc_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/thinking_level.dart';
-import 'package:cockpit/app/cockpit/domain/entities/transcript_message.dart';
+import 'package:cockpit/app/cockpit/domain/entities/transcript_event.dart';
 import 'package:cockpit/app/cockpit/domain/exceptions/rpc_error.dart';
 import 'package:cockpit/app/core/domain/result.dart';
 
@@ -95,8 +95,11 @@ abstract class RpcProcessGateway implements Service {
   /// `switch_session` — carrega uma sessão salva do pi (por caminho).
   Future<Result<void, RpcError>> switchSession(String sessionPath);
 
-  /// `get_messages` — mensagens da sessão atual, já mapeadas pro transcript.
-  Future<Result<List<TranscriptMessage>, RpcError>> getMessages();
+  /// `get_messages` — eventos de transcript da sessão atual, prontos para
+  /// replay pelo reducer compartilhado.
+  Future<Result<List<CockpitTranscriptEvent>, RpcError>> getMessages({
+    required String sessionId,
+  });
 
   /// `get_session_stats` — uso da janela de contexto (pode ser `null`).
   Future<Result<ContextUsage?, RpcError>> sessionStats();

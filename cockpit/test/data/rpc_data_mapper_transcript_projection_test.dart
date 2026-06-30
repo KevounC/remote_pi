@@ -149,36 +149,47 @@ void main() {
     });
   });
 
-  group('RpcDataMapper transcriptMessages', () {
-    test('uses the shared projection for get_messages history', () {
-      final messages = const RpcDataMapper().transcriptMessages({
-        'session_id': 'opaque-session-id',
-        'messages': [
-          {'id': 'u1', 'role': 'user', 'content': 'hello'},
-          {
-            'id': 'a1',
-            'role': 'assistant',
-            'content': [
-              {'type': 'thinking', 'thinking': 'considering'},
-              {'type': 'text', 'text': 'hi'},
-              {
-                'type': 'toolCall',
-                'id': 'tool-1',
-                'name': 'read',
-                'arguments': {'path': 'README.md'},
-              },
-            ],
-          },
-          {
-            'role': 'toolResult',
-            'toolCallId': 'tool-1',
-            'isError': true,
-            'content': [
-              {'type': 'text', 'text': 'not found'},
-            ],
-          },
-        ],
-      });
+  group('RpcDataMapper transcriptEvents', () {
+    test('maps get_messages history to replayable transcript events', () {
+      final events = const RpcDataMapper().transcriptEvents(
+        _historyPayload,
+        sessionId: 'selected-session',
+      );
+
+      expect(events, hasLength(5));
+      expect(
+        events[0],
+        isA<CockpitUserMessageConfirmed>()
+            .having((e) => e.sessionId, 'sessionId', 'selected-session')
+            .having((e) => e.text, 'text', 'hello'),
+      );
+      expect(events[1], isA<CockpitThinkingDeltaReceived>());
+      expect(events[2], isA<CockpitAssistantMessageCommitted>());
+      expect(events[3], isA<CockpitToolRequested>());
+      expect(
+        events[4],
+        isA<CockpitToolFinished>()
+            .having((e) => e.toolCallId, 'toolCallId', 'tool-1')
+            .having((e) => e.error, 'error', 'not found'),
+      );
+
+      final projection = deriveCockpitTranscript(events);
+      expect(projection.entries, hasLength(4));
+      expect(projection.entries[0], isA<ProjectedUserMessage>());
+      expect(projection.entries[1], isA<ProjectedThinkingMessage>());
+      expect(projection.entries[2], isA<ProjectedAssistantTextMessage>());
+      expect(
+        projection.entries[3],
+        isA<ProjectedToolMessage>()
+            .having((m) => m.status, 'status', ToolProjectionStatus.error)
+            .having((m) => m.resultText, 'resultText', 'not found'),
+      );
+    });
+
+    test('compatibility transcriptMessages uses the shared projection', () {
+      final messages = const RpcDataMapper().transcriptMessages(
+        _historyPayload,
+      );
 
       expect(messages, hasLength(4));
       expect(messages[0], isA<ProjectedUserMessage>());
@@ -243,6 +254,35 @@ void main() {
     });
   });
 }
+
+const _historyPayload = <String, Object?>{
+  'session_id': 'opaque-session-id',
+  'messages': <Object?>[
+    <String, Object?>{'id': 'u1', 'role': 'user', 'content': 'hello'},
+    <String, Object?>{
+      'id': 'a1',
+      'role': 'assistant',
+      'content': <Object?>[
+        <String, Object?>{'type': 'thinking', 'thinking': 'considering'},
+        <String, Object?>{'type': 'text', 'text': 'hi'},
+        <String, Object?>{
+          'type': 'toolCall',
+          'id': 'tool-1',
+          'name': 'read',
+          'arguments': <String, Object?>{'path': 'README.md'},
+        },
+      ],
+    },
+    <String, Object?>{
+      'role': 'toolResult',
+      'toolCallId': 'tool-1',
+      'isError': true,
+      'content': <Object?>[
+        <String, Object?>{'type': 'text', 'text': 'not found'},
+      ],
+    },
+  ],
+};
 
 final class _CockpitFixture {
   const _CockpitFixture({
