@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-cli-daemon-pairing-module
 depends_on: [epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Move setup, local-mesh command lifecycle, and RPC control into CommandSurface
@@ -68,6 +68,17 @@ export async function probeListPeers(sockPath: string, timeoutMs = 2000): Promis
 - [ ] `probeListPeers` lives outside `index.ts` and is re-exported compatibly.
 - [ ] Existing stale/shutdown race tests around `_cmdJoin`, `_cmdStart`, `session_shutdown`, `CTRL_PREFIX`, and rename still pass.
 - [ ] `corepack pnpm typecheck` and `corepack pnpm test -- src/extension.test.ts src/session/e2e.test.ts` pass.
+
+## Implementation
+- Added `CommandSurface` as a concrete registration shell and extracted `LocalMeshCommands` for `/remote-pi` root/setup/join/stop/peers plus cwd-lock ownership. Compatibility exports in `index.ts` now delegate `_getLockedNameForTest` and `_resetCwdLockForTest` to the controller.
+- Added `ControlCommands` for transparent RPC controls (`relay:*`, `rename:*`), with relay start/stop still delegated through index-owned lifecycle callbacks and bridge attachment still delegated via `_attachBridgeIfReady`.
+- Extracted `probeListPeers` into `pi-extension/src/extension/probe_list_peers.ts` and re-exported it from `index.ts`, preserving `session/e2e.test.ts` imports.
+- Preserved the `_disposed` race guards after local mesh `connect()` and relay `connect()` awaits; session shutdown now releases the command-surface-owned cwd lock through `LocalMeshCommands.releaseCwdLock()`.
+- Verification:
+  - `corepack pnpm typecheck`: pass (`tsc --noEmit`).
+  - `corepack pnpm exec vitest run src/extension.test.ts src/session/e2e.test.ts`: attempted; actual local result `146 passed | 33 failed | 0 skipped` in this harness, with failures all on local IPC/UDS bind/connect paths (`listen EPERM` / leader election failures) before or inside mesh join coverage.
+  - `corepack pnpm exec vitest run src/extension.test.ts`: attempted; actual local result `142 passed | 5 failed | 0 skipped`, same local IPC/UDS mesh-join failure class. No assertion failure was observed in the extracted pure control/probe code outside mesh startup.
+  - Full-suite-fine confirmation could not be produced in this sandbox because Node cannot bind even a repo-local Unix socket (`listen EPERM`), and the existing `~/.pi/remote/sessions/local/broker.sock` is on a read-only filesystem.
 
 ## Rollback
 Move the local-mesh/control bodies and test aliases back to `index.ts`; because state fields move together, rollback is a file-level revert for the new local-mesh command files.

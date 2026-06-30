@@ -10,14 +10,18 @@ export interface CommandSurfaceDeps {
 }
 
 /** Behavior-preserving command/daemon registration shell. */
+export class CommandSurface implements CommandSurfacePort {
+  constructor(private readonly deps: CommandSurfaceDeps) {}
+
+  register(pi: ExtensionAPI, _runtime: RemotePiRuntime): void {
+    this.deps.deployAgentNetworkSkill();
+    this.deps.refreshPairingsCache();
+    this.deps.registerAgentTools(pi);
+    this.deps.registerCommands(pi);
+    if (process.env["REMOTE_PI_DAEMON"] === "1") this.deps.startDaemonMode();
+  }
+}
+
 export function createCommandSurface(deps: CommandSurfaceDeps): CommandSurfacePort {
-  return {
-    register(pi: ExtensionAPI, _runtime: RemotePiRuntime): void {
-      deps.deployAgentNetworkSkill();
-      deps.refreshPairingsCache();
-      deps.registerAgentTools(pi);
-      deps.registerCommands(pi);
-      if (process.env["REMOTE_PI_DAEMON"] === "1") deps.startDaemonMode();
-    },
-  };
+  return new CommandSurface(deps);
 }
