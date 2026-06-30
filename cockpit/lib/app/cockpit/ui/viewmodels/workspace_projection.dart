@@ -21,7 +21,7 @@ import 'package:flutter/foundation.dart';
 import 'package:window_manager/window_manager.dart';
 
 typedef WorkspaceProjectionTurnEnd = void Function(AgentSession session);
-typedef WorkspaceProjectionPreferenceChanged = void Function(String projectId);
+typedef WorkspaceProjectionDescriptorChanged = void Function(String projectId);
 
 /// Live projection of a persisted [WorkspaceDocument] into disposable UI tabs.
 ///
@@ -38,7 +38,7 @@ final class WorkspaceProjection {
     required this.lsp,
     VoidCallback? onChanged,
     WorkspaceProjectionTurnEnd? onAgentTurnEnd,
-    WorkspaceProjectionPreferenceChanged? onPreferenceChanged,
+    WorkspaceProjectionDescriptorChanged? onDescriptorChanged,
   }) : _rpcFactory = rpcFactory,
        _terminalFactory = terminalFactory,
        _fileReader = fileReader,
@@ -46,7 +46,7 @@ final class WorkspaceProjection {
        _notifier = notifier,
        _onChanged = onChanged ?? _noop,
        _onAgentTurnEnd = onAgentTurnEnd,
-       _onPreferenceChanged = onPreferenceChanged;
+       _onDescriptorChanged = onDescriptorChanged;
 
   final RpcGatewayFactory _rpcFactory;
   final TerminalGatewayFactory _terminalFactory;
@@ -59,7 +59,7 @@ final class WorkspaceProjection {
 
   final VoidCallback _onChanged;
   final WorkspaceProjectionTurnEnd? _onAgentTurnEnd;
-  final WorkspaceProjectionPreferenceChanged? _onPreferenceChanged;
+  final WorkspaceProjectionDescriptorChanged? _onDescriptorChanged;
 
   final Map<String, PaneItem> _items = <String, PaneItem>{};
   final Map<String, StreamSubscription<void>> _fileWatchers =
@@ -106,17 +106,7 @@ final class WorkspaceProjection {
         createEmpty(id: tab.id, projectId: project.id, title: tab.title);
         return true;
       case WorkspaceTabKind.agent:
-        createAgent(
-          id: tab.id,
-          project: project,
-          workingDirectory: cwdOf(),
-          title: tab.title,
-          autoStartRelay: tab.autoStartRelay,
-          restoreSessionPath: tab.sessionPath,
-          preferredModelId: tab.preferredModelId,
-          preferredThinking: tab.preferredThinking,
-        );
-        return true;
+        return realizeAgent(tab, project);
     }
   }
 
@@ -131,6 +121,7 @@ final class WorkspaceProjection {
       workingDirectory: '',
       factory: _rpcFactory,
       title: title ?? 'New',
+      isPlaceholder: true,
     );
     _items[session.id] = session;
     return session;
@@ -153,6 +144,23 @@ final class WorkspaceProjection {
     return terminal;
   }
 
+  Future<bool> realizeAgent(WorkspaceTab tab, Project project) async {
+    if (tab.kind != WorkspaceTabKind.agent) return false;
+    final cwd = tab.relativeSubpath.isEmpty
+        ? project.path
+        : '${project.path}/${tab.relativeSubpath}';
+    final session = AgentSession.fromWorkspaceTab(
+      tab: tab,
+      projectId: project.id,
+      workingDirectory: cwd,
+      factory: _rpcFactory,
+    );
+    _wireAgent(session, project.id);
+    _items[session.id] = session;
+    await _bootAgent(session, project, tab.sessionPath);
+    return true;
+  }
+
   AgentSession createAgent({
     required String id,
     required Project project,
@@ -163,19 +171,22 @@ final class WorkspaceProjection {
     String? preferredModelId,
     ThinkingLevel preferredThinking = ThinkingLevel.off,
   }) {
-    final session =
-        AgentSession(
-            id: id,
-            projectId: project.id,
-            workingDirectory: workingDirectory,
-            factory: _rpcFactory,
-            title: title,
-            autoStartRelay: autoStartRelay,
-          )
-          ..preferredModelId = preferredModelId
-          ..preferredThinking = preferredThinking;
-    session.onTurnEnd = () => _onAgentTurnEnd?.call(session);
-    session.onPreferenceChanged = () => _onPreferenceChanged?.call(project.id);
+    final relativeSubpath = _subOf(workingDirectory, project.path);
+    final session = AgentSession.fromWorkspaceTab(
+      tab: WorkspaceTab.agent(
+        id: id,
+        relativeSubpath: relativeSubpath,
+        title: title,
+        sessionPath: restoreSessionPath,
+        autoStartRelay: autoStartRelay,
+        preferredModelId: preferredModelId,
+        preferredThinking: preferredThinking,
+      ),
+      projectId: project.id,
+      workingDirectory: workingDirectory,
+      factory: _rpcFactory,
+    );
+    _wireAgent(session, project.id);
     _items[session.id] = session;
     unawaited(_bootAgent(session, project, restoreSessionPath));
     return session;
@@ -275,17 +286,15 @@ final class WorkspaceProjection {
       return WorkspaceTab.viewer(id: item.id, filePath: item.path);
     }
     final agent = item as AgentSession;
-    if (agent.status == AgentStatus.empty) {
-      return WorkspaceTab.empty(id: agent.id, title: agent.title);
+    return descriptorForAgent(agent, project);
+  }
+
+  WorkspaceTab descriptorForAgent(AgentSession session, Project project) {
+    if (session.isPlaceholder) {
+      return WorkspaceTab.empty(id: session.id, title: session.title);
     }
-    return WorkspaceTab.agent(
-      id: agent.id,
-      relativeSubpath: _subOf(agent.workingDirectory, project.path),
-      title: agent.title,
-      sessionPath: agent.sessionPath,
-      autoStartRelay: agent.autoStartRelay,
-      preferredModelId: agent.preferredModelId,
-      preferredThinking: agent.preferredThinking,
+    return session.workspaceDescriptor(
+      relativeSubpath: _subOf(session.workingDirectory, project.path),
     );
   }
 
@@ -314,7 +323,7 @@ final class WorkspaceProjection {
     if (fresh.isEmpty) return;
     fresh.sort((a, b) => b.modifiedAt.compareTo(a.modifiedAt));
     session.sessionPath = fresh.first.path;
-    _onChanged();
+    _notifyDescriptorChanged(session.projectId);
   }
 
   Future<void> notifyIfNeeded(
@@ -352,6 +361,16 @@ final class WorkspaceProjection {
       item.dispose();
     }
     _items.clear();
+  }
+
+  void _wireAgent(AgentSession session, String projectId) {
+    session.onTurnEnd = () => _onAgentTurnEnd?.call(session);
+    session.onProjectionChanged = () => _notifyDescriptorChanged(projectId);
+  }
+
+  void _notifyDescriptorChanged(String projectId) {
+    _onDescriptorChanged?.call(projectId);
+    _onChanged();
   }
 
   Future<void> _bootAgent(

@@ -1,14 +1,14 @@
 ---
 id: epic-bold-cockpit-workspace-projection-agent-session-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-agent-session
 depends_on: [epic-bold-cockpit-workspace-projection-agent-session-step-3, epic-bold-cockpit-workspace-projection-workspace-document-step-6]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Realize AgentSession from WorkspaceDocument tab descriptors
@@ -113,3 +113,12 @@ Medium. This step crosses the workspace-document and agent-session seams. The pr
 ## Rollback
 
 Restore `_buildAgent`, `_restoreSession`, `_sessionToJson`, `onPreferenceChanged`, and direct `AgentSession` construction in `CockpitViewModel`. The earlier agent projection and transcript refactors can remain if their compatibility getters still satisfy the old serializer.
+
+## Implementation
+
+- Descriptor ownership moved into `WorkspaceProjection`: it now realizes agent tabs with `realizeAgent(WorkspaceTab.agent, Project)` and projects live agents back via `descriptorForAgent`, while `CockpitViewModel` delegates restore/serialization through the workspace projection.
+- `AgentSession.fromWorkspaceTab` initializes tab identity, working directory, session path, relay preference, preferred model, and preferred thinking from the document descriptor; `workspaceDescriptor` snapshots the projection for saving.
+- Replaced `onPreferenceChanged` with `onProjectionChanged` for session-path, title/name-assigned, preferred model, and preferred thinking updates; `setAutoStartRelay` also emits descriptor changes while `CockpitViewModel` keeps debounced layout saves.
+- Empty placeholders now use an explicit `isPlaceholder` marker, so unbooted real agent tabs persist as `type: agent` instead of being inferred from lifecycle `AgentStatus.empty`.
+- `v: 1` layout JSON shape is unchanged; existing round-trip tests still assert `agent` and `empty` descriptor keys.
+- Tests: `flutter pub get --offline`; `flutter analyze` (0 issues); targeted `flutter test test/ui/workspace_projection_test.dart test/domain/workspace_document_codec_test.dart` (9/9); full `flutter test` (221/221).

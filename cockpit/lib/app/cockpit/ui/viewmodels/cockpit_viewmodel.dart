@@ -85,7 +85,7 @@ class CockpitViewModel extends ChangeNotifier {
       lsp: lsp,
       onChanged: notifyListeners,
       onAgentTurnEnd: _onAgentTurnEnd,
-      onPreferenceChanged: _scheduleSave,
+      onDescriptorChanged: _scheduleSave,
     );
   }
 
@@ -361,9 +361,7 @@ class CockpitViewModel extends ChangeNotifier {
           newTab: viewerTab,
         ),
       );
-    } else if (lf != null &&
-        only is AgentSession &&
-        only.status == AgentStatus.empty) {
+    } else if (lf != null && only is AgentSession && only.isPlaceholder) {
       // Placeholder vazio → substitui.
       applied = _applyWorkspaceCommand(
         (doc) => WorkspaceDocumentCommands.replaceTab(
@@ -895,7 +893,7 @@ class CockpitViewModel extends ChangeNotifier {
     if (!nameChanged && !relayChanged) return;
 
     s.rename(agentName.trim());
-    s.autoStartRelay = autoStartRelay;
+    s.setAutoStartRelay(autoStartRelay);
     if (nameChanged && s.isAlive) {
       unawaited(s.sendRelayControl('rename:${agentName.trim()}'));
     }
@@ -952,8 +950,7 @@ class CockpitViewModel extends ChangeNotifier {
     final tab = _workspace.descriptorFor(s, project);
 
     final active = _workspace.item(leaf.active);
-    final replaceEmpty =
-        active is AgentSession && active.status == AgentStatus.empty;
+    final replaceEmpty = active is AgentSession && active.isPlaceholder;
 
     final applied = _applyWorkspaceCommand(
       (doc) => replaceEmpty
@@ -1282,7 +1279,7 @@ class CockpitViewModel extends ChangeNotifier {
 
     final restored = <String>{};
     for (final tab in document.tabs.values) {
-      if (await _restoreSession(tab, project)) restored.add(tab.id);
+      if (await _workspace.realize(tab, project)) restored.add(tab.id);
     }
 
     document = document.filterTabs(
@@ -1291,11 +1288,6 @@ class CockpitViewModel extends ChangeNotifier {
     );
     _setDocument(document);
   }
-
-  /// Recria uma sessão a partir do descritor. `false` = não deu pra restaurar
-  /// (ex.: viewer de arquivo que sumiu) → a aba é descartada no sanitize.
-  Future<bool> _restoreSession(WorkspaceTab tab, Project project) =>
-      _workspace.realize(tab, project);
 
   /// Avança `_seq` além de qualquer sufixo numérico dos ids restaurados, pra
   /// `_nid` não colidir com ids reaproveitados.

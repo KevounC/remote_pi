@@ -13,6 +13,7 @@ import 'package:cockpit/app/cockpit/domain/entities/rpc_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/thinking_level.dart';
 import 'package:cockpit/app/cockpit/domain/entities/transcript_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/transcript_message.dart';
+import 'package:cockpit/app/cockpit/domain/entities/workspace_tab.dart';
 import 'package:cockpit/app/cockpit/ui/session/agent_entry.dart';
 import 'package:cockpit/app/cockpit/ui/session/agent_process_controller.dart';
 import 'package:cockpit/app/cockpit/ui/session/pane_item.dart';
@@ -32,9 +33,34 @@ class AgentSession extends PaneItem {
     required RpcGatewayFactory factory,
     String? title,
     this.autoStartRelay = false,
+    this.isPlaceholder = false,
   }) : _process = AgentProcessController(factory: factory),
        _title = title ?? 'New agent' {
     _signalSub = _process.signals.listen(_onSignal);
+  }
+
+  factory AgentSession.fromWorkspaceTab({
+    required WorkspaceTab tab,
+    required String projectId,
+    required String workingDirectory,
+    required RpcGatewayFactory factory,
+  }) {
+    if (tab.kind != WorkspaceTabKind.agent) {
+      throw ArgumentError.value(tab.kind, 'tab.kind', 'Expected agent tab');
+    }
+    final session = AgentSession(
+      id: tab.id,
+      projectId: projectId,
+      workingDirectory: workingDirectory,
+      factory: factory,
+      title: tab.title,
+      autoStartRelay: tab.autoStartRelay,
+    );
+    session
+      ..sessionPath = tab.sessionPath
+      ..preferredModelId = tab.preferredModelId
+      ..preferredThinking = tab.preferredThinking;
+    return session;
   }
 
   @override
@@ -46,9 +72,10 @@ class AgentSession extends PaneItem {
   /// notificar o workspace.
   VoidCallback? onTurnEnd;
 
-  /// Disparado quando o usuário altera [preferredModelId] ou [preferredThinking].
-  /// A VM usa pra agendar um save imediato — sem depender do fim de turno.
-  VoidCallback? onPreferenceChanged;
+  /// Disparado quando o descritor persistível deste agente muda.
+  /// A projeção usa isso para atualizar o WorkspaceDocument sem esperar o fim
+  /// de turno: título, sessão restaurada/capturada e preferências entram aqui.
+  VoidCallback? onProjectionChanged;
 
   /// Foca o input do composer deste agente. Registrado pelo `AgentComposer`
   /// (quando montado) e disparado pelo atalho ⌘L/Ctrl+L.
@@ -57,6 +84,11 @@ class AgentSession extends PaneItem {
   /// Pasta (subpasta do projeto) onde o `pi --mode rpc` roda.
   @override
   final String workingDirectory;
+
+  /// Verdadeiro só para a aba placeholder "New" criada pelo WorkspaceDocument.
+  /// Um agente real ainda pode estar com lifecycle `empty` antes do boot começar;
+  /// persistência deve usar este marcador, não o estado do processo.
+  final bool isPlaceholder;
 
   /// Conectar ao relay ao iniciar (injetado em `REMOTE_PI_DIRECT_CONFIG`).
   bool autoStartRelay;
@@ -163,6 +195,17 @@ class AgentSession extends PaneItem {
   );
 
   AgentStatus get status => projection.lifecycle.toLegacyStatus();
+
+  WorkspaceTab workspaceDescriptor({required String relativeSubpath}) =>
+      WorkspaceTab.agent(
+        id: id,
+        relativeSubpath: relativeSubpath,
+        title: projection.title,
+        sessionPath: projection.sessionPath,
+        autoStartRelay: autoStartRelay,
+        preferredModelId: projection.controls.preferredModelId,
+        preferredThinking: projection.controls.preferredThinking,
+      );
 
   AgentTurnProjection get turn => projection.turn;
 
@@ -293,9 +336,9 @@ class AgentSession extends PaneItem {
         sessionPath = null;
         _addInfo('new session');
         notifyListeners();
-        // sessionPath mudou → pede à VM para salvar o layout agora (sem esperar
-        // o próximo fim de turno, que pode nunca vir antes do app fechar).
-        onPreferenceChanged?.call();
+        // sessionPath mudou → pede à projeção para salvar o layout agora (sem
+        // esperar o próximo fim de turno, que pode nunca vir antes do app fechar).
+        _notifyProjectionChanged();
       },
       (error) {
         _addInfo('failed to create session: ${error.message}', isError: true);
@@ -325,7 +368,7 @@ class AgentSession extends PaneItem {
       (applied) {
         _model = applied;
         preferredModelId = applied.id; // persiste a escolha do usuário
-        onPreferenceChanged?.call();
+        _notifyProjectionChanged();
       },
       (error) {
         _addInfo('failed to switch model: ${error.message}', isError: true);
@@ -343,7 +386,7 @@ class AgentSession extends PaneItem {
       (_) {
         _thinking = level;
         preferredThinking = level; // persiste a escolha do usuário
-        onPreferenceChanged?.call();
+        _notifyProjectionChanged();
       },
       (error) {
         _addInfo('failed to change effort: ${error.message}', isError: true);
@@ -390,7 +433,7 @@ class AgentSession extends PaneItem {
         _pendingSend = false;
         _reduceTurn(AgentTurnTransition.idle);
         notifyListeners();
-        onPreferenceChanged?.call();
+        _notifyProjectionChanged();
       },
       (error) {
         _addInfo('failed to load history: ${error.message}', isError: true);
@@ -404,6 +447,14 @@ class AgentSession extends PaneItem {
     if (trimmed.isEmpty || trimmed == _title) return;
     _title = trimmed;
     notifyListeners();
+    _notifyProjectionChanged();
+  }
+
+  void setAutoStartRelay(bool value) {
+    if (autoStartRelay == value) return;
+    autoStartRelay = value;
+    notifyListeners();
+    _notifyProjectionChanged();
   }
 
   /// Mata o processo e reseta o status para `crashed`, mas mantém a sessão
@@ -638,8 +689,7 @@ class AgentSession extends PaneItem {
         relayStatus = status;
       case RpcNameAssigned(:final assigned, :final changed):
         if (changed) {
-          rename(assigned);
-          onPreferenceChanged?.call(); // persiste no layout imediatamente
+          rename(assigned); // persiste no layout imediatamente
         }
       case RpcUnknown():
         return;
@@ -747,6 +797,10 @@ class AgentSession extends PaneItem {
         tool.resultText = resultText;
         return tool;
     }
+  }
+
+  void _notifyProjectionChanged() {
+    onProjectionChanged?.call();
   }
 
   void _addInfo(String text, {bool isError = false, bool dedup = false}) {

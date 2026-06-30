@@ -22,6 +22,7 @@ import 'package:cockpit/app/cockpit/domain/entities/transcript_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/workspace_document.dart';
 import 'package:cockpit/app/cockpit/domain/entities/workspace_tab.dart';
 import 'package:cockpit/app/cockpit/domain/exceptions/rpc_error.dart';
+import 'package:cockpit/app/cockpit/ui/session/agent_session.dart';
 import 'package:cockpit/app/cockpit/ui/session/file_viewer_session.dart';
 import 'package:cockpit/app/cockpit/ui/states/pane_node.dart';
 import 'package:cockpit/app/cockpit/ui/viewmodels/workspace_projection.dart';
@@ -126,6 +127,119 @@ void main() {
     projection.dispose();
   });
 
+  test('realizes agent descriptors and projects them back unchanged', () async {
+    final rpcFactory = _RpcFactory();
+    final projection = _projection(rpcFactory: rpcFactory);
+    final project = _project();
+    const tab = WorkspaceTab.agent(
+      id: 'a1',
+      relativeSubpath: 'packages/app',
+      title: 'Agent',
+      sessionPath: '/sessions/a1.jsonl',
+      autoStartRelay: true,
+      preferredModelId: 'gpt-test',
+      preferredThinking: ThinkingLevel.high,
+    );
+
+    final realized = await projection.realizeAgent(tab, project);
+
+    expect(realized, isTrue);
+    final agent = projection.item('a1');
+    expect(agent, isA<AgentSession>());
+    final session = agent! as AgentSession;
+    expect(session.workingDirectory, '/workspace/packages/app');
+    expect(session.sessionPath, '/sessions/a1.jsonl');
+    expect(session.autoStartRelay, isTrue);
+    expect(session.preferredModelId, 'gpt-test');
+    expect(session.preferredThinking, ThinkingLevel.high);
+    expect(
+      rpcFactory.lastGateway?.spawnWorkingDirectory,
+      session.workingDirectory,
+    );
+    expect(rpcFactory.lastGateway?.spawnSessionId, '/sessions/a1.jsonl');
+    expect(
+      rpcFactory.lastGateway?.spawnEnvironment?['REMOTE_PI_DIRECT_CONFIG'],
+      contains('"auto_start_relay":true'),
+    );
+    expect(
+      projection.descriptorForAgent(session, project).kind,
+      WorkspaceTabKind.agent,
+    );
+    expect(
+      projection.descriptorForAgent(session, project).sessionPath,
+      '/sessions/a1.jsonl',
+    );
+    expect(
+      projection.descriptorForAgent(session, project).preferredModelId,
+      'gpt-test',
+    );
+    expect(
+      projection.descriptorForAgent(session, project).preferredThinking,
+      ThinkingLevel.high,
+    );
+    projection.dispose();
+  });
+
+  test('keeps placeholders distinct from unbooted agent descriptors', () async {
+    final projection = _projection();
+    final project = _project();
+
+    final empty = projection.createEmpty(id: 'a-empty', projectId: project.id);
+    final agent = projection.createAgent(
+      id: 'a-real',
+      project: project,
+      workingDirectory: project.path,
+      title: 'Real',
+      preferredModelId: 'gpt-test',
+    );
+
+    expect(
+      projection.descriptorFor(empty, project).kind,
+      WorkspaceTabKind.empty,
+    );
+    expect(
+      projection.descriptorFor(agent, project).kind,
+      WorkspaceTabKind.agent,
+    );
+    expect(
+      projection.descriptorFor(agent, project).preferredModelId,
+      'gpt-test',
+    );
+    projection.dispose();
+  });
+
+  test('captures session path through descriptor-change callback', () async {
+    final changedProjects = <String>[];
+    final projection = _projection(
+      history: _History(<SessionInfo>[
+        SessionInfo(
+          path: '/sessions/new.jsonl',
+          id: 'new',
+          modifiedAt: DateTime(2026, 2),
+        ),
+      ]),
+      onDescriptorChanged: changedProjects.add,
+    );
+    final project = _project();
+    final agent = AgentSession(
+      id: 'a1',
+      projectId: project.id,
+      workingDirectory: project.path,
+      factory: _RpcFactory(),
+      title: 'Agent',
+    )..sessionBaseline = <String>{'/sessions/old.jsonl'};
+
+    await projection.captureSessionPath(agent);
+
+    expect(agent.sessionPath, '/sessions/new.jsonl');
+    expect(changedProjects, <String>[project.id]);
+    expect(
+      projection.descriptorForAgent(agent, project).sessionPath,
+      '/sessions/new.jsonl',
+    );
+    projection.dispose();
+  });
+
   test(
     'refreshes document descriptors without mutating the document',
     () async {
@@ -155,17 +269,21 @@ void main() {
 }
 
 WorkspaceProjection _projection({
+  _RpcFactory? rpcFactory,
   _FileReader? reader,
+  _History? history,
   void Function()? onChanged,
+  void Function(String projectId)? onDescriptorChanged,
 }) {
   return WorkspaceProjection(
-    rpcFactory: _RpcFactory(),
+    rpcFactory: rpcFactory ?? _RpcFactory(),
     terminalFactory: _TerminalFactory(),
     fileReader: reader ?? _FileReader(),
-    history: _History(),
+    history: history ?? _History(),
     notifier: _Notifier(),
     lsp: LspServerPool(_LspFactory()),
     onChanged: onChanged,
+    onDescriptorChanged: onDescriptorChanged,
   );
 }
 
@@ -214,11 +332,15 @@ final class _Notifier implements Notifier {
 }
 
 final class _History implements SessionHistory {
+  _History([this.sessions = const <SessionInfo>[]]);
+
+  final List<SessionInfo> sessions;
+
   @override
   Future<List<SessionInfo>> sessionsFor(
     String cwd, {
     bool withTitle = false,
-  }) async => const <SessionInfo>[];
+  }) async => sessions;
 }
 
 final class _TerminalFactory implements TerminalGatewayFactory {
@@ -250,12 +372,17 @@ final class _TerminalGateway implements TerminalGateway {
 }
 
 final class _RpcFactory implements RpcGatewayFactory {
+  _RpcGateway? lastGateway;
+
   @override
-  RpcProcessGateway create() => _RpcGateway();
+  RpcProcessGateway create() => lastGateway = _RpcGateway();
 }
 
 final class _RpcGateway implements RpcProcessGateway {
   final _events = StreamController<RpcEvent>.broadcast();
+  String? spawnWorkingDirectory;
+  Map<String, String>? spawnEnvironment;
+  String? spawnSessionId;
 
   @override
   Stream<RpcEvent> get events => _events.stream;
@@ -337,7 +464,12 @@ final class _RpcGateway implements RpcProcessGateway {
     required String workingDirectory,
     Map<String, String>? environment,
     String? sessionId,
-  }) async => const Success(null);
+  }) async {
+    spawnWorkingDirectory = workingDirectory;
+    spawnEnvironment = environment;
+    spawnSessionId = sessionId;
+    return const Success(null);
+  }
 
   @override
   Future<Result<void, RpcError>> switchSession(String sessionPath) async =>
