@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-relay-transport-module-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-relay-transport-module
 depends_on: [epic-bold-split-pi-extension-index-composition-root, epic-bold-reachability-contract-pi-adapter-step-4]
@@ -91,3 +91,19 @@ step depends on.
 ## Rollback
 Delete the new adapter module and its type-only imports. No runtime behavior
 should have changed in this step.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: `corepack pnpm typecheck` clean;
+**full pi-ext suite 651 passed | 3 skipped | 0 failed (44 files)** — fully green
+(shell step, no behavior change; suite confirms no regression).
+
+Commit `581c349` scoped to pi-ext only (relay_transport.ts new 207 lines + ports.ts
++ story .md); collision guard held. Adapter verified: `createRelayTransportPort()`
+implements `RelayTransportPort` contract; private relay/URL/keypair/room-meta/
+reconnect-timer/attempt/status/outer-message/bridge fields owned by the adapter
+(not new index.ts globals); reachability constants imported from
+`reachability_contract.js` via `reachabilityBackoffMs` (no duplicated backoff
+ladder — single source of truth preserved). The `currentRelayForOwnerChannels()`
+internal escape hatch is the documented temporary bridge the story explicitly
+permits (marked for step-5 removal).
