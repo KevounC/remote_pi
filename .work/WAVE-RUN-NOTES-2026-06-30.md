@@ -134,6 +134,30 @@ Do NOT run `git add`/`git commit` while parallel write-subagents are in flight �
 it can sweep in an agent's in-progress story transition. Agents commit their own
 work; orchestrator commits only its own notes/docs when no agents are writing.
 
+## ⚠️ ENV-CEILING FINDING (load-bearing for all future pi-ext agents)
+
+**The sandbox kernel blocks Unix domain socket `bind()` with `EPERM` everywhere**
+(verified: `/tmp`, `/var/tmp`, project dirs, `~/.pi` — all writable, but UDS
+listen is forbidden — a namespace/seccomp restriction, NOT a permissions issue).
+`acquireCwdLock` (src/session/cwd_lock.ts) creates a `.sock` UDS to pin a
+per-cwd singleton; it CANNOT bind → returns `{ok:false}` → `src/extension.test.ts`
+`beforeEach` setup bails silently for ~37 tests that exercise the extension
+harness. `cwd_lock.test.ts` itself fails all 7 tests (same EPERM). `~/.pi/remote/locks`
+is also on a READ-ONLY fs.
+
+This is a verified PRE-EXISTING environmental ceiling (clean HEAD has the same
+37 failures), NOT a code defect. **DO NOT require full `src/extension.test.ts`
+green — it is impossible in this sandbox.** Future pi-ext implement agents must
+use this signal:
+1. `corepack pnpm typecheck` (clean).
+2. Targeted vitest on the files they own.
+3. `vitest run src/extension.test.ts -t "<their test fragments>"` (story-filtered).
+4. Confirm they did NOT add NEW failures beyond the known 37 baseline.
+This matches `.agents/rules/testing-integrity.md` Environment-issue category.
+
+The transcript-projection-derive-step-4 and dart-codegen-step-4 Wave-4 agents
+were given this env-ceiling briefing explicitly.
+
 ---
 
 ## Wave 2 results — 6/9 done (fast-lane verified by orchestrator)
@@ -192,3 +216,47 @@ Transient-tree note for W3 agents: the dart-codegen agent's uncommitted
 `cockpit_viewmodel.dart` may make whole-project `analyze` show transient errors
 in THOSE files. W3 agents were told to run their targeted tests as the regression
 signal and ignore analyze errors confined to other agents' in-flight files.
+
+## Wave 3 results — 4/4 done (fast-lane verified by orchestrator)
+
+| Story | Commit | Verdict |
+|---|---|---|
+| canonical-session-relay-opaque-targeting-step-4 | 62eaef2 | ✅ done (9 pi_forward tests: session_id opacity + room-targeted; stale comments removed) |
+| reachability-contract-pi-adapter-step-4 | a227eaa | ✅ done (liveness constants from contract; 14/14 tests) |
+| turn-state-machine-projection-consumers-step-2 | f890c8c | ✅ done (HIGH-risk convergence core: 55/55 tests, all terminal causes → idle; ChatViewModel single projection, no OR logic) |
+| cockpit-workspace-projection-settings-split-step-5 | b0bdaff | ✅ done (ScheduleSettingsPanel + SettingsCategoryPanel; settings_page pure route shell; 22/22 tests; analyze clean) |
+
+Plus env-ceiling triage on **turn-state-machine-algebraic-state-step-3** (commit
+`b4d8539` implement + `21bc551` review-approve): the implement agent (cc53b26d)
+refused to commit because full `extension.test.ts` wasn't green. Orchestrator
+triaged via stash differential (clean HEAD = 37 fail/106 pass; with agent's
+changes = 37 fail/110 pass → +4 passing, 0 broken) and committed on the agent's
+behalf. The 37 failures are the UDS-EPERM env ceiling (see finding above), not a
+code defect. Agent's own signals green: 16 turn_state + 6 story-filtered
+extension convergence tests + typecheck.
+
+Also done this wave's tail (Wave 2 stragglers that completed during W3):
+- generated-protocol-dart-codegen-step-3 (`4ba0339`) ✅ done — regen-diff EMPTY
+  verified by orchestrator (generated-contract invariant holds); 15/15 codegen tests.
+- cockpit-workspace-projection-workspace-document-step-4 (`7201976`) ✅ done —
+  `_trees`/`_focused`→`_documents`; 3/3 tests; whole-cockpit analyze clean.
+
+**Session tally after W3: 64 done / 72 implementing / 0 review.**
+
+## Wave 4 — launched 2026-06-30 (4 disjoint bundles)
+
+14 ready after W3. Collision constraints: relay `peer.rs`/`registry.rs` cluster
+(rust-codegen-step-3, control-handlers-step-5, projection-consumers-step-3 —
+all collide) deferred to W5; pi-ext `index.ts` god-file serialized (ONE writer
+this wave: transcript-projection-derive-step-4).
+
+| Agent ID | Story | Subproject | Model/Tier | Owns |
+|---|---|---|---|---|
+| d9b05f5a | generated-protocol-dart-codegen-step-4 | app | gpt-5.5 high | protocol.dart (facade), codec.dart, control_frames.dart, protocol.g.dart (regen), protocol_test, generator |
+| 8d0486b5 | transcript-event-log-projection-derive-step-4 | pi-ext | gpt-5.5 high | index.ts (SOLE writer), transcript_event.ts, transcript_projection.ts, ext.test.ts transcript sections (env-ceiling-aware verification) |
+| fb094b41 | cockpit-workspace-projection-workspace-document-step-5 | cockpit | gpt-5.5 high | cockpit_viewmodel.dart, workspace_document_commands.dart (new), commands test |
+| 829c7f28 | canonical-session-app-attribution-hydration-step-3 | app | gpt-5.5 high | boxes.dart, session_index_record.dart, SyncService keying, read repos, ChatViewModel keying |
+
+Cross-bundle overlap check: #1 app-protocol vs #4 app-persistence — disjoint
+(protocol files vs boxes/records/sync keying). #2 pi-ext sole index.ts writer.
+#3 cockpit disjoint. All 4 disjoint from each other.
