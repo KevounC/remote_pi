@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-sdk-session-projection-module
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-split-pi-extension-index
 depends_on: [epic-bold-split-pi-extension-index-composition-root]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Split pi-extension index — SDK session projection module
@@ -479,3 +479,12 @@ No step intentionally changes public protocol shape or CLI API. Step 3 is semi-a
 - Medium risk: moving `session_sync` history into a module while preserving stop/start vs. session-replacement semantics. Tests must prove relay reconnect does not reset history and successful `session_new` does.
 - Medium risk: bridge attach guard touching cross-PC code. The guard is additive/no-op when current; detached objects already conceptually should no-op.
 - Rollback is step-local because the module is introduced as a shell, then owns identity/history, then action routing, then turn state, then late continuation guards.
+
+## Review — advanced to done (2026-06-30)
+
+All 5 child steps `done` (session identity/transcript → app ingress/action routing
+→ fresh-capability guards → turn/queue/late-attach state → epoch teardown + bridge
+late-continuation). `index.ts` no longer owns session identity, transcript history,
+turn/queue/late-attach state, or stale `_pi` fallback — all moved into
+`SdkSessionProjection`. `working:false` convergence preserved across all 7 paths.
+Detached no-op guards harden the cross-PC bridge against late continuations. Epic complete.
