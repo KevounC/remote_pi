@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-registry-split-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-relay-typed-actor-registry-split
 depends_on: [epic-bold-relay-typed-actor-registry-split-step-4]
@@ -70,3 +70,23 @@ Revert this composition step to the step-4 facade. Earlier extracted modules can
 - Deleted obsolete facade broadcast helpers (`backfill_presence`, `is_online`, `forward`, `forward_to_peer`, `forward_to_room`) so production code no longer treats `PeerRegistry` as a hidden bus; registry tests exercise delivery through the composed connection piece. No obsolete tuple aliases lived in the owned facade/handler files; the extracted `RoomKey` alias remains untouched per the collision guard.
 - Verification: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build` passed from `relay/`. `cargo test` covered 158 tests across unit, integration, mesh, cross-PC, presence, rooms, protocol parity, and doc-test targets.
 - No-regression confirmation: routing, duplicate connections, stale unregister, presence transitions, room lifecycle, metadata patches, and cross-PC delivery/transport-error coverage all remained green.
+
+## Review
+
+Approved (2026-06-30) with HIGH-risk final-composition verification. Independently
+re-ran: relay `cargo fmt --check` clean; `cargo clippy -- -D warnings` clean;
+`cargo test` 158 passed / 0 failed (no regression — existing routing/duplicate/
+stale-unregister/presence/room-lifecycle/metadata/cross-PC tests prove the facade
+composition is correct). Commit `4b597f2` scoped to peers/registry.rs (facade) +
+handlers/{connection_actor,control,pi_forward} (narrow-surface migration) + story
+.md; relay-only, no generated files.
+
+Facade composition verified: `PeerRegistry` is now a thin facade over
+`Arc<ConnectionRegistry>` + `Arc<RoomStateStore>` + `Arc<PresenceState>` +
+`Arc<RegistryEventPublisher>` — no longer a grab-bag owning the sender map, room
+metadata, presence transitions, event serialization, and metrics. Call sites
+migrated: `ConnectionActor` stores the narrow pieces; typed control handlers use
+them for presence backfill/checks + room metadata patches; `pi_forward` depends
+on `ConnectionRegistry` delivery (not the full facade). Obsolete facade broadcast
+helpers (`backfill_presence`/`is_online`/`forward`/`forward_to_peer`/`forward_to_room`)
+deleted so production code no longer treats PeerRegistry as a hidden bus. **registry-split arc complete (5/5).**
