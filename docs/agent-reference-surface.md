@@ -7,7 +7,7 @@ Remote Pi is moving from ad-hoc `CLAUDE.md` guidance toward a platform-style ref
 - `/home/agent/SNC/platform/AGENTS.md` — indexes build/test commands, tech references, research/work bands, coding conventions, and agent commands.
 - `/home/agent/SNC/platform/.claude/skills/hono-v4/SKILL.md` — versioned framework reference with imports, API snippets, validation/openapi patterns, gotchas, and anti-patterns.
 - `/home/agent/SNC/platform/.claude/skills/drizzle-v0/SKILL.md`, `zod-v4/SKILL.md`, and scan-rule skills — same convention applied to library APIs and review lenses.
-- `/home/agent/forks/remote_pi/AGENTS.md` and subproject `CLAUDE.md` files — current Remote Pi guidance is useful but mostly persona/orchestration prose, not API-reference substrate.
+- `/home/agent/projects/remote_pi/AGENTS.md` and subproject `CLAUDE.md` files — current Remote Pi guidance is useful but mostly persona/orchestration prose, not API-reference substrate.
 
 ## Recommendation
 
