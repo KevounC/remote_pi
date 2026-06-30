@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-identity-model-step-4
 kind: story
-stage: review
+stage: implementing
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-canonical-session-identity-model
 depends_on: [epic-bold-canonical-session-identity-model-step-3]
@@ -72,3 +72,23 @@ Restore `OuterEnvelope` default-room parsing and `forward_to_peer` usage. This r
 - Tests added: `rejects_missing_room`, `preserves_opaque_ct_that_mentions_session_id` in `relay/src/protocol/outer.rs`; updated integration outer-envelope routing tests to send explicit room and assert room rewrite.
 - Discrepancies from design: `RoomMeta.session_id` remains as endpoint-owned bootstrap metadata from prior identity-model work; it is not a registry key, DB field, or routing branch. The unused generated mirror under `relay/src/protocol/generated/` still reflects the old generated schema and is intentionally left for the generated-protocol owner rather than hand-editing generated code.
 - Adjacent issues parked: none.
+
+## Review bounce (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blockers**:
+- `relay/src/protocol/generated/outer.rs:16` and `relay/src/protocol/outer.rs:65`: missing outer `room` still defaults to `"main"`, and the unit test asserts that behavior. This violates the fail-closed/temporary-compatibility-seam criterion and can still route a missing-room envelope to an active room.
+- `relay/src/rooms.rs:17`, `relay/src/auth/challenge.rs:34`, and `relay/src/peers/registry.rs:302`: the relay still owns and mutates `session_id` as room metadata. It may not route by it, but the acceptance criterion literally says the relay has no `SessionId`/`session_id` domain field.
+- `relay/tests/integration.rs:16`: commit `4ad5f2e0` updates the integration route test to send an explicit room, but its `ct` is only `"aGVsbG8="`. It proves room rewrite and generic `ct` preservation, not an integration boundary carrying a `session_id` inside opaque app↔Pi payload unchanged/uninspected.
+
+**Acceptance criteria**:
+- FAIL — Relay has no `SessionId`/`session_id` domain field, registry key, database column, or routing branch: `RoomMeta.session_id` and patch handling remain in relay source.
+- PARTIAL/FAIL — Relay tests prove `session_id` inside opaque payloads is carried unchanged and uninspected: unit/Pi-forward coverage exists, but the changed integration test does not prove app↔Pi opaque `ct` with `session_id` through routing.
+- FAIL — Missing/legacy outer room handling is fail-closed or isolated behind a temporary compatibility seam with tests proving it cannot route to every active room: generated outer envelope still defaults missing room to `main`.
+- PASS — Cross-PC design/tests assert explicit room targeting and reject peer-wide fanout as the long-term path: `pi_envelope` requires `to_room`, and registry forwarding uses `forward_to_room`.
+- PASS — `cargo fmt --check` and targeted relay tests pass: full relay verification passed.
+
+**Verification run**:
+- `cd /home/agent/forks/remote_pi && git show --stat --patch 4ad5f2e0 && git log --oneline -5` — inspected commit `4ad5f2e0` and adjacent history.
+- `cd /home/agent/forks/remote_pi/relay && cargo fmt --check && cargo clippy -- -D warnings && cargo test` — passed; full suite: 63 lib tests, 3 integration tests, 13 mesh tests, 6 pi-forward tests, 10 presence tests, 19 rooms tests, and doc-tests all green.
