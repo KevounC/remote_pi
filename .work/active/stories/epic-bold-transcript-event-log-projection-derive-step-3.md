@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-2]
@@ -169,4 +169,14 @@ happened to correct it — a working-state convergence violation.
   (known-unrelated `axisAlignment` info at `lib/ui/chat/widgets/input_bar.dart:802`).
   `flutter test test/data/sync/sync_service_test.dart` → All tests passed! (41 tests:
   40 prior + the new convergence regression).
+
+## Review (2026-06-30)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Reviewed commit `1d7965d7c9362bdad5bc8a5843ba586cb20a90eb` (`implement: epic-bold-transcript-event-log-projection-derive-step-3 (rework, second bounce)`). `clearActiveSession()` now calls `_resetTurnState()` after the active `(epk, room)` guard inside the queued clear, so the `session_new` wipe boundary clears `_working` to false, `_workingReplyTo` to null, and `_streaming` to null while emitting the working/streaming state changes; `_cancelAllSendTimers()` remains outside the queued wipe and `_resetTurnState()` uses the default no-double-cancel path. The wipe boundary now reuses the same turn-reset path as session switch. Prior bounce fixes still hold: steer send/echo uses `preserveTurnState` and preserves the original `workingReplyTo`, live/history tool args narrow through `_objectMap`, and `clearActiveSession()` clears `_transcriptEvents`/`_transcriptEventIds` before replay. The new regression test is non-tautological: it drives a mid-turn state, asserts `isWorking == false`, `streaming == null`, `workingReplyTo == null`, listener notification (`contains(false)`), and empty rows after clear. Verification run from `app/`: `export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && /home/agent/projects/remote_pi/.tools/flutter/bin/flutter pub get` succeeded; `/home/agent/projects/remote_pi/.tools/flutter/bin/flutter analyze` exited 1 with only the known-unrelated `axisAlignment` info at `lib/ui/chat/widgets/input_bar.dart:802`; `/home/agent/projects/remote_pi/.tools/flutter/bin/flutter test test/data/sync/sync_service_test.dart` passed, 41 tests.
 
