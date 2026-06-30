@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-control-handlers-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-control-handlers
 depends_on: [epic-bold-relay-typed-actor-control-handlers-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Move presence and rooms control frames into typed actor handlers
@@ -96,3 +96,10 @@ Medium. The handler extraction touches observable push/dedup behavior, especiall
 ## Rollback
 
 Move presence/rooms branches back into `handle_peer` while keeping the shared `SubscriptionIndex` if it has already landed. Because manager APIs are preserved, rollback is mechanical.
+
+## Implementation notes
+- Files changed: `relay/src/handlers/control.rs`, `relay/src/handlers/connection_actor.rs`, `relay/src/handlers/peer.rs`, `.work/active/stories/epic-bold-relay-typed-actor-control-handlers-step-4.md`.
+- Tests added: control-handler unit tests for malformed subscribe fail-closed behavior, `subscribe_presence` backfill, presence-check dedup/metrics, and rooms-check dedup/metrics; moved limiter/cost unit coverage to the connection actor module.
+- Verification: from `relay/`, `cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed.
+- Discrepancies from design: current generated `RelayControlFrame` variants still flatten fields into generated maps, so the handlers consume the generated enum and perform the peer-list narrowing at the handler boundary rather than taking generated per-frame peer-list structs.
+- Adjacent issues parked: none.
