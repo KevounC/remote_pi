@@ -9,8 +9,9 @@ use crate::mesh::MeshStore;
 use crate::metrics::FirehoseMetrics;
 use crate::peers::registry::PeerRegistry;
 use crate::presence::{PeerPresence, PresenceManager};
-use crate::protocol::frame::{DecodedRelayFrame, OuterEnvelope, PiEnvelopeFrame};
+use crate::protocol::frame::{DecodedRelayFrame, PiEnvelopeFrame};
 use crate::protocol::generated::cross_pc::CrossPcFrame;
+use crate::protocol::outer::OuterEnvelope;
 use crate::rooms::RoomManager;
 
 use crate::handlers::peer::{MAX_CONTROL_CHECK_PEER_COST_PER_WINDOW, MAX_CONTROL_FRAME_PEERS};
@@ -136,8 +137,7 @@ impl ConnectionActor {
             room: self.room_id.clone(),
             ct: env.ct,
         };
-        let fwd_line =
-            serde_json::to_string(&rewritten).expect("OuterEnvelope serialisation is infallible");
+        let fwd_line = rewritten.to_json_string();
 
         // Skip-sender: pass this connection's conn_id so multi-device Owners
         // don't echo their own outbound messages.
@@ -254,10 +254,13 @@ impl ConnectionActor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::extract::ws::Message;
+    use tokio::sync::mpsc;
+
     use crate::metrics::FirehoseMetrics;
     use crate::peers::registry::PeerRegistry;
     use crate::presence::PresenceManager;
-    use crate::rooms::RoomManager;
+    use crate::rooms::{RoomManager, RoomMeta};
 
     fn actor_services() -> ConnectionActorServices {
         let presence = Arc::new(PresenceManager::new());
@@ -276,6 +279,27 @@ mod tests {
             mesh_auth: Arc::new(MeshAuthCache::new()),
             metrics,
         }
+    }
+
+    fn make_meta(room_id: &str) -> RoomMeta {
+        RoomMeta {
+            room_id: room_id.to_string(),
+            name: None,
+            cwd: None,
+            session_id: None,
+            model: None,
+            thinking: None,
+            working: false,
+            started_at: 0,
+        }
+    }
+
+    fn text_from_rx(rx: &mut mpsc::UnboundedReceiver<Message>) -> String {
+        rx.try_recv()
+            .expect("recipient must receive forwarded envelope")
+            .to_text()
+            .expect("forwarded envelope must be text")
+            .to_string()
     }
 
     #[test]
@@ -308,5 +332,119 @@ mod tests {
     #[test]
     fn control_check_cost_charges_empty_checks() {
         assert_eq!(control_check_cost(&[]), 1);
+    }
+
+    #[tokio::test]
+    async fn dispatch_outer_forwards_ct_verbatim_and_rewrites_sender_identity() {
+        let services = actor_services();
+        let (dest_tx, mut dest_rx) = mpsc::unbounded_channel::<Message>();
+        let _dest_conn = services
+            .registry
+            .register("dest-peer".to_string(), make_meta("dest-room"), dest_tx)
+            .await;
+
+        let mut actor = ConnectionActor::new(
+            "sender-peer".to_string(),
+            "der-peer".to_string(),
+            "sender-room".to_string(),
+            42,
+            services,
+        );
+        let opaque_ct = "eyJ0eXBlIjoidXNlcl9tZXNzYWdlIiwidGV4dCI6ImRvIG5vdCBkZWNvZGUifQ==";
+
+        let dispatch = actor
+            .dispatch(DecodedRelayFrame::Outer(OuterEnvelope {
+                peer: "dest-peer".to_string(),
+                room: "dest-room".to_string(),
+                ct: opaque_ct.to_string(),
+            }))
+            .await;
+
+        assert!(matches!(dispatch, ActorDispatch::Continue));
+        let delivered: OuterEnvelope = serde_json::from_str(&text_from_rx(&mut dest_rx)).unwrap();
+        assert_eq!(delivered.peer, "sender-peer");
+        assert_eq!(delivered.room, "sender-room");
+        assert_eq!(delivered.ct, opaque_ct);
+    }
+
+    #[tokio::test]
+    async fn dispatch_outer_targets_exact_destination_room_without_cross_room_contamination() {
+        let services = actor_services();
+        let (target_tx, mut target_rx) = mpsc::unbounded_channel::<Message>();
+        let (other_tx, mut other_rx) = mpsc::unbounded_channel::<Message>();
+        let _target_conn = services
+            .registry
+            .register("dest-peer".to_string(), make_meta("target-room"), target_tx)
+            .await;
+        let _other_conn = services
+            .registry
+            .register("dest-peer".to_string(), make_meta("other-room"), other_tx)
+            .await;
+
+        let mut actor = ConnectionActor::new(
+            "sender-peer".to_string(),
+            "der-peer".to_string(),
+            "sender-room".to_string(),
+            42,
+            services,
+        );
+
+        let dispatch = actor
+            .dispatch(DecodedRelayFrame::Outer(OuterEnvelope {
+                peer: "dest-peer".to_string(),
+                room: "target-room".to_string(),
+                ct: "opaque-bytes".to_string(),
+            }))
+            .await;
+
+        assert!(matches!(dispatch, ActorDispatch::Continue));
+        let delivered: OuterEnvelope = serde_json::from_str(&text_from_rx(&mut target_rx)).unwrap();
+        assert_eq!(delivered.ct, "opaque-bytes");
+        assert!(
+            other_rx.try_recv().is_err(),
+            "outer forwarding must not leak into sibling rooms for the same peer"
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_outer_skips_sender_connection_without_suppressing_other_matching_connections()
+    {
+        let services = actor_services();
+        let (sender_tx, mut sender_rx) = mpsc::unbounded_channel::<Message>();
+        let (other_tx, mut other_rx) = mpsc::unbounded_channel::<Message>();
+        let sender_conn = services
+            .registry
+            .register("owner-peer".to_string(), make_meta("main"), sender_tx)
+            .await;
+        let _other_conn = services
+            .registry
+            .register("owner-peer".to_string(), make_meta("main"), other_tx)
+            .await;
+
+        let mut actor = ConnectionActor::new(
+            "owner-peer".to_string(),
+            "ner-peer".to_string(),
+            "main".to_string(),
+            sender_conn,
+            services,
+        );
+
+        let dispatch = actor
+            .dispatch(DecodedRelayFrame::Outer(OuterEnvelope {
+                peer: "owner-peer".to_string(),
+                room: "main".to_string(),
+                ct: "same-room-opaque".to_string(),
+            }))
+            .await;
+
+        assert!(matches!(dispatch, ActorDispatch::Continue));
+        assert!(
+            sender_rx.try_recv().is_err(),
+            "originating connection must not receive its own forwarded envelope"
+        );
+        let delivered: OuterEnvelope = serde_json::from_str(&text_from_rx(&mut other_rx)).unwrap();
+        assert_eq!(delivered.peer, "owner-peer");
+        assert_eq!(delivered.room, "main");
+        assert_eq!(delivered.ct, "same-room-opaque");
     }
 }

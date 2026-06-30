@@ -2,6 +2,17 @@ use std::sync::OnceLock;
 
 pub use crate::protocol::generated::outer::OuterEnvelope;
 
+impl OuterEnvelope {
+    /// Serializes the generated outer envelope back to JSON for forwarding.
+    ///
+    /// Keep this tiny adapter next to the parse/size boundary so callers do
+    /// not grow handwritten mirrors of the generated wire type. `ct` remains
+    /// an opaque string; serialization never decodes or inspects it.
+    pub fn to_json_string(&self) -> String {
+        serde_json::to_string(self).expect("OuterEnvelope serialisation is infallible")
+    }
+}
+
 /// Nome da env var que sobrescreve o teto do outer envelope (inteiro em MiB).
 pub const MAX_CT_ENV: &str = "RELAY_MAX_CT_MIB";
 

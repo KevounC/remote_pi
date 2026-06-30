@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-frame-dispatch-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-frame-dispatch
 depends_on: [epic-bold-relay-typed-actor-frame-dispatch-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Route app↔Pi outer envelopes through the typed actor
@@ -97,3 +97,14 @@ Medium. A rewrite mistake could cause cross-room contamination or sender echo; t
 ## Rollback
 
 Move `dispatch_outer` back into the socket loop and call the previous `parse_line`/`registry.forward` path directly.
+
+## Implementation
+
+- Routed `DecodedRelayFrame::Outer` through `ConnectionActor::dispatch_outer`; `relay/src/handlers/peer.rs` remains a raw socket/lifecycle loop with no app↔Pi outer-envelope rewrite/forward logic.
+- Added a tiny `OuterEnvelope::to_json_string()` adapter in `relay/src/protocol/outer.rs` so forwarding serializes the generated type without a second handwritten struct; no generator or generated files were changed.
+- Preserved `ct` opacity and verbatim forwarding: the actor only measures `ct.len()` for the content-free not-found warning, never decodes or inspects app↔Pi inner bodies.
+- Preserved rewrite semantics: route lookup stays `(dest_peer, dest_room)`, while the delivered envelope carries authenticated sender `peer_id`, sender `room_id`, and original `ct`.
+- Preserved sender-skip behavior by forwarding with the actor's `conn_id`.
+- Added actor tests proving byte-for-byte `ct` carry, sender peer/room rewrite, exact destination room routing with no sibling-room contamination, and skip-sender/no sender echo while another same-key connection still receives.
+- Regen verdict: not applicable; generator and generated protocol files were untouched.
+- Verification: `cargo test dispatch_outer --lib` passed (3/3 targeted tests). Full relay verification passed: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build`; `cargo test` reported 85 lib tests, 0 main tests, and integration suites 3 + 13 + 8 + 10 + 2 + 19 all passing.
