@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-store-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, app, pi-extension]
 parent: epic-bold-transcript-event-log-store
 depends_on: [epic-bold-transcript-event-log-store-step-3]
@@ -78,3 +78,21 @@ runtime key = '$peerId:$roomId'
 ## Rollback
 
 Switch read/write paths back to peer+room keys. Because old projection boxes were preserved, rollback restores the previous cache behavior; event boxes can remain orphaned until cleanup.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: **app tests 597 passed (baseline
+maintained)**; pi-ext `corepack pnpm typecheck` clean. Commit `d2668f1` scoped to
+app + the one pi-ext file (`remote_session.ts`); collision guard held.
+
+Re-key verified: transcript truth uses `TranscriptSessionKey(peerId, roomId, sessionId)`
++ disposable projections use `RemoteSessionRef(peerEpk, roomId, sessionId)` — both
+`transcript_events_<peer>__<room>__<session>` and `msgs_<peer>__<room>__<session>`
+scoped by canonical SDK `session_id`, so two sessions on the same `(peer, room)` do
+not share transcript events/rows. Runtime reachability/working snapshots remain
+keyed by `(peer, room)` via `LocalBoxes.runtimeKey` (relay-room liveness ≠ transcript
+identity — unchanged). Rollback preserved: legacy peer+room boxes ignored (not
+deleted); `SessionIndexRecord.tryFromJson` drops old rows missing `session_id`;
+old Hive files remain for rollback. Repositories document session-scoped vs
+room-scoped/compatibility reads; `SyncService._activeTranscriptKeyOrNull`
+quarantines temporary no-session state.
