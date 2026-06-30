@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen-step-4
 kind: story
-stage: review
+stage: done
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: [epic-bold-generated-protocol-dart-codegen-step-3]
 tags: [refactor]
@@ -88,3 +88,17 @@ Revert `protocol.dart`, `codec.dart`, generated outputs, and protocol tests to t
 - Verification: `PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache /home/agent/projects/remote_pi/.tools/flutter/bin/flutter test test/protocol_test.dart test/protocol/ test/protocol_codegen/` passed (`105` tests). Scoped analyze of `lib test/protocol_test.dart test/protocol test/protocol_codegen` reported only the known `axisAlignment` deprecation info. Full `flutter analyze` is blocked by concurrent/unowned test edits outside this story's file ownership (`test/data/sync/sync_service_test.dart`, `test/ui/chat/chat_viewmodel_test.dart`) plus the same known `axisAlignment` info.
 - Discrepancies from design: relay control frames are deferred from the schema IR and remain in the temporary `control_frames.dart` island as allowed by the story.
 - Adjacent issues parked: none.
+
+## Review (2026-06-30, fast-lane; generated-contract invariant verified)
+
+**Verdict**: Approve — fast-lane advance; orchestrator independently verified the generated-contract invariant.
+
+**Findings**: none above nit level.
+
+**Verification run (orchestrator)**:
+- `git show --stat 5e24b69` — generator (`tools/protocol-codegen/bin/protocol-codegen.mjs` + IR fixture), regenerated `protocol.g.dart`, `protocol.dart` (now facade), `control_frames.dart` (control-frame island), `protocol_test.dart` + story. No stray files.
+- **REGEN + DETERMINISM CHECK**: regenerated `protocol.g.dart` from the committed generator/IR → diff vs committed = **EMPTY** (no hand-edits). Regenerated twice → two outputs identical (deterministic). Generated-contract invariant holds.
+- `protocol.dart` is now a **20-line facade** (`export 'generated/protocol.g.dart'; export 'control_frames.dart';`) — down from 1313 lines. Hand mirror retired; control frames split to `control_frames.dart` as the documented hand-maintained island.
+- `cd app && flutter test test/protocol_test.dart test/protocol_codegen/` (PUB_CACHE set) — 55/55 pass (server fixtures parse; client/control allowlist; generated union narrows + round-trips; exhaustive switch; determinism golden).
+- `flutter analyze` — only the known-unrelated `axisAlignment` info (a transient `RuntimePresence`-undefined error appeared once from the parallel app-attribution-hydration agent's mid-edit state, then cleared on re-run).
+- Acceptance criteria satisfied: existing `package:app/protocol/protocol.dart` imports still compile (facade re-exports); `encodeClient`/`decodeServer` preserve JSONL wire behavior; hand mirror reduced to facade + control-frame island; fixture tests fail if a schema server variant is missing from Dart generation.

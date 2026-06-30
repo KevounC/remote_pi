@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-workspace-document-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-workspace-document
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document-step-4]
@@ -82,3 +82,16 @@ Restore the direct ViewModel mutation bodies from before this step and keep the 
 - `_applyWorkspaceCommand` applies the pure document result, disposes returned tab ids after document update, clears the focused notification, and notifies/schedules save once per applied mutation.
 - Added `cockpit_viewmodel_workspace_commands_test.dart` coverage for command purity, notification clearing, session disposal, pane layout/focus behavior, debounced save, and file preview replacement.
 - Verification: `flutter pub get --offline`, `flutter analyze`, and `flutter test test/domain/workspace_document_commands_test.dart test/ui/cockpit_viewmodel_workspace_commands_test.dart test/ui/cockpit_viewmodel_workspace_document_test.dart` passed with `PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache`.
+
+## Review (2026-06-30, fast-lane)
+
+**Verdict**: Approve — fast-lane advance; orchestrator independently verified.
+
+**Findings**: none above nit level.
+
+**Verification run (orchestrator)**:
+- `git show --stat 85a84eb` — only owned files: `workspace_document_commands.dart` (new), `cockpit_viewmodel.dart`, `cockpit_viewmodel_workspace_commands_test.dart` (new) + story. No collision with other cockpit agents.
+- Confirmed `WorkspaceDocumentCommands` is a pure-function class (`focusPane`, `selectTab`, `resizeSplit`, `appendTab`, `replaceTab`, `replaceActiveTab`, `fillEmpty`, `splitPane`, `moveTabToIndex`) returning `WorkspaceCommandResult{document, disposeTabIds}` — pure document transforms, no VM side-effects. `CockpitViewModel` mutation methods route through `_applyWorkspaceCommand` (gets `_activeDocument`, runs command, `_setDocument(result.document)`, disposes `result.disposeTabIds`, clears focused notification, notifies).
+- `cd cockpit && flutter test test/ui/cockpit_viewmodel_workspace_commands_test.dart test/ui/cockpit_viewmodel_workspace_document_test.dart` (PUB_CACHE, offline) — 8/8 pass (command routing incl. openFile preview replacement; step-4 regression green).
+- `flutter analyze` — No issues found.
+- Acceptance criteria satisfied: all pane mutations routed through document commands; pure transforms; `_applyWorkspaceCommand` applies + disposes + notifies; public behavior preserved.
