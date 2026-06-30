@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-projection-consumers-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-turn-state-machine-projection-consumers
 depends_on: [epic-bold-turn-state-machine-projection-consumers-step-3]
@@ -110,3 +110,17 @@ DateTime? get turnStartedAt => _turn.startedAt;
 ## Rollback
 
 Restore `AgentStatus.streaming`, `_pendingSend`, and `_turnStartedAt` as direct UI state in `AgentSession`. Keep the process-lifecycle tests if they expose missing terminal cleanup.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: whole-cockpit `flutter analyze` →
+No issues found; whole-cockpit `flutter test` → 203/203. Commit `374b430` scoped
+to cockpit only (no cross-subproject collision). The UI-file expansion
+(agent_composer/agent_edit_dialog/pane_view) is a legitimate projection-consumer
+migration, documented. Core invariant verified: `AgentTurnProjection` + single
+reducer; `AgentSession` derives busy/streaming/elapsed/stop/tab from it; ALL
+terminal paths (agent_end, stream error, abort/stop ack, process exit, history
+restore, new session, restart) converge `working:false` + clear startedAt
+(lifecycle-convergence from .agents/rules/code-design.md). Process lifecycle
+(`AgentStatus`) correctly separated from turn state. 7 AgentSession
+turn-convergence tests + 2 RpcDataMapper projection tests added.
