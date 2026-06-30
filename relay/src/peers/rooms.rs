@@ -7,6 +7,7 @@ use crate::rooms::{RoomMeta, RoomMetaPatch};
 #[derive(Debug, Clone)]
 pub(crate) struct RoomEnded {
     pub room_id: String,
+    pub since_ts: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +50,7 @@ impl RoomStateStore {
         peer_id: &str,
         room_id: &str,
         remove: &ConnectionRemove,
+        since_ts: i64,
     ) -> Option<RoomEnded> {
         if !remove.room_emptied {
             return None;
@@ -60,6 +62,7 @@ impl RoomStateStore {
 
         Some(RoomEnded {
             room_id: room_id.to_string(),
+            since_ts,
         })
     }
 
@@ -200,7 +203,11 @@ mod tests {
             room_emptied: false,
             peer_offlined: false,
         };
-        assert!(store.on_connection_removed(peer, "main", &remove).is_none());
+        assert!(
+            store
+                .on_connection_removed(peer, "main", &remove, 42)
+                .is_none()
+        );
         assert_eq!(store.rooms_of(peer).len(), 1);
 
         let remove = ConnectionRemove {
@@ -210,7 +217,7 @@ mod tests {
             peer_offlined: true,
         };
         let ended = store
-            .on_connection_removed(peer, "main", &remove)
+            .on_connection_removed(peer, "main", &remove, 42)
             .expect("last connection ends room");
         assert_eq!(ended.room_id, "main");
         assert!(store.rooms_of(peer).is_empty());

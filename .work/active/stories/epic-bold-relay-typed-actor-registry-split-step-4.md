@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-registry-split-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-relay-typed-actor-registry-split
 depends_on: [epic-bold-relay-typed-actor-registry-split-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Extract registry event publication from state mutation
@@ -58,10 +58,10 @@ Connection/room/presence state returns transition records; the publisher seriali
 
 ## Acceptance Criteria
 
-- [ ] Connection, room-state, and presence-state modules do not directly depend on event subscribers/metrics except through the publisher/facade.
-- [ ] Event JSON snapshots match current tests/fixtures.
-- [ ] Register/unregister/update paths are clearly state mutation followed by event publication.
-- [ ] From `relay/`: `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` pass.
+- [x] Connection, room-state, and presence-state modules do not directly depend on event subscribers/metrics except through the publisher/facade.
+- [x] Event JSON snapshots match current tests/fixtures.
+- [x] Register/unregister/update paths are clearly state mutation followed by event publication.
+- [x] From `relay/`: `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` pass.
 
 ## Risk
 
@@ -70,3 +70,11 @@ Medium. Event shapes are client-visible even though this is structural, so seria
 ## Rollback
 
 Inline publisher methods back into `PeerRegistry` while retaining extracted state modules if they remain useful.
+
+## Implementation
+
+- Added `relay/src/peers/registry_event_publisher.rs` with `RegistryEventPublisher`, the adapter that owns subscriber lookup, event JSON construction, firehose metrics, and delivery over `ConnectionRegistry`.
+- `PeerRegistry` now performs state mutation first (`ConnectionRegistry` + `RoomStateStore` + `PresenceState`) and then publishes the resulting room/presence transition through the publisher for register, unregister, and room metadata update paths.
+- Preserved event-shape compatibility for `peer_online`, `peer_offline`, `room_announced`, `room_ended`, and `room_meta_updated` by moving the existing serialization logic intact; existing registry/presence/rooms tests continue to exercise deserializable snapshots.
+- Added `RoomEnded.since_ts` as a transition fact so the publisher can emit `room_ended` without recomputing timestamps or mixing event details back into `PeerRegistry`.
+- Verification passed from `relay/`: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build`. Test counts: 103 lib tests, 0 main tests, 3 integration tests, 13 mesh tests, 8 pi-forward tests, 10 presence tests, 2 protocol parity tests, 19 rooms tests, and 0 doc-tests.

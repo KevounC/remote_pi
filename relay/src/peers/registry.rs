@@ -5,7 +5,8 @@ use axum::extract::ws::Message;
 use tokio::sync::mpsc;
 
 use super::connections::ConnectionRegistry;
-use super::presence_state::{PresenceState, PresenceTransition};
+use super::presence_state::PresenceState;
+use super::registry_event_publisher::RegistryEventPublisher;
 use super::rooms::RoomStateStore;
 use crate::metrics::FirehoseMetrics;
 use crate::presence::PresenceManager;
@@ -48,11 +49,9 @@ use crate::rooms::{RoomManager, RoomMeta, RoomMetaPatch};
 ///   state changes, but the offline edge is the authoritative one).
 #[derive(Debug)]
 pub struct PeerRegistry {
-    connections: ConnectionRegistry,
+    connections: Arc<ConnectionRegistry>,
     room_state: RoomStateStore,
-    presence: Arc<PresenceManager>,
-    rooms: Arc<RoomManager>,
-    metrics: Arc<FirehoseMetrics>,
+    events: RegistryEventPublisher,
 }
 
 impl PeerRegistry {
@@ -61,12 +60,12 @@ impl PeerRegistry {
         rooms: Arc<RoomManager>,
         metrics: Arc<FirehoseMetrics>,
     ) -> Self {
+        let connections = Arc::new(ConnectionRegistry::new());
+        let events = RegistryEventPublisher::new(connections.clone(), presence, rooms, metrics);
         Self {
-            connections: ConnectionRegistry::new(),
+            connections,
             room_state: RoomStateStore::new(),
-            presence,
-            rooms,
-            metrics,
+            events,
         }
     }
 
@@ -92,44 +91,18 @@ impl PeerRegistry {
         // room_announced fires once per (peer, room) lifecycle. Duplicate
         // connections refresh the canonical rooms snapshot but do not announce.
         if let Some(announced_meta) = announced_meta {
-            let room_subs = self.rooms.subscribers_of(&peer_id).await;
-            if !room_subs.is_empty() {
-                let mut announced = serde_json::to_value(&announced_meta)
-                    .expect("RoomMeta serialization is infallible");
-                announced["type"] = "room_announced".into();
-                announced["peer"] = peer_id.as_str().into();
-                let msg = announced.to_string();
-                for sub in &room_subs {
-                    self.forward_to_all_rooms_of(sub, Message::Text(msg.clone()));
-                }
-            }
+            self.events
+                .publish_room_announced(&peer_id, &announced_meta)
+                .await;
         }
 
         // peer_online fires only on a real offline → online transition.
         // Re-registers from a peer that already had a live conn produce no
         // new push to subscribers — they already think it's online.
         let presence_transition = PresenceState::on_connection_inserted(&insert);
-        let pres_subs = self.presence.subscribers_of(&peer_id).await;
-        let sub_count = pres_subs.len() as u64;
-        if sub_count > 0 {
-            match presence_transition {
-                PresenceTransition::BecameOnline { peer_id } => {
-                    let msg =
-                        serde_json::json!({"type": "peer_online", "peer": peer_id}).to_string();
-                    for sub in pres_subs {
-                        self.forward_to_all_rooms_of(&sub, Message::Text(msg.clone()));
-                    }
-                    self.metrics.inc_peer_online_emitted(sub_count);
-                }
-                PresenceTransition::StayedOnline { .. } => {
-                    self.metrics.inc_peer_online_suppressed(sub_count);
-                }
-                PresenceTransition::BecameOffline { .. }
-                | PresenceTransition::StayedOnlineAfterDisconnect { .. } => {
-                    unreachable!("insert transitions cannot be disconnect transitions")
-                }
-            }
-        }
+        self.events
+            .publish_presence_transition(presence_transition)
+            .await;
 
         insert.conn_id
     }
@@ -141,8 +114,7 @@ impl PeerRegistry {
     pub fn backfill_presence(&self, subscriber: &str, peers: &[String]) {
         for peer in peers {
             if self.is_online(peer) {
-                let msg = serde_json::json!({"type": "peer_online", "peer": peer}).to_string();
-                self.forward_to_all_rooms_of(subscriber, Message::Text(msg));
+                self.events.publish_peer_online_backfill(subscriber, peer);
             }
         }
     }
@@ -162,40 +134,16 @@ impl PeerRegistry {
         let remove = self.connections.remove(peer_id, room_id, conn_id);
         let ended = self
             .room_state
-            .on_connection_removed(peer_id, room_id, &remove);
+            .on_connection_removed(peer_id, room_id, &remove, now_ms);
 
         if let Some(ended) = ended {
-            let room_subs = self.rooms.subscribers_of(peer_id).await;
-            if !room_subs.is_empty() {
-                let msg = serde_json::json!({
-                    "type": "room_ended",
-                    "peer": peer_id,
-                    "room_id": ended.room_id,
-                    "since_ts": now_ms,
-                })
-                .to_string();
-                for sub in &room_subs {
-                    self.forward_to_all_rooms_of(sub, Message::Text(msg.clone()));
-                }
-            }
+            self.events.publish_room_ended(peer_id, ended).await;
         }
 
-        let presence_transition = PresenceState::on_connection_removed(&remove, now_ms);
-        if let Some(PresenceTransition::BecameOffline { peer_id, since_ts }) = presence_transition {
-            let pres_subs = self.presence.subscribers_of(&peer_id).await;
-            if !pres_subs.is_empty() {
-                let msg = serde_json::json!({
-                    "type": "peer_offline",
-                    "peer": peer_id.as_str(),
-                    "since_ts": since_ts,
-                })
-                .to_string();
-                for sub in pres_subs {
-                    self.forward_to_all_rooms_of(&sub, Message::Text(msg.clone()));
-                }
-            }
-            self.presence.record_offline(&peer_id, since_ts).await;
-            self.presence.unsubscribe_all(&peer_id).await;
+        if let Some(presence_transition) = PresenceState::on_connection_removed(&remove, now_ms) {
+            self.events
+                .publish_presence_transition(presence_transition)
+                .await;
         }
     }
 
@@ -266,49 +214,11 @@ impl PeerRegistry {
             return true;
         }
 
-        let room_subs = self.rooms.subscribers_of(peer_id).await;
-        if !room_subs.is_empty() {
-            let snapshot = patch_result.meta;
-            let mut meta_obj = serde_json::Map::new();
-            if let Some(m) = &snapshot.model {
-                meta_obj.insert("model".to_string(), serde_json::Value::String(m.clone()));
-            }
-            if let Some(t) = &snapshot.thinking {
-                meta_obj.insert("thinking".to_string(), serde_json::Value::String(t.clone()));
-            }
-            if let Some(session_id) = &snapshot.session_id {
-                meta_obj.insert(
-                    "session_id".to_string(),
-                    serde_json::Value::String(session_id.clone()),
-                );
-            }
-            // `working` is always present (non-nullable bool), so it always
-            // rides along in the broadcast — subscribers can rely on it.
-            meta_obj.insert(
-                "working".to_string(),
-                serde_json::Value::Bool(snapshot.working),
-            );
-            let msg = serde_json::json!({
-                "type": "room_meta_updated",
-                "peer": peer_id,
-                "room_id": room_id,
-                "meta": serde_json::Value::Object(meta_obj),
-            })
-            .to_string();
-            for sub in &room_subs {
-                self.forward_to_all_rooms_of(sub, Message::Text(msg.clone()));
-            }
-        }
+        self.events
+            .publish_room_meta_updated(peer_id, room_id, &patch_result.meta)
+            .await;
 
         true
-    }
-
-    /// Sends `msg` to every live connection of `peer_id` across all rooms.
-    /// Used for control-frame pushes (`peer_online`/`peer_offline`,
-    /// `room_announced`/`room_ended`, `room_meta_updated`) where the
-    /// subscriber's room isn't known in advance.
-    fn forward_to_all_rooms_of(&self, peer_id: &str, msg: Message) {
-        let _ = self.connections.send_to_all_rooms_of(peer_id, msg);
     }
 
     /// Sends `msg` to every live connection of `peer_id` across all rooms.
