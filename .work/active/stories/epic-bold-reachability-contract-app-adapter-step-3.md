@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-app-adapter-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, app]
 parent: epic-bold-reachability-contract-app-adapter
 depends_on: [epic-bold-reachability-contract-app-adapter-step-2]
@@ -81,3 +81,16 @@ keeping the feature behavior intact.
 - `app/test/transport/reachability_adapter_test.dart` covers deterministic adapter transitions: relay connection success preserves retry backoff, retry attempts advance only when the retry timer fires, repeated attempts clamp the next delay at the 30s contract ceiling, three missed app pongs degrade reachability, app-frame ingress restores online and resets retry/missed counters, and stop/reset returns offline.
 - Re-checked the step-2 bounce invariant: `onRelayConnectionEstablished()` still does not reset `retryAttempt`; the existing `ConnectionManager` regression test preserves the public `0→1→2` retry ladder with `1s→2s→5s` delays when relay reconnects succeed without inbound app/Pi traffic.
 - Verification: `flutter pub get` completed. `flutter analyze` reported only the known unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802` and no issues in this story's files. `flutter test test/domain/reachability_test.dart test/transport/reachability_adapter_test.dart test/transport/connection_manager_test.dart` passed `52/52`.
+
+## Review
+
+Fast-lane approved (2026-06-30). Independently re-ran `flutter test
+test/domain/reachability_test.dart test/transport/reachability_adapter_test.dart
+test/transport/connection_manager_test.dart` → 52/52; `flutter analyze` clean in
+owned files (only known `axisAlignment` info). Commit `d6adcbb` scoped to test
+files + story .md; collision guard held — did NOT touch connection_manager.dart
+(owned by parallel projection-consumers-step-3). Bounce invariant re-verified:
+`onRelayConnectionEstablished()` preserved (untouched in connection_manager.dart);
+the existing `0→1→2` retry-ladder regression + `inbound message resets
+_retryAttempt back to 0` test both green. Test-locking refactor with no source
+behavior change.
