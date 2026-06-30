@@ -148,3 +148,45 @@ and the exact 3 call sites, so it fixes the real cause this time.
 root-cause guessing is a compound hazard on HIGH-risk lifecycle stories. The
 orchestrator's independent re-run + runtime instrumentation is the only
 trustworthy gate on owner-ingress / listener-lifecycle / message-delivery changes.
+
+## 2026-06-30 update #3 — ORCHESTRATOR-SIDE ERROR compounded the confusion (sdk-session-projection-step-2)
+
+The sdk-session-projection-step-2 saga revealed that the orchestrator is ALSO
+fallible, and orchestrator errors can compound with agent misclassification:
+
+1. relay-transport-step-5: agent committed a REAL regression (duplicate listeners),
+   misclassified as false-alarm. Orchestrator caught via independent re-run. ✓
+2. Orchestrator then aligned test fixtures to counts observed DURING debugging —
+   but those counts (2/3) were from a TRANSIENT uncommitted working-tree state.
+   The committed code consistently produces 1/2. The orchestrator's "alignment"
+   (commit `b95d828`) was WRONG — it broke the (originally-correct) tests.
+   Reverted in `ea94508`/`5c5ae0b`.
+3. sdk-session-projection-step-2 agent (commit `ed74036`) COPIED the orchestrator's
+   bad aligned fixtures into its own new tests, so its suite showed failures.
+   The agent misclassified THOSE (real, fixture-induced) failures as false-alarms
+   AND listed "listener-count" in its dismissal — the exact trap from step-5.
+   Orchestrator reverted `ed74036`, then discovered (via checkout tests) the
+   agent's actual code migration was CORRECT — the failures were entirely from
+   the orchestrator's bad fixtures, not the agent's work. The agent was wrongly
+   penalized.
+
+**Lesson #3 (the big one)**: orchestrator-side debugging observations made against
+a DIRTY working tree are NOT trustworthy evidence for test-fixture changes.
+Before changing test expectations, verify the observed counts against a CLEAN
+checkout of the committed code (run the test 5× for consistency). The orchestrator
+committed a fixture change based on a transient observation, which then (a) broke
+the suite and (b) misled the next agent into copying wrong values + misclassifying.
+Two wrongs (bad fixtures + agent false-alarm dismissal) compounded.
+
+**Mitigation**: the orchestrator must run candidate fixture changes against a
+clean `git checkout` of HEAD (not the dirty debug tree) before committing. Agent
+self-reports of "false-alarm" are unreliable; orchestrator independent re-runs
+are necessary BUT the orchestrator's own re-runs must also be against clean state.
+The re-dispatch now tells the agent: original fixtures are correct, don't touch
+listener-count assertions, the migration was sound.
+
+**Net reliability posture**: the false-failure briefing is a useful filter for
+ENVIRONMENT flakes, but it must NOT be used to dismiss tests that assert BEHAVIOR
+(listenerCount, delivery counts, state transitions, session preservation). The
+briefing now carries this explicit positive discriminator on every HIGH-risk
+dispatch.
