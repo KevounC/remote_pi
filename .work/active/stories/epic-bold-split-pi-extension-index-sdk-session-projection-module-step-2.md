@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-sdk-session-projection-module-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-sdk-session-projection-module
 depends_on: [epic-bold-split-pi-extension-index-sdk-session-projection-module-step-1]
@@ -94,3 +94,33 @@ Move `RemoteSessionIssuer`, `sessionStartedAt`, `messageBuffer`, and history hel
   - Focused vitest (`corepack pnpm exec vitest run src/extension.test.ts --testNamePattern "known peer reconnect|relay reconnect detaches|successful reconnect preserves session_id|pair_ok captures|session_new uses fresh"`): 4 passed, 150 skipped; the existing listener-count invariant tests were not changed and passed with `toBe(1)`/`toBe(2)` and `toBe(2)`/`toBe(0)`/`toBe(1)`/`toBe(2)`.
   - Required targeted command (`corepack pnpm exec vitest run src/extension.test.ts src/session/remote_session.test.ts`): 154 passed, 4 failed, 0 skipped across both files. All session-projection, `session_id`, history, listener-count, delivery, and `paired` state-transition tests passed. The 4 failures are the known environment/fixture false-alarm class, not session-projection regressions: `after a clean reset, connect works again (flag is per-instance, not sticky)`, `join emits remote-pi:name-assigned with requested + assigned + changed`, `rename:<name> renames live (broker re-register + relay swap), process/session survive`, and `a second same-name agent joins as <name>#2 instead of being refused`.
 - Discrepancies from design: the existing codebase already uses transcript events rather than the story's older `BufferMsg` name, so the projection module owns the transcript event buffer/history API instead of reintroducing `BufferMsg`.
+
+## Review
+
+Approved (2026-06-30) after the corrected re-dispatch. Independently re-ran:
+`corepack pnpm typecheck` clean; `corepack pnpm build` clean; **full pi-ext suite
+656 passed | 3 skipped | 0 failed (44 files)** — fully green (up from 655 — the
+agent's new session tests). The 4 failures the agent reported are genuinely the
+environment-flake false-alarm signature (`after a clean reset`, `name-assigned`,
+`rename:<name>`, same-name `#2`) — a clean orchestrator re-run shows 0 failures.
+
+### Saga note (this was the 2nd attempt)
+The 1st attempt (`ed74036`, reverted) was undone by an ORCHESTRATOR-SIDE error:
+the orchestrator had committed a wrong test-fixture alignment (transient dirty-tree
+observation) on the prior relay-transport-step-5, and that agent copied the wrong
+listener-count values into its new tests. The agent's actual code migration was
+CORRECT. This re-dispatch was briefed that the original invariant fixtures are
+correct (do not touch `toBe(1)`/`toBe(2)` listener-count assertions) and that the
+migration was sound — only the reconnect-preservation test needed fixing.
+
+### Verification of this attempt (commit `de2086f`)
+- `SdkSessionProjection` class created with private `issuer`/`sessionStartedAt`/
+  `messageBuffer` — no longer `index.ts` globals.
+- Relay reconnect preserves session_id/sessionStartedAt/history (not cleared in
+  `_goIdle`/`_onRelayClose`); `session_new` recaptures fresh SDK id + resets history.
+- The previously-failing `successful reconnect preserves session_id, sessionStartedAt,
+  and transcript history` test now PASSES (2× consistent) — reconnect→repair path fixed.
+- Existing listener-count invariant tests untouched and passing.
+- `pair_ok captures opaque Pi SDK session_id` test passing.
+- Commit scoped to pi-ext only (sdk_session_projection.ts + index.ts shrunk ~280
+  lines + tests); collision guard held.
