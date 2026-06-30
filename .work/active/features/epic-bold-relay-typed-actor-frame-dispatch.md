@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-frame-dispatch
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Relay typed actor — typed-frame dispatch (riskiest — design first)
@@ -361,3 +361,12 @@ impl ConnectionActor {
 - Step 5 is the only high-risk switch-over step because it removes the last raw control switch. It remains rollback-isolated from typed outer and cross-PC routing.
 - Cross-PC room targeting is intentionally not folded into this refactor; that behavior-changing posture belongs to `epic-bold-canonical-session-relay-opaque-targeting`.
 
+
+## Review — advanced to done (2026-06-30)
+
+All 5 child steps `done` (typed decode boundary → connection actor shell →
+outer-envelope routing → cross-PC pi_envelope → exhaustive typed dispatch).
+The relay's inbound WebSocket frame handling is now fully typed-actor driven:
+`decode_relay_frame` is the single classification boundary; `ConnectionActor`
+owns per-connection dispatch state; the raw JSON control switch is gone.
+Epic complete.
