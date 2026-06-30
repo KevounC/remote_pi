@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cockpit/app/cockpit/domain/contracts/rpc_gateway_factory.dart';
-import 'package:cockpit/app/cockpit/domain/contracts/rpc_process_gateway.dart';
 import 'package:cockpit/app/cockpit/domain/entities/agent_session_projection.dart';
+import 'package:cockpit/app/cockpit/domain/entities/agent_session_signal.dart';
 import 'package:cockpit/app/cockpit/domain/entities/agent_turn_projection.dart';
 import 'package:cockpit/app/cockpit/domain/entities/context_usage.dart';
 import 'package:cockpit/app/cockpit/domain/entities/pi_command.dart';
@@ -14,13 +14,14 @@ import 'package:cockpit/app/cockpit/domain/entities/thinking_level.dart';
 import 'package:cockpit/app/cockpit/domain/entities/transcript_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/transcript_message.dart';
 import 'package:cockpit/app/cockpit/ui/session/agent_entry.dart';
+import 'package:cockpit/app/cockpit/ui/session/agent_process_controller.dart';
 import 'package:cockpit/app/cockpit/ui/session/pane_item.dart';
 import 'package:flutter/foundation.dart';
 
 enum AgentStatus { empty, booting, idle, crashed }
 
 /// Controlador de UM agente (uma aba do multiplexador). Dono de um
-/// [RpcProcessGateway] próprio (criado pela fábrica), do transcript e dos
+/// processo RPC próprio (criado pela fábrica), do transcript e dos
 /// controles (modelo/effort/contexto/aprovação). `ChangeNotifier`: cada pane
 /// escuta só a sua sessão, então um agente em streaming rebuilda só o seu pane.
 class AgentSession extends PaneItem {
@@ -31,8 +32,10 @@ class AgentSession extends PaneItem {
     required RpcGatewayFactory factory,
     String? title,
     this.autoStartRelay = false,
-  }) : _factory = factory,
-       _title = title ?? 'New agent';
+  }) : _process = AgentProcessController(factory: factory),
+       _title = title ?? 'New agent' {
+    _signalSub = _process.signals.listen(_onSignal);
+  }
 
   @override
   final String id;
@@ -69,9 +72,8 @@ class AgentSession extends PaneItem {
   /// Nível de effort preferido. Persistido e reaplicado após cada boot.
   ThinkingLevel preferredThinking = ThinkingLevel.off;
 
-  final RpcGatewayFactory _factory;
-  RpcProcessGateway? _gateway;
-  StreamSubscription<RpcEvent>? _sub;
+  final AgentProcessController _process;
+  StreamSubscription<AgentSessionSignal>? _signalSub;
 
   /// Caminho do arquivo de sessão do pi (`~/.pi/agent/sessions/<cwd>/*.jsonl`)
   /// que pertence a este agente. Capturado pela VM no 1º fim de turno e usado
@@ -209,31 +211,21 @@ class AgentSession extends PaneItem {
     _transcriptProjection = _emptyTranscriptProjection;
     notifyListeners();
 
-    final gateway = _factory.create();
-    _gateway = gateway;
-    final result = await gateway.spawn(
-      workingDirectory: workingDirectory,
-      environment: environment,
-      sessionId: restoreSessionPath,
+    await _process.boot(
+      AgentSessionBootRequest(
+        workingDirectory: workingDirectory,
+        environment: environment,
+        restoreSessionPath: restoreSessionPath,
+      ),
     );
-    result.fold(
-      (_) {
-        _status = AgentStatus.idle;
-        _sub = gateway.events.listen(_onEvent);
-        _addInfo('agent ready in $workingDirectory');
-        unawaited(_loadControls());
-        unawaited(_syncRelayStatus());
-        if (restoreSessionPath != null) {
-          unawaited(_populateTranscript(restoreSessionPath));
-        }
-        notifyListeners();
-      },
-      (error) {
-        _status = AgentStatus.crashed;
-        _addInfo('failed to start: ${error.message}', isError: true);
-        notifyListeners();
-      },
-    );
+    if (!_process.isRunning) return;
+    _addInfo('agent ready in $workingDirectory');
+    unawaited(_loadControls());
+    unawaited(_syncRelayStatus());
+    if (restoreSessionPath != null) {
+      unawaited(_populateTranscript(restoreSessionPath));
+    }
+    notifyListeners();
   }
 
   Future<void> send(
@@ -241,11 +233,7 @@ class AgentSession extends PaneItem {
     List<PromptImage> images = const <PromptImage>[],
   }) async {
     final text = message.trim();
-    final gateway = _gateway;
-    if ((text.isEmpty && images.isEmpty) ||
-        gateway == null ||
-        !isAlive ||
-        isBusy) {
+    if ((text.isEmpty && images.isEmpty) || !isAlive || isBusy) {
       return;
     }
     // Balão do usuário: texto + miniaturas das imagens (decodifica o base64
@@ -266,7 +254,12 @@ class AgentSession extends PaneItem {
     _awaitingUserEcho.add(text);
     _pendingSend = true;
     notifyListeners();
-    final result = await gateway.sendPrompt(text, images: images);
+    final result = await _process.send(AgentPrompt(text: text, images: images));
+    if (result == null) {
+      _pendingSend = false;
+      notifyListeners();
+      return;
+    }
     result.fold((_) {}, (error) {
       _addInfo('failed to send: ${error.message}', isError: true);
       _pendingSend = false;
@@ -276,29 +269,19 @@ class AgentSession extends PaneItem {
 
   /// Interrompe o turno atual (não mata o processo).
   Future<void> stop() async {
-    final result = await _gateway?.abort();
-    result?.fold(
-      (_) {
-        _pendingSend = false;
-        _closeTranscriptTurn();
-        _reduceTurn(AgentTurnTransition.idle);
-        notifyListeners();
-      },
-      (error) {
-        _pendingSend = false;
-        _addInfo('failed to stop: ${error.message}', isError: true);
-        _reduceTurn(AgentTurnTransition.error, error: error.message);
-        notifyListeners();
-      },
-    );
+    final result = await _process.stop();
+    result?.fold((_) {}, (error) {
+      _addInfo('failed to stop: ${error.message}', isError: true);
+      notifyListeners();
+    });
   }
 
   /// `/new` — começa uma sessão nova: zera a conversa. O `sessionPath` é
   /// resetado pra a VM recapturar o novo arquivo de sessão no próximo turno.
   Future<void> startNewSession() async {
-    final gateway = _gateway;
-    if (gateway == null || isBusy) return;
-    final result = await gateway.newSession();
+    if (!_process.isRunning || isBusy) return;
+    final result = await _process.newSession();
+    if (result == null) return;
     result.fold(
       (_) {
         _pendingSend = false;
@@ -323,9 +306,9 @@ class AgentSession extends PaneItem {
 
   /// `/compact` — compacta o contexto da sessão.
   Future<void> compact() async {
-    final gateway = _gateway;
-    if (gateway == null || isBusy) return;
-    final result = await gateway.compact();
+    if (!_process.isRunning || isBusy) return;
+    final result = await _process.compact();
+    if (result == null) return;
     result.fold(
       (_) => _addInfo('context compacted'),
       (error) => _addInfo('failed to compact: ${error.message}', isError: true),
@@ -335,9 +318,9 @@ class AgentSession extends PaneItem {
   }
 
   Future<void> changeModel(PiModel model) async {
-    final gateway = _gateway;
-    if (gateway == null || isBusy || model == _model) return;
-    final result = await gateway.setModel(model);
+    if (!_process.isRunning || isBusy || model == _model) return;
+    final result = await _process.setModel(model);
+    if (result == null) return;
     result.fold(
       (applied) {
         _model = applied;
@@ -353,9 +336,9 @@ class AgentSession extends PaneItem {
   }
 
   Future<void> changeThinking(ThinkingLevel level) async {
-    final gateway = _gateway;
-    if (gateway == null || isBusy || level == _thinking) return;
-    final result = await gateway.setThinkingLevel(level);
+    if (!_process.isRunning || isBusy || level == _thinking) return;
+    final result = await _process.setThinkingLevel(level);
+    if (result == null) return;
     result.fold(
       (_) {
         _thinking = level;
@@ -372,10 +355,10 @@ class AgentSession extends PaneItem {
   /// Troca de sessão interativamente (picker de histórico) e recarrega o
   /// transcript. Usa `switch_session` para mudar a sessão no processo pi vivo.
   Future<void> loadHistory(String sessionPath) async {
-    final gateway = _gateway;
-    if (gateway == null || isBusy) return;
+    if (!_process.isRunning || isBusy) return;
 
-    final switched = await gateway.switchSession(sessionPath);
+    final switched = await _process.switchSession(sessionPath);
+    if (switched == null) return;
     final ok = switched.fold((_) => true, (error) {
       _addInfo('failed to switch session: ${error.message}', isError: true);
       notifyListeners();
@@ -390,10 +373,10 @@ class AgentSession extends PaneItem {
   /// Chamado após boot com `--session <id>` (sem `switch_session`) e após
   /// [loadHistory] (que já fez o `switch_session`).
   Future<void> _populateTranscript(String sessionPath) async {
-    final gateway = _gateway;
-    if (gateway == null) return;
+    if (!_process.isRunning) return;
 
-    final result = await gateway.getMessages(sessionId: sessionPath);
+    final result = await _process.getMessages(sessionId: sessionPath);
+    if (result == null) return;
     result.fold(
       (events) {
         _entries.clear();
@@ -426,23 +409,9 @@ class AgentSession extends PaneItem {
   /// Mata o processo e reseta o status para `crashed`, mas mantém a sessão
   /// viva na UI. Use antes de chamar `boot()` novamente com nova config.
   Future<void> killForRestart() async {
-    await _sub?.cancel();
-    _sub = null;
-    final gateway = _gateway;
-    _gateway = null;
-    if (gateway != null) {
-      await gateway.kill();
-      gateway.dispose();
-    }
-    _pendingSend = false;
-    _reduceTurn(
-      AgentTurnTransition.stale,
-      error: 'restarting with new configuration',
-    );
-    // _onExit não será recebido (sub cancelado) — forçamos o status.
-    if (_status == AgentStatus.booting || isAlive) {
-      _status = AgentStatus.crashed;
-      _closeTranscriptTurn();
+    final wasAlive = _status == AgentStatus.booting || isAlive;
+    await _process.killForRestart();
+    if (wasAlive) {
       _addInfo('restarting with new configuration...');
       notifyListeners();
     }
@@ -451,13 +420,9 @@ class AgentSession extends PaneItem {
   /// Mata o processo limpo e libera o gateway. Chamado ao fechar a aba.
   @override
   Future<void> dispose() async {
-    await _sub?.cancel();
-    final gateway = _gateway;
-    _gateway = null;
-    if (gateway != null) {
-      await gateway.kill();
-      gateway.dispose();
-    }
+    await _process.dispose();
+    await _signalSub?.cancel();
+    _signalSub = null;
     super.dispose();
   }
 
@@ -466,23 +431,22 @@ class AgentSession extends PaneItem {
   /// Liga/desliga/alterna o relay sem envolver o LLM. Não aparece no transcript.
   /// [verb]: `relay:on` | `relay:off` | `relay:toggle` | `relay:status`.
   Future<void> sendRelayControl(String verb) async {
-    await _gateway?.sendControl(verb);
+    await _process.sendControl(verb);
   }
 
   /// Solicita o estado atual do relay ao pi (resposta chega como RpcRelayState).
   Future<void> _syncRelayStatus() async {
-    await _gateway?.sendControl('relay:status');
+    await _process.sendControl('relay:status');
   }
 
   Future<void> _loadControls() async {
-    final gateway = _gateway;
-    if (gateway == null) return;
-    final modelsResult = await gateway.availableModels();
-    modelsResult.fold((list) => _models = list, (_) {});
-    final commandsResult = await gateway.commands();
-    commandsResult.fold((list) => _commands = list, (_) {});
-    final stateResult = await gateway.state();
-    stateResult.fold((snapshot) {
+    if (!_process.isRunning) return;
+    final modelsResult = await _process.availableModels();
+    modelsResult?.fold((list) => _models = list, (_) {});
+    final commandsResult = await _process.commands();
+    commandsResult?.fold((list) => _commands = list, (_) {});
+    final stateResult = await _process.state();
+    stateResult?.fold((snapshot) {
       _model = snapshot.model;
       _thinking = snapshot.thinkingLevel;
       // `get_state` is a boot-time snapshot; do not let a stale idle snapshot
@@ -501,58 +465,71 @@ class AgentSession extends PaneItem {
   /// diferem do estado que o pi subiu. Erros são descartados (o pi pode não ter
   /// o modelo; a UI continua com o default dele nesse caso).
   Future<void> _applyPreferred() async {
-    final gateway = _gateway;
-    if (gateway == null) return;
+    if (!_process.isRunning) return;
     final pid = preferredModelId;
     if (pid != null) {
       final target = _models.where((m) => m.id == pid).firstOrNull;
       if (target != null && target != _model) {
-        final r = await gateway.setModel(target);
-        r.fold((applied) => _model = applied, (_) {});
+        final r = await _process.setModel(target);
+        r?.fold((applied) => _model = applied, (_) {});
         notifyListeners();
       }
     }
     if (preferredThinking != _thinking) {
-      final r = await gateway.setThinkingLevel(preferredThinking);
-      r.fold((_) => _thinking = preferredThinking, (_) {});
+      final r = await _process.setThinkingLevel(preferredThinking);
+      r?.fold((_) => _thinking = preferredThinking, (_) {});
       notifyListeners();
     }
   }
 
   Future<void> _refreshStats() async {
-    final gateway = _gateway;
-    if (gateway == null || !isAlive) return;
-    final result = await gateway.sessionStats();
-    result.fold((usage) {
+    if (!_process.isRunning || !isAlive) return;
+    final result = await _process.sessionStats();
+    result?.fold((usage) {
       if (usage != null) _ctx = usage;
     }, (_) {});
     notifyListeners();
   }
 
-  // ---- fold do stream -------------------------------------------------------
+  // ---- signal projection ----------------------------------------------------
 
-  void _onEvent(RpcEvent event) {
-    switch (event) {
-      case RpcAgentStart():
-        _pendingSend = false;
-        _reduceTurn(AgentTurnTransition.started, now: DateTime.now());
-      case RpcAgentEnd():
-        final wasWorking = _turn.working;
-        final startedAt = _turn.startedAt;
-        _reduceTurn(AgentTurnTransition.idle);
-        _closeTranscriptTurn();
-        // Registra quanto tempo o turno levou no fim da conversa.
-        if (wasWorking && startedAt != null) {
-          _add(WorkedEntry(DateTime.now().difference(startedAt)));
+  void _onSignal(AgentSessionSignal signal) {
+    switch (signal) {
+      case AgentTurnSignal():
+        _onTurnSignal(signal);
+      case AgentTranscriptSignal(:final event):
+        _onTranscriptSignal(event);
+      case AgentLifecycleSignal(:final lifecycle, :final error):
+        _status = lifecycle.toLegacyStatus();
+        if (lifecycle == AgentProcessLifecycle.crashed && error != null) {
+          _addInfo('failed to start: $error', isError: true);
         }
-        unawaited(_refreshStats());
-        if (wasWorking) onTurnEnd?.call();
+    }
+    notifyListeners();
+  }
+
+  void _onTurnSignal(AgentTurnSignal signal) {
+    final wasWorking = _turn.working;
+    final startedAt = _turn.startedAt;
+    if (signal.clearPendingSend) _pendingSend = false;
+    _reduceTurn(signal.event, now: signal.now, error: signal.error);
+    if (signal.closeTranscriptTurn) _closeTranscriptTurn();
+    if (signal.recordWorkedDuration && wasWorking && startedAt != null) {
+      _add(WorkedEntry(DateTime.now().difference(startedAt)));
+    }
+    if (signal.refreshStats) unawaited(_refreshStats());
+    if (signal.notifyOnCompletion && wasWorking) onTurnEnd?.call();
+  }
+
+  void _onTranscriptSignal(RpcEvent event) {
+    switch (event) {
+      case RpcAgentStart() || RpcAgentEnd():
+        return;
       case RpcTurnStart():
         _closeTranscriptTurn();
       case RpcTurnEnd():
         _closeTranscriptTurn();
       case RpcThinkingDelta(:final delta):
-        _reduceTurn(AgentTurnTransition.contentDelta, now: DateTime.now());
         _appendTranscriptEvent(
           CockpitThinkingDeltaReceived(
             eventId: _nextTranscriptEventId(),
@@ -563,7 +540,6 @@ class AgentSession extends PaneItem {
           ),
         );
       case RpcTextDelta(:final delta):
-        _reduceTurn(AgentTurnTransition.contentDelta, now: DateTime.now());
         _appendTranscriptEvent(
           CockpitAssistantDeltaReceived(
             eventId: _nextTranscriptEventId(),
@@ -624,8 +600,6 @@ class AgentSession extends PaneItem {
           _addInfo('command "$command" failed: ${error ?? "?"}', isError: true);
         }
       case RpcStreamError(:final message):
-        _pendingSend = false;
-        _reduceTurn(AgentTurnTransition.error, error: message);
         _addInfo('agent error: $message', isError: true, dedup: true);
       case RpcAutoRetry(
         :final attempt,
@@ -637,13 +611,6 @@ class AgentSession extends PaneItem {
       case RpcDiagnostic(:final text):
         _addInfo('stderr: $text');
       case RpcProcessExit(:final code):
-        _pendingSend = false;
-        _status = AgentStatus.crashed;
-        _reduceTurn(
-          AgentTurnTransition.stale,
-          error: 'process exited (code=$code)',
-        );
-        _closeTranscriptTurn();
         _addInfo('process exited (code=$code)', isError: code != 0);
       case RpcNotice(:final message, :final level):
         _add(NoticeEntry(message, level.index));
@@ -674,11 +641,9 @@ class AgentSession extends PaneItem {
           rename(assigned);
           onPreferenceChanged?.call(); // persiste no layout imediatamente
         }
-        return; // sem notifyListeners extra — rename() já chama
       case RpcUnknown():
         return;
     }
-    notifyListeners();
   }
 
   /// Responde a um pedido interativo da extensão (card do transcript) e marca o
@@ -690,7 +655,7 @@ class AgentSession extends PaneItem {
       entry.resolved = true;
       entry.answerLabel = label;
     }
-    unawaited(_gateway?.respondUi(id, response));
+    unawaited(_process.respondUi(id, response));
     notifyListeners();
   }
 

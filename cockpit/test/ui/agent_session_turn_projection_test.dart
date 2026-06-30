@@ -333,6 +333,60 @@ void main() {
   });
 
   test(
+    'dispose converges an active turn and tears down the controller path',
+    () async {
+      final (session, gateway) = await _bootSession();
+
+      gateway
+        ..emit(const RpcAgentStart())
+        ..emit(const RpcTextDelta('partial'));
+
+      await session.dispose();
+
+      expect(gateway.killCount, 1);
+      expect(gateway.disposeCount, 1);
+      expect(session.status, AgentStatus.empty);
+      expect(session.turn.status, AgentTurnStatus.stale);
+      expect(session.turn.working, isFalse);
+      expect(session.isBusy, isFalse);
+      expect(session.turnStartedAt, isNull);
+    },
+  );
+
+  test('onTurnEnd fires only for successful completed turns', () async {
+    final (session, gateway) = await _bootSession();
+    var completions = 0;
+    session.onTurnEnd = () => completions++;
+
+    gateway.emit(const RpcAgentEnd());
+    expect(completions, 0);
+
+    gateway
+      ..emit(const RpcAgentStart())
+      ..emit(const RpcTextDelta('ok'))
+      ..emit(const RpcAgentEnd());
+    expect(completions, 1);
+
+    gateway
+      ..emit(const RpcAgentStart())
+      ..emit(const RpcStreamError('provider failed'));
+    expect(completions, 1);
+
+    gateway
+      ..emit(const RpcAgentStart())
+      ..emit(const RpcTextDelta('partial'));
+    await session.stop();
+    expect(completions, 1);
+
+    gateway
+      ..emit(const RpcAgentStart())
+      ..emit(const RpcProcessExit(1));
+    expect(completions, 1);
+
+    await session.dispose();
+  });
+
+  test(
     'projection-backed compatibility getters preserve busy and alive semantics',
     () async {
       final (session, gateway) = await _bootSession();
@@ -421,6 +475,7 @@ final class _RpcGateway implements RpcProcessGateway {
   var abortCount = 0;
   var newSessionCount = 0;
   var killCount = 0;
+  var disposeCount = 0;
   final getMessagesSessionIds = <String>[];
   var _running = false;
   String? _cwd;
@@ -465,7 +520,10 @@ final class _RpcGateway implements RpcProcessGateway {
       const Success([]);
 
   @override
-  void dispose() => unawaited(_events.close());
+  void dispose() {
+    disposeCount++;
+    unawaited(_events.close());
+  }
 
   @override
   Future<Result<List<CockpitTranscriptEvent>, RpcError>> getMessages({

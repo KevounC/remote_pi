@@ -1,14 +1,14 @@
 ---
 id: epic-bold-cockpit-workspace-projection-agent-session-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-agent-session
 depends_on: [epic-bold-cockpit-workspace-projection-agent-session-step-2, epic-bold-turn-state-machine-projection-consumers-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Split process lifecycle from turn projection in AgentSession
@@ -97,3 +97,15 @@ High. This is the core lifecycle extraction and touches process, transcript, not
 ## Rollback
 
 Inline the process controller back into `AgentSession`, restore direct `_status`, `_pendingSend`, and `_turnStartedAt` updates, and keep the event-log transcript projection from Step 2 if it remains green. If rollback is needed because convergence tests fail, keep those tests and bounce the story rather than weakening them.
+
+## Implementation
+
+- Files changed: `cockpit/lib/app/cockpit/ui/session/agent_session.dart`, `cockpit/lib/app/cockpit/ui/session/agent_process_controller.dart`, `cockpit/lib/app/cockpit/domain/entities/agent_session_signal.dart`, `cockpit/test/ui/agent_session_turn_projection_test.dart`.
+- Controller/projection split: added `AgentProcessController` as the local agent-tab process owner for boot, stdin commands, event subscription, process-exit release, restart kill, and dispose. `AgentSession` remains the `PaneItem`/`ChangeNotifier` and coordinates `AgentSessionSignal`s into lifecycle, turn, and transcript projection updates.
+- Terminal-path convergence: agent end, stream error, stop/abort acknowledgement, process exit, new session, history load, `killForRestart`, and `dispose` all flow through `AgentTurnProjection` terminal transitions, leaving `working:false` and `startedAt:null`.
+- `onTurnEnd` semantics preserved: it fires only when a previously working turn receives a successful `agent_end`; stream error, stop/abort, process exit, and idle `agent_end` do not fire it.
+- Tests added/updated: targeted agent-session projection tests now cover start→streaming→end, stream error, stop/abort, process exit, new session, history load, restart, dispose, controller teardown, and `onTurnEnd` success-only semantics.
+- UI-identical confirmation: compatibility getters (`isBusy`, `isStreaming`, `turnStartedAt`, `isAlive`) still back existing widgets and now derive from `AgentTurnProjection`/process lifecycle rather than `AgentStatus.streaming`.
+- Verification: `flutter pub get --offline`, targeted `flutter test test/ui/agent_session_turn_projection_test.dart`, `flutter analyze`, and full `flutter test` passed.
+- Discrepancies from design: controller keeps pass-through wrappers for existing model/session/history/relay RPC commands so stdin ownership stays with the process controller while preserving current `AgentSession` public behavior; no new pane-wide process abstraction was introduced.
+- Adjacent issues parked: none.
