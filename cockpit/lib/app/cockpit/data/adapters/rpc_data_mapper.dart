@@ -3,6 +3,7 @@ import 'package:cockpit/app/cockpit/domain/entities/context_usage.dart';
 import 'package:cockpit/app/cockpit/domain/entities/pi_command.dart';
 import 'package:cockpit/app/cockpit/domain/entities/pi_model.dart';
 import 'package:cockpit/app/cockpit/domain/entities/thinking_level.dart';
+import 'package:cockpit/app/cockpit/domain/entities/transcript_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/transcript_message.dart';
 
 /// Converte os `data` das respostas request/response do RPC em entidades de
@@ -83,20 +84,35 @@ class RpcDataMapper {
     );
   }
 
-  /// Converte `get_messages` (`{messages:[AgentMessage]}`) numa lista de
-  /// [TranscriptMessage], resolvendo `toolResult` no `toolCall` correspondente.
+  /// Converte `get_messages` (`{messages:[AgentMessage]}`) numa projeção
+  /// imutável do transcript. O histórico e o stream ao vivo usam
+  /// [deriveCockpitTranscript] como única regra para user/text/thinking/tool.
   List<TranscriptMessage> transcriptMessages(Object? data) {
     if (data is! Map || data['messages'] is! List) {
       return const <TranscriptMessage>[];
     }
-    final out = <TranscriptMessage>[];
-    final toolsById = <String, TmTool>{};
+    final sessionId = data['session_id'] as String? ?? 'get_messages';
+    final events = <CockpitTranscriptEvent>[];
+    var index = 0;
+    String nextEventId() => '$sessionId:history:${index++}';
+    final ts = DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+
     for (final raw in data['messages'] as List) {
       if (raw is! Map) continue;
       switch (raw['role']) {
         case 'user':
           final text = _contentText(raw['content']);
-          if (text.isNotEmpty) out.add(TmUser(text));
+          if (text.isNotEmpty) {
+            events.add(
+              CockpitUserMessageConfirmed(
+                eventId: nextEventId(),
+                sessionId: sessionId,
+                ts: ts,
+                clientMessageId: raw['id'] as String? ?? nextEventId(),
+                text: text,
+              ),
+            );
+          }
         case 'assistant':
           final content = raw['content'];
           if (content is! List) break;
@@ -104,32 +120,62 @@ class RpcDataMapper {
             if (block is! Map) continue;
             switch (block['type']) {
               case 'thinking':
-                final t = block['thinking'] as String? ?? '';
-                if (t.isNotEmpty) out.add(TmThinking(t));
+                final text = block['thinking'] as String? ?? '';
+                if (text.isNotEmpty) {
+                  events.add(
+                    CockpitThinkingDeltaReceived(
+                      eventId: nextEventId(),
+                      sessionId: sessionId,
+                      ts: ts,
+                      replyTo: raw['id'] as String? ?? '',
+                      delta: text,
+                    ),
+                  );
+                }
               case 'text':
-                final t = block['text'] as String? ?? '';
-                if (t.isNotEmpty) out.add(TmAssistantText(t));
+                final text = block['text'] as String? ?? '';
+                if (text.isNotEmpty) {
+                  events.add(
+                    CockpitAssistantMessageCommitted(
+                      eventId: nextEventId(),
+                      sessionId: sessionId,
+                      ts: ts,
+                      messageId: raw['id'] as String? ?? nextEventId(),
+                      replyTo: raw['id'] as String? ?? '',
+                      text: text,
+                    ),
+                  );
+                }
               case 'toolCall':
                 final id = block['id'] as String? ?? '';
-                final tool = TmTool(
-                  callId: id,
-                  name: block['name'] as String? ?? '?',
-                  args: _asStringMap(block['arguments']),
+                events.add(
+                  CockpitToolRequested(
+                    eventId: nextEventId(),
+                    sessionId: sessionId,
+                    ts: ts,
+                    toolCallId: id,
+                    tool: block['name'] as String? ?? '?',
+                    args: _asObjectMap(block['arguments']),
+                  ),
                 );
-                toolsById[id] = tool;
-                out.add(tool);
             }
           }
         case 'toolResult':
-          final tool = toolsById[raw['toolCallId'] as String? ?? ''];
-          if (tool != null) {
-            tool.done = true;
-            tool.isError = raw['isError'] == true;
-            tool.resultText = _contentText(raw['content']);
-          }
+          events.add(
+            CockpitToolFinished(
+              eventId: nextEventId(),
+              sessionId: sessionId,
+              ts: ts,
+              toolCallId: raw['toolCallId'] as String? ?? '',
+              result: _contentText(raw['content']),
+              error: raw['isError'] == true
+                  ? _contentText(raw['content'])
+                  : null,
+            ),
+          );
       }
     }
-    return out;
+    return deriveCockpitTranscript(events).entries;
   }
 
   String _contentText(Object? content) {
@@ -144,10 +190,10 @@ class RpcDataMapper {
     return '';
   }
 
-  Map<String, dynamic> _asStringMap(Object? value) {
+  Map<String, Object?> _asObjectMap(Object? value) {
     if (value is Map) {
       return value.map((key, v) => MapEntry(key.toString(), v));
     }
-    return const <String, dynamic>{};
+    return const <String, Object?>{};
   }
 }

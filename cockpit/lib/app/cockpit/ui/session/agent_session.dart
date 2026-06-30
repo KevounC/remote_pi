@@ -9,6 +9,7 @@ import 'package:cockpit/app/cockpit/domain/entities/pi_model.dart';
 import 'package:cockpit/app/cockpit/domain/entities/prompt_image.dart';
 import 'package:cockpit/app/cockpit/domain/entities/rpc_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/thinking_level.dart';
+import 'package:cockpit/app/cockpit/domain/entities/transcript_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/transcript_message.dart';
 import 'package:cockpit/app/cockpit/ui/session/agent_entry.dart';
 import 'package:cockpit/app/cockpit/ui/session/pane_item.dart';
@@ -97,6 +98,9 @@ class AgentSession extends PaneItem {
   /// pra mostrar o cronômetro de "trabalhando".
   DateTime? _turnStartedAt;
   final List<AgentEntry> _entries = <AgentEntry>[];
+  final List<CockpitTranscriptEvent> _transcriptEvents =
+      <CockpitTranscriptEvent>[];
+  var _transcriptEventSeq = 0;
 
   List<PiModel> _models = const <PiModel>[];
   List<PiCommand> _commands = const <PiCommand>[];
@@ -122,10 +126,6 @@ class AgentSession extends PaneItem {
     _unseenFinish = false;
     notifyListeners();
   }
-
-  AssistantTextEntry? _openText;
-  ThinkingEntry? _openThinking;
-  final Map<String, ToolEntry> _openTools = <String, ToolEntry>{};
 
   /// Pedidos interativos da extensão (`extension_ui_request`) ainda abertos,
   /// por `id` — pra marcar o card como resolvido ao responder.
@@ -170,7 +170,7 @@ class AgentSession extends PaneItem {
     _status = AgentStatus.booting;
     _entries.clear();
     _awaitingUserEcho.clear();
-    _resetOpenBuffers();
+    _transcriptEvents.clear();
     notifyListeners();
 
     final gateway = _factory.create();
@@ -216,10 +216,18 @@ class AgentSession extends PaneItem {
     // uma vez pra exibir). Status permanece idle até RpcAgentStart confirmar
     // o início do turno — comandos não-bloqueantes (compact etc.) não devem
     // acender o indicador de "trabalhando".
-    _addUser(
-      text,
-      images: [for (final image in images) base64Decode(image.data)],
+    _appendTranscriptEvent(
+      CockpitUserMessageSubmitted(
+        eventId: _nextTranscriptEventId(),
+        sessionId: _transcriptSessionId,
+        ts: DateTime.now(),
+        clientMessageId: _nextTranscriptEventId(),
+        text: text,
+        images: [for (final image in images) base64Decode(image.data)],
+      ),
     );
+    // Marca pra deduplicar o eco `message_start:user` que o pi vai emitir.
+    _awaitingUserEcho.add(text);
     _pendingSend = true;
     notifyListeners();
     final result = await gateway.sendPrompt(text, images: images);
@@ -244,7 +252,7 @@ class AgentSession extends PaneItem {
     result.fold(
       (_) {
         _entries.clear();
-        _resetOpenBuffers();
+        _transcriptEvents.clear();
         _ctx = null;
         sessionPath = null;
         _addInfo('new session');
@@ -336,35 +344,11 @@ class AgentSession extends PaneItem {
     result.fold(
       (messages) {
         _entries.clear();
-        _resetOpenBuffers();
-        for (final message in messages) {
-          switch (message) {
-            case TmUser(:final text):
-              _add(UserEntry(text));
-            case TmAssistantText(:final text):
-              _add(AssistantTextEntry(text));
-            case TmThinking(:final text):
-              _add(ThinkingEntry(text));
-            case TmTool(
-              :final callId,
-              :final name,
-              :final args,
-              :final done,
-              :final isError,
-              :final resultText,
-            ):
-              final tool = ToolEntry(
-                toolCallId: callId,
-                toolName: name,
-                args: args,
-              );
-              tool.done = done;
-              tool.isError = isError;
-              tool.resultText = resultText;
-              _add(tool);
-          }
-        }
         this.sessionPath = sessionPath;
+        _transcriptEvents
+          ..clear()
+          ..addAll(_eventsFromProjectedMessages(messages));
+        _replaceProjectedTranscript();
         _status = AgentStatus.idle;
         notifyListeners();
         onPreferenceChanged?.call();
@@ -397,7 +381,7 @@ class AgentSession extends PaneItem {
     // _onExit não será recebido (sub cancelado) — forçamos o status.
     if (_status == AgentStatus.booting || isAlive) {
       _status = AgentStatus.crashed;
-      _resetOpenBuffers();
+      _closeTranscriptTurn();
       _addInfo('restarting with new configuration...');
       notifyListeners();
     }
@@ -492,7 +476,7 @@ class AgentSession extends PaneItem {
         if (wasStreaming) _status = AgentStatus.idle;
         final startedAt = _turnStartedAt;
         _turnStartedAt = null;
-        _resetOpenBuffers();
+        _closeTranscriptTurn();
         // Registra quanto tempo o turno levou no fim da conversa.
         if (wasStreaming && startedAt != null) {
           _add(WorkedEntry(DateTime.now().difference(startedAt)));
@@ -500,25 +484,75 @@ class AgentSession extends PaneItem {
         unawaited(_refreshStats());
         if (wasStreaming) onTurnEnd?.call();
       case RpcTurnStart():
-        _resetOpenBuffers();
+        _closeTranscriptTurn();
       case RpcTurnEnd():
-        _resetOpenBuffers();
+        _closeTranscriptTurn();
       case RpcThinkingDelta(:final delta):
-        _appendThinking(delta);
+        _appendTranscriptEvent(
+          CockpitThinkingDeltaReceived(
+            eventId: _nextTranscriptEventId(),
+            sessionId: _transcriptSessionId,
+            ts: DateTime.now(),
+            replyTo: id,
+            delta: delta,
+          ),
+        );
       case RpcTextDelta(:final delta):
-        _appendText(delta);
+        _appendTranscriptEvent(
+          CockpitAssistantDeltaReceived(
+            eventId: _nextTranscriptEventId(),
+            sessionId: _transcriptSessionId,
+            ts: DateTime.now(),
+            replyTo: id,
+            delta: delta,
+          ),
+        );
       case RpcTextEnd(:final content):
-        _finishText(content);
+        _appendTranscriptEvent(
+          CockpitAssistantMessageCommitted(
+            eventId: _nextTranscriptEventId(),
+            sessionId: _transcriptSessionId,
+            ts: DateTime.now(),
+            messageId: _nextTranscriptEventId(),
+            replyTo: id,
+            text: content,
+          ),
+        );
       case RpcUserMessage(:final text):
         // Eco da nossa própria mensagem local → já está no transcript, ignora.
         // Caso contrário, é mensagem vinda do app/mesh → mostra a bolha.
         if (_awaitingUserEcho.remove(text)) return;
-        _resetOpenBuffers();
-        _add(UserEntry(text));
+        _appendTranscriptEvent(
+          CockpitUserMessageConfirmed(
+            eventId: _nextTranscriptEventId(),
+            sessionId: _transcriptSessionId,
+            ts: DateTime.now(),
+            clientMessageId: _nextTranscriptEventId(),
+            text: text,
+          ),
+        );
       case RpcToolStart(:final toolCallId, :final toolName, :final args):
-        _startTool(toolCallId, toolName, args);
+        _appendTranscriptEvent(
+          CockpitToolRequested(
+            eventId: _nextTranscriptEventId(),
+            sessionId: _transcriptSessionId,
+            ts: DateTime.now(),
+            toolCallId: toolCallId,
+            tool: toolName,
+            args: args,
+          ),
+        );
       case RpcToolEnd(:final toolCallId, :final isError, :final resultText):
-        _finishTool(toolCallId, isError, resultText);
+        _appendTranscriptEvent(
+          CockpitToolFinished(
+            eventId: _nextTranscriptEventId(),
+            sessionId: _transcriptSessionId,
+            ts: DateTime.now(),
+            toolCallId: toolCallId,
+            result: resultText,
+            error: isError ? resultText : null,
+          ),
+        );
       case RpcCommandResponse(:final command, :final success, :final error):
         if (!success) {
           _addInfo('command "$command" failed: ${error ?? "?"}', isError: true);
@@ -540,7 +574,7 @@ class AgentSession extends PaneItem {
       case RpcProcessExit(:final code):
         _pendingSend = false;
         _status = AgentStatus.crashed;
-        _resetOpenBuffers();
+        _closeTranscriptTurn();
         _addInfo('process exited (code=$code)', isError: code != 0);
       case RpcNotice(:final message, :final level):
         _add(NoticeEntry(message, level.index));
@@ -591,36 +625,6 @@ class AgentSession extends PaneItem {
     notifyListeners();
   }
 
-  void _appendText(String delta) {
-    final open = _openText ??= _add(AssistantTextEntry());
-    open.text += delta;
-  }
-
-  void _finishText(String content) {
-    final open = _openText;
-    if (open != null && content.isNotEmpty) open.text = content;
-    _openText = null;
-  }
-
-  void _appendThinking(String delta) {
-    final open = _openThinking ??= _add(ThinkingEntry());
-    open.text += delta;
-  }
-
-  void _startTool(String id, String name, Map<String, dynamic> args) {
-    _openTools[id] = _add(
-      ToolEntry(toolCallId: id, toolName: name, args: args),
-    );
-  }
-
-  void _finishTool(String id, bool isError, String resultText) {
-    final entry = _openTools.remove(id);
-    if (entry == null) return;
-    entry.done = true;
-    entry.isError = isError;
-    entry.resultText = resultText;
-  }
-
   // ---- helpers --------------------------------------------------------------
 
   T _add<T extends AgentEntry>(T entry) {
@@ -628,11 +632,132 @@ class AgentSession extends PaneItem {
     return entry;
   }
 
-  void _addUser(String text, {List<Uint8List> images = const <Uint8List>[]}) {
-    _resetOpenBuffers();
-    _add(UserEntry(text, images: images));
-    // Marca pra deduplicar o eco `message_start:user` que o pi vai emitir.
-    _awaitingUserEcho.add(text);
+  String get _transcriptSessionId => sessionPath ?? id;
+
+  String _nextTranscriptEventId() => '$id:${_transcriptEventSeq++}';
+
+  void _appendTranscriptEvent(CockpitTranscriptEvent event) {
+    _transcriptEvents.add(event);
+    _replaceProjectedTranscript();
+  }
+
+  void _closeTranscriptTurn() {
+    if (_transcriptEvents.isEmpty) return;
+    final projection = deriveCockpitTranscript(_transcriptEvents);
+    if (projection.turn.status == CockpitTranscriptTurnStatus.idle) return;
+    _appendTranscriptEvent(
+      CockpitAssistantDoneReceived(
+        eventId: _nextTranscriptEventId(),
+        sessionId: _transcriptSessionId,
+        ts: DateTime.now(),
+        replyTo: id,
+      ),
+    );
+  }
+
+  Iterable<CockpitTranscriptEvent> _eventsFromProjectedMessages(
+    List<TranscriptMessage> messages,
+  ) sync* {
+    for (final message in messages) {
+      switch (message) {
+        case ProjectedUserMessage(:final text, :final images):
+          yield CockpitUserMessageSubmitted(
+            eventId: _nextTranscriptEventId(),
+            sessionId: _transcriptSessionId,
+            ts: DateTime.now(),
+            clientMessageId: _nextTranscriptEventId(),
+            text: text,
+            images: images,
+          );
+        case ProjectedAssistantTextMessage(:final text):
+          yield CockpitAssistantMessageCommitted(
+            eventId: _nextTranscriptEventId(),
+            sessionId: _transcriptSessionId,
+            ts: DateTime.now(),
+            messageId: _nextTranscriptEventId(),
+            replyTo: id,
+            text: text,
+          );
+        case ProjectedThinkingMessage(:final text):
+          yield CockpitThinkingDeltaReceived(
+            eventId: _nextTranscriptEventId(),
+            sessionId: _transcriptSessionId,
+            ts: DateTime.now(),
+            replyTo: id,
+            delta: text,
+          );
+        case ProjectedToolMessage(
+          :final callId,
+          :final name,
+          :final args,
+          :final status,
+          :final resultText,
+        ):
+          yield CockpitToolRequested(
+            eventId: _nextTranscriptEventId(),
+            sessionId: _transcriptSessionId,
+            ts: DateTime.now(),
+            toolCallId: callId,
+            tool: name,
+            args: args,
+          );
+          if (status != ToolProjectionStatus.running) {
+            yield CockpitToolFinished(
+              eventId: _nextTranscriptEventId(),
+              sessionId: _transcriptSessionId,
+              ts: DateTime.now(),
+              toolCallId: callId,
+              result: resultText,
+              error: status == ToolProjectionStatus.error ? resultText : null,
+            );
+          }
+      }
+    }
+  }
+
+  void _replaceProjectedTranscript() {
+    final firstProjectedIndex = _entries.indexWhere(
+      _isProjectedTranscriptEntry,
+    );
+    _entries.removeWhere(_isProjectedTranscriptEntry);
+    final projected = deriveCockpitTranscript(_transcriptEvents).entries;
+    final newEntries = projected.map(_toAgentEntry).toList(growable: false);
+    final insertionIndex = firstProjectedIndex < 0
+        ? _entries.length
+        : firstProjectedIndex > _entries.length
+        ? _entries.length
+        : firstProjectedIndex;
+    _entries.insertAll(insertionIndex, newEntries);
+  }
+
+  bool _isProjectedTranscriptEntry(AgentEntry entry) {
+    return entry is UserEntry ||
+        entry is AssistantTextEntry ||
+        entry is ThinkingEntry ||
+        entry is ToolEntry;
+  }
+
+  AgentEntry _toAgentEntry(ProjectedTranscriptMessage message) {
+    switch (message) {
+      case ProjectedUserMessage(:final text, :final images):
+        return UserEntry(text, images: images);
+      case ProjectedAssistantTextMessage(:final text):
+        return AssistantTextEntry(text);
+      case ProjectedThinkingMessage(:final text):
+        return ThinkingEntry(text);
+      case ProjectedToolMessage(
+        :final callId,
+        :final name,
+        :final args,
+        :final status,
+        :final resultText,
+      ):
+        final tool = ToolEntry(toolCallId: callId, toolName: name, args: args);
+        tool.done = status != ToolProjectionStatus.running;
+        tool.isError = status == ToolProjectionStatus.error;
+        tool.resultText = resultText;
+        return tool;
+    }
   }
 
   void _addInfo(String text, {bool isError = false, bool dedup = false}) {
@@ -641,11 +766,5 @@ class AgentSession extends PaneItem {
       if (last is InfoEntry && last.text == text) return;
     }
     _add(InfoEntry(text, isError: isError));
-  }
-
-  void _resetOpenBuffers() {
-    _openText = null;
-    _openThinking = null;
-    _openTools.clear();
   }
 }

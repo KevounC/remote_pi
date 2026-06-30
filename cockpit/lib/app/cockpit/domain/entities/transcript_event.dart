@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 sealed class CockpitTranscriptEvent {
   const CockpitTranscriptEvent({
     required this.eventId,
@@ -20,10 +22,12 @@ final class CockpitUserMessageSubmitted extends CockpitTranscriptEvent {
     super.turnId,
     required this.clientMessageId,
     required this.text,
+    this.images = const <Uint8List>[],
   });
 
   final String clientMessageId;
   final String text;
+  final List<Uint8List> images;
 }
 
 final class CockpitUserMessageConfirmed extends CockpitTranscriptEvent {
@@ -58,6 +62,20 @@ final class CockpitUserMessageFailed extends CockpitTranscriptEvent {
 
 final class CockpitAssistantDeltaReceived extends CockpitTranscriptEvent {
   const CockpitAssistantDeltaReceived({
+    required super.eventId,
+    required super.sessionId,
+    required super.ts,
+    super.turnId,
+    required this.replyTo,
+    required this.delta,
+  });
+
+  final String replyTo;
+  final String delta;
+}
+
+final class CockpitThinkingDeltaReceived extends CockpitTranscriptEvent {
+  const CockpitThinkingDeltaReceived({
     required super.eventId,
     required super.sessionId,
     required super.ts,
