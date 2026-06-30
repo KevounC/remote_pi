@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-composition-root-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-composition-root
 depends_on: [epic-bold-split-pi-extension-index-composition-root-step-4]
@@ -70,3 +70,20 @@ Remove the harness wrapper and restore direct `_fooForTest` function exports in 
 - Kept `probeListPeers` exported from `extension/probe_list_peers.ts`; it had already been moved as a pure helper and this step preserved that seam.
 - Updated `pi-extension/src/extension.test.ts` so the start/state smoke test uses the named harness while checking legacy `_getState` still matches the harness state.
 - Verification: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; focused harness test `corepack pnpm exec vitest run src/extension.test.ts -t "start: idle"` passed (1 passed, 148 skipped). Full `src/extension.test.ts` run reported 145 passed / 4 failed out of 149; the failures match the confirmed known false-alarm group (`after a clean reset`, `name-assigned`, `rename:<name>`, same-name cwd-lock), so they were not chased.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: `corepack pnpm typecheck` clean;
+**full pi-ext suite 651 passed | 3 skipped | 0 failed (44 files)** — fully green.
+
+NOTE: the implementer CORRECTLY identified the false-failure pattern (6th
+consecutive pi-ext agent to do so) — reported the full-suite "4 failed" as
+"matching the confirmed known false-alarm group (`after a clean reset`,
+`name-assigned`, `rename:<name>`, same-name cwd-lock), so they were not chased."
+
+Commit `1c03e76` scoped to pi-ext only (testing.ts + index.ts + extension.test.ts).
+Harness verified: `RemotePiTestHarness` + `createRemotePiTestHarness` added;
+legacy `_connectForTest`/`_stopForTest`/`_getState`/`routeClientMessage` aliased
+through the harness (names preserved, not deleted); `probeListPeers` kept as
+pure-helper export; extension.test.ts start/state smoke uses the named harness
+while still checking legacy `_getState` parity. **composition-root arc complete (5/5).**
