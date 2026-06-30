@@ -161,6 +161,52 @@ export type RelayConnectivity = "connected" | "reconnecting" | "disconnected";
  *  transcript entry. Starts with NUL so it can't collide with real user input
  *  and doesn't begin with "/" (which would route to the command parser). */
 export const CTRL_PREFIX = "\x00remote-pi-ctrl:";
+
+const STRUCTURED_CONTROL_TYPE = "remote_pi_control";
+const STRUCTURED_CONTROL_COMMANDS = {
+  relay_on: "relay:on",
+  relay_off: "relay:off",
+  relay_toggle: "relay:toggle",
+  relay_status: "relay:status",
+} as const;
+
+type StructuredControlCommand = keyof typeof STRUCTURED_CONTROL_COMMANDS | "rename";
+type ParsedControlFrame = { command: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function structuredControlToCommand(payload: unknown): ParsedControlFrame | null {
+  if (!isRecord(payload)) return null;
+  if (payload["type"] !== STRUCTURED_CONTROL_TYPE) return null;
+
+  const command = payload["command"];
+  if (typeof command !== "string") return null;
+  if (command === "rename") {
+    const name = payload["name"];
+    if (typeof name !== "string" || name.trim().length === 0) return null;
+    return { command: `rename:${name}` };
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(STRUCTURED_CONTROL_COMMANDS, command)) return null;
+  return { command: STRUCTURED_CONTROL_COMMANDS[command as Exclude<StructuredControlCommand, "rename">] };
+}
+
+export function _parseControlFrame(text: string): ParsedControlFrame | null {
+  try {
+    const parsed = structuredControlToCommand(JSON.parse(text));
+    if (parsed) return parsed;
+  } catch {
+    // Malformed JSON is ordinary user input unless it also uses the legacy prefix.
+  }
+
+  if (text.startsWith(CTRL_PREFIX)) {
+    return { command: text.slice(CTRL_PREFIX.length).trim() };
+  }
+  return null;
+}
+
 let _myRoomId: string | null = null;   // this Pi's room id (derived from cwd)
 
 const _relayTransport = createRelayTransportPort({
@@ -966,6 +1012,10 @@ export async function _handleControl(cmd: string): Promise<void> {
   await _localMeshCommands.handleControl(cmd);
 }
 
+function _dispatchControlFrame(frame: ParsedControlFrame): void {
+  void _handleControl(frame.command);
+}
+
 /**
  * Per-owner disconnect callback. Fires when one specific owner's channel
  * detaches (e.g. relay told us the peer is gone). Other owners' channels
@@ -1101,12 +1151,14 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // from routeClientMessage, which already seeded the turn projection — skip to
   // avoid a double turnId.
   pi.on("input", (event) => {
-    // Transparent control channel: a `CTRL_PREFIX`-tagged input from an RPC
-    // client (Cockpit button) toggles the relay. Run it and SWALLOW the input
-    // (`action:"handled"`) so it never reaches the LLM or the transcript.
+    // Transparent control channel: structured `remote_pi_control` frames are
+    // the canonical path; `CTRL_PREFIX` remains an explicit compatibility
+    // decoder. Both map to one dispatch path and are SWALLOWED
+    // (`action:"handled"`) so they never reach the LLM or the transcript.
     // Checked first, before the peer-broadcast path, and regardless of source.
-    if (event.text.startsWith(CTRL_PREFIX)) {
-      void _handleControl(event.text.slice(CTRL_PREFIX.length).trim());
+    const controlFrame = _parseControlFrame(event.text);
+    if (controlFrame) {
+      _dispatchControlFrame(controlFrame);
       return { action: "handled" } as const;
     }
     if (event.source === "extension") return;

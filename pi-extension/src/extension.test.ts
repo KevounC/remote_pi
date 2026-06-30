@@ -169,6 +169,7 @@ const {
   _getLockedNameForTest,
   _resetCwdLockForTest,
   _handleControl,
+  _parseControlFrame,
   CTRL_PREFIX,
 } = await import("./index.js");
 const { runStandaloneRemotePiCli } = await import("./extension/command_surface/standalone_cli.js");
@@ -4014,6 +4015,51 @@ describe("relay control channel + relay-state event", () => {
     const input = captureEventHandler("input");
     const result = input({ type: "input", text: `${CTRL_PREFIX}relay:status`, source: "rpc" });
     expect(result).toEqual({ action: "handled" });
+  });
+
+  test("legacy CTRL_PREFIX input dispatches relay status through the control path", async () => {
+    const sendMessage = vi.fn();
+    captureHandler("remote-pi");
+    const input = captureEventHandler("input");
+    _setPiForTest(makeSpyPi(sendMessage));
+
+    const result = input({ type: "input", text: `${CTRL_PREFIX}relay:status`, source: "rpc" });
+
+    expect(result).toEqual({ action: "handled" });
+    await vi.waitFor(() => expect(lastRelayState(sendMessage)).toBeDefined());
+    expect(lastRelayState(sendMessage)!.details).toMatchObject({ status: "disconnected", connected: false });
+  });
+
+  test("structured remote_pi_control input is swallowed and dispatches relay status", async () => {
+    const sendMessage = vi.fn();
+    captureHandler("remote-pi");
+    const input = captureEventHandler("input");
+    _setPiForTest(makeSpyPi(sendMessage));
+    const payload = JSON.stringify({ type: "remote_pi_control", command: "relay_status" });
+
+    const result = input({ type: "input", text: payload, source: "rpc" });
+
+    expect(result).toEqual({ action: "handled" });
+    await vi.waitFor(() => expect(lastRelayState(sendMessage)).toBeDefined());
+    expect(lastRelayState(sendMessage)!.details).toMatchObject({ status: "disconnected", connected: false });
+  });
+
+  test("structured remote_pi_control rename parses to the legacy command path", () => {
+    expect(_parseControlFrame(JSON.stringify({
+      type: "remote_pi_control",
+      command: "rename",
+      name: "Renamed",
+    }))).toEqual({ command: "rename:Renamed" });
+  });
+
+  test("unknown or invalid structured control JSON is NOT swallowed", () => {
+    const input = captureEventHandler("input");
+    expect(input({
+      type: "input",
+      text: JSON.stringify({ type: "remote_pi_control", command: "relay_bounce" }),
+      source: "rpc",
+    })).toBeUndefined();
+    expect(input({ type: "input", text: '{"type":"remote_pi_control"', source: "rpc" })).toBeUndefined();
   });
 
   test("a normal (non-control) input is NOT swallowed", () => {

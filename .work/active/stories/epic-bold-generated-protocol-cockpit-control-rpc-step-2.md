@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-cockpit-control-rpc-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-generated-protocol-cockpit-control-rpc
 depends_on: [epic-bold-generated-protocol-cockpit-control-rpc-step-1]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 2: Parse schema control envelopes in pi-extension input path and route to dispatcher
@@ -66,3 +66,13 @@ if (event.text.startsWith(CTRL_PREFIX)) {
 
 Drop parser and compatibility branch additions in `pi-extension/src/index.ts` and
 `_handleControl` signature, restoring the current `CTRL_PREFIX`-only handling.
+
+## Implementation
+
+- Files changed: `pi-extension/src/index.ts`, `pi-extension/src/extension.test.ts`.
+- Added a schema-shaped `remote_pi_control` parser in `index.ts` that normalizes `relay_on`, `relay_off`, `relay_toggle`, `relay_status`, and `rename` into the existing legacy command strings before dispatch.
+- Kept `CTRL_PREFIX` as an explicit compatibility decoder and routed both structured and legacy frames through the same `_dispatchControlFrame`/`_handleControl` path.
+- Added extension tests proving legacy control input is swallowed and dispatches relay-state, structured `remote_pi_control` input is swallowed and dispatches relay-state, structured rename parses to the same command path, and unknown/malformed structured JSON falls through as normal input.
+- Discrepancies from design: used the checked-in schema discriminator `type: "remote_pi_control"` from `protocol/schema/cockpit-control.schema.json` rather than the example `"remote-pi-control"` spelling in the notes.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; `corepack pnpm exec vitest run src/extension.test.ts` reported 161 passed / 4 failed out of 165 before the harness timeout.
+- False-alarm observation: the 4 failing tests were `after a clean reset, connect works again (flag is per-instance, not sticky)`, `join emits remote-pi:name-assigned with requested + assigned + changed`, `rename:<name> renames live (broker re-register + relay swap), process/session survive`, and `a second same-name agent joins as <name>#2 instead of being refused`; these match the known environment/cwd-lock/name-assigned/rename false-failure pattern. A focused `-t "relay control channel"` run showed all new control tests passing, with only the known `rename:<name>...` false-alarm failing.
