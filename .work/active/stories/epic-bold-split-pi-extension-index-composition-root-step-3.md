@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-composition-root-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-composition-root
 depends_on: [epic-bold-split-pi-extension-index-composition-root-step-2]
@@ -102,3 +102,13 @@ Inline adapter wiring back into `index.ts` and remove `legacy_ports.ts`; no prot
   - With sandbox cache env (`PNPM_HOME=/home/agent/projects/remote_pi/.pnpm-store`, `npm_config_cache=/home/agent/projects/remote_pi/.npm-cache`, `XDG_CACHE_HOME=/home/agent/projects/remote_pi/.xdg-cache`): `corepack pnpm exec vitest run src/extension/composition_root.test.ts src/session/turn_state.test.ts src/session/session_gate.test.ts src/protocol/session_scope.test.ts` — passed (4 files, 22 tests).
   - Extra probe: `corepack pnpm exec vitest run src/extension.test.ts -t "app session_new recaptures fresh message API|cancel uses freshest session_start ctx"` failed with the known current-head session-gate expectation failures; verified by reverse-applying this rework patch and re-running the same command, which failed identically before these changes.
 - Adjacent issues parked: none.
+
+## Review (2026-06-30)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Reviewed rework commit `30ec471`. The prior blocker is resolved: `index.ts` constructs `createLegacyIndexPorts(createIndexDeps())`, `createIndexDeps()` returns the concrete `LegacyIndexDeps` wiring object for today's globals, SDK API binding goes through `legacyRuntime.ports.session.bindApi(pi)`, and command registration goes through `legacyRuntime.ports.commands.register(pi, legacyRuntime)`. Runtime behavior is preserved because the legacy ports delegate to the existing helper bodies/state and the inline Pi hook bodies remain unchanged for the follow-on routing story. Verification passed from `pi-extension/` with repo-local caches: `corepack pnpm typecheck`; `corepack pnpm exec vitest run src/extension/composition_root.test.ts src/session/turn_state.test.ts src/session/session_gate.test.ts src/protocol/session_scope.test.ts` (4 files, 22 tests).
