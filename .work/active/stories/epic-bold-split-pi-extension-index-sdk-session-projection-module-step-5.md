@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-sdk-session-projection-module-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-sdk-session-projection-module
 depends_on: [epic-bold-split-pi-extension-index-sdk-session-projection-module-step-4]
@@ -102,3 +102,24 @@ Remove the epoch/current predicate and detached guards, restoring the previous a
 - False-alarm observation: the 4 targeted-suite failures match the documented environment/cwd-lock false-failure bucket, not bridge/listener/late-attach behavior: `after a clean reset, connect works again (flag is per-instance, not sticky)`, `join emits remote-pi:name-assigned with requested + assigned + changed`, `rename:<name> renames live (broker re-register + relay swap), process/session survive`, and `a second same-name agent joins as <name>#2 instead of being refused`.
 - Discrepancies from design: per collision guard, this step hardened the relay-transport-owned attach path and detached guards without editing landed `session/mesh_node.ts` or `session/bridge.ts`; the bridge predicate is exposed through the `CrossPcBridgeMeshNode` port for attach implementations that honor it.
 - Adjacent issues parked: none.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran (clean state): `corepack pnpm typecheck`
+clean; `corepack pnpm build` clean; `corepack pnpm exec vitest run src/session/
+broker_remote.test.ts` → 35 passed; **full pi-ext suite 664 passed | 3 skipped |
+0 failed (44 files)** — fully green (up from 660 — the agent's new detached-no-op +
+late-attach regression tests). The 4 failures the agent reported are genuinely the
+environment-flake false-alarm signature — confirmed by clean orchestrator re-run
+(0 failures). The agent CORRECTLY classified them by reading the actual test names.
+
+Hardening verified (2× consistent): detached no-op guards added to `PlainPeerChannel`
+(`detached` flag + send/queued-inbound guard — the +6 to peer_channel.ts the story
+explicitly permits), `PiForwardClient` (sendEnvelopeToPi/queued-inbound), and
+`BrokerRemote` (handleIncoming/control-send). Bridge late-continuation: `RelayTransport`
+tracks bridge epoch, passes `isCurrent` to `attachBridge`, invalidates on detach/stop/
+reconnect, detaches stale continuations after shutdown. Epoch teardown: `clearStaleContexts()`
+advances before relay/mesh teardown. New regression tests (detached no-ops +
+late-attach-after-shutdown) pass. Commit `fc9541c` scoped to pi-ext only (relay_transport
++ ports + peer_channel/pi_forward_client/broker_remote detached guards + tests); collision
+guard held. **sdk-session-projection arc complete (5/5).**
