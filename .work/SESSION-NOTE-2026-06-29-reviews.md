@@ -1,5 +1,23 @@
 # Session note — 2026-06-29 — bold-refactor review pass
 
+**UPDATE 2026-06-29 (later):** The cockpit env blocker described below is now
+**RESOLVED**. pub.dev became reachable (200), and a writable pub cache was
+materialized at `/tmp/pi-pub-cache` via `PUB_CACHE=/tmp/pi-pub-cache
+HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter pub get` from
+`cockpit/`. `cockpit/.dart_tool/package_config.json` now exists. `flutter
+analyze` (full project) is green: "No issues found!". The two pending cockpit
+verifications were run:
+- `workspace-document-step-3` — 9 targeted tests pass; the static-only
+  approval is now backed by a green run. Stays `done`.
+- `settings-split-step-3` — the one committed test passes but is still only
+  import coverage; the bounce stands on its merits (AC needs fake VM/gateway
+  coverage). Stays `implementing`.
+The "Fix options" section below is now historical; keep it only as a record of
+what was wrong. Resume from "Resume instructions" item 3 (the 8 bounces), not
+the env work.
+
+---
+
 Transient handoff note. Per `.agents/rules/agent-discipline.md` this lives in
 `.work/` (transient) and is NOT a durable artifact. When the work it describes
 is fully resolved, delete this file; do not link durable docs at it.

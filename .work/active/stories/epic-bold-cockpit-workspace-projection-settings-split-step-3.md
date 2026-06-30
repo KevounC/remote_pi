@@ -114,3 +114,12 @@ Move the connectivity panel and helpers back into `settings_page.dart`, restore 
 - `cd /home/agent/forks/remote_pi && git show --stat --find-renames --find-copies da43c9d5 && git show --no-ext-diff --no-color --find-renames --find-copies da43c9d5 -- cockpit/lib/app/settings/ui/categories/connectivity_settings_panel.dart cockpit/lib/app/settings/ui/settings_page.dart cockpit/test/settings/connectivity_settings_panel_test.dart .work/active/stories/epic-bold-cockpit-workspace-projection-settings-split-step-3.md`: reviewed commit `da43c9d5` diff.
 - `cd /home/agent/forks/remote_pi/cockpit && flutter analyze`: failed before analysis because `/opt/flutter/bin/cache` is read-only (`engine.stamp.tmp.17`, `engine.realm`).
 - `cd /home/agent/forks/remote_pi/cockpit && flutter test test/settings/connectivity_settings_panel_test.dart`: failed before test execution for the same read-only Flutter cache error.
+
+## Verification supplement (2026-06-29, env unblocked)
+
+The env block is resolved (pub.dev reachable, `PUB_CACHE=/tmp/pi-pub-cache`, `/tmp/flutter-writable/bin/flutter`, `HOME=/tmp/pi-dart-home`). Reran the targeted commands:
+
+- `flutter analyze` (full cockpit project) → **No issues found!** (ran in 18.4s).
+- `flutter test test/settings/connectivity_settings_panel_test.dart` → **All tests passed!** but the suite contains exactly **one** test: `connectivity settings panel is importable outside settings_page`.
+
+This confirms the bounce's blocker stands on its merits, not on the env block: the AC requires fake view-model/gateway coverage for `ConnectivityViewModel.load`, relay save/check, and pairing/revoke controller disposal, and the committed test still only proves importability. `stage: implementing` unchanged; the real test gap remains.
