@@ -1,14 +1,14 @@
 ---
 id: epic-bold-turn-state-machine-projection-consumers-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-turn-state-machine-projection-consumers
 depends_on: [epic-bold-turn-state-machine-projection-consumers-step-1]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 2: Replace mobile chat working booleans with an app turn projection
@@ -99,12 +99,24 @@ String? get cancelTargetId => _turnProjection.cancelTargetId;
 
 ## Acceptance Criteria
 
-- [ ] `flutter test test/data/sync/sync_service_test.dart` passes from `app/`.
-- [ ] Targeted `ConnectionManager` tests prove `isRoomWorking`/room projection is false when the room is ended, absent from a fresh `RoomsSnapshot`, connection is non-online, or reconnect hydration reports `working:false`.
-- [ ] `ChatViewModel.isWorking` and `cancelTargetId` derive from one projection object; they no longer OR `roomWorking || _working || _streaming != null`.
-- [ ] `SyncService` convergence tests cover agent done, provider error, cancel/abort, send timeout, compaction/history replay, session switch, connection loss/reconnect, and dispose.
-- [ ] The app domain projection imports no Flutter widgets, storage boxes, WebSocket channel, or `BuildContext`.
+- [x] `flutter test test/data/sync/sync_service_test.dart` passes from `app/`.
+- [x] Targeted `ConnectionManager` tests prove `isRoomWorking`/room projection is false when the room is ended, absent from a fresh `RoomsSnapshot`, connection is non-online, or reconnect hydration reports `working:false`.
+- [x] `ChatViewModel.isWorking` and `cancelTargetId` derive from one projection object; they no longer OR `roomWorking || _working || _streaming != null`.
+- [x] `SyncService` convergence tests cover agent done, provider error, cancel/abort, send timeout, compaction/history replay, session switch, connection loss/reconnect, and dispose.
+- [x] The app domain projection imports no Flutter widgets, storage boxes, WebSocket channel, or `BuildContext`.
 
 ## Rollback
 
 Restore the existing `_working` / `_workingReplyTo` stream and `ChatViewModel` OR logic. Keep any pure projection tests if they expose a real convergence bug, but do not weaken them to hide sticky `working:true`.
+
+## Implementation notes
+
+- Files changed: `app/lib/domain/session_state.dart`, `app/lib/domain/transcript/transcript_projection.dart`, `app/lib/data/sync/sync_service.dart`, `app/lib/data/transport/connection_manager.dart`, `app/lib/ui/chat/viewmodels/chat_viewmodel.dart`, `app/test/data/sync/sync_service_test.dart`, `app/test/data/transport/connection_manager_test.dart`.
+- Projection shape: added pure-domain `AppTurnStatus`, `AppTurnProjection`, and `RoomTurnProjection`; `TranscriptTurnView` now carries `status`/`turnId`/`replyTo` aligned to the canonical app turn status, with `TranscriptTurnStatus` kept only as compatibility aliases to avoid a second enum.
+- SyncService: replaced independent `_working` / `_workingReplyTo` mutable fields with a single `TranscriptTurnView`/`AppTurnProjection` source; legacy `isWorking`, `workingStream`, and `workingReplyTo` now derive from that projection.
+- ConnectionManager: added `roomTurnProjection`; `isRoomWorking` derives from it and returns false for ended, absent, non-online, and stale/unhydrated rooms. `markRoomWorking` is narrowed to the active live room and terminal/lifecycle paths clear cached active-room working state.
+- ChatViewModel: `isWorking` and `cancelTargetId` now read one `_turnProjection` object derived by `deriveChatTurnProjection(room, transcript, streaming)`; the old OR logic is gone.
+- Convergence tests added: agent done, provider error, cancel/abort, send timeout, compaction live event, history replay, session switch, connection loss/reconnect, and dispose all assert `working:false`/no cancel target; connection-manager tests cover room ended, room absent from fresh snapshot, non-online connection, and reconnect hydration with `working:false`.
+- Verification: `HOME=/tmp/pi-dart-home PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache /home/agent/projects/remote_pi/.tools/flutter/bin/flutter pub get` passed; `flutter test test/data/sync/sync_service_test.dart test/data/transport/connection_manager_test.dart` passed; `flutter test test/data/transport/connection_manager_test.dart` passed separately; `flutter analyze` reports only the known unrelated `axisAlignment` deprecation in `lib/ui/chat/widgets/input_bar.dart:802` and exits non-zero because Flutter treats the info as an issue in this environment.
+- Discrepancies from design: `TranscriptTurnStatus` remains as an alias-only compatibility wrapper over `AppTurnStatus` so older transcript tests/callers continue to compile without creating an independent variant source.
+- Adjacent issues parked: none.

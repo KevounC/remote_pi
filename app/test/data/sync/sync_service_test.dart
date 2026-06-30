@@ -12,6 +12,7 @@ import 'package:app/data/sync/sync_service.dart';
 import 'package:app/data/transport/channel.dart';
 import 'package:app/data/transport/connection_manager.dart';
 import 'package:app/domain/session_state.dart';
+import 'package:app/domain/transcript/transcript_projection.dart';
 import 'package:app/pairing/storage.dart';
 import 'package:app/protocol/protocol.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1153,54 +1154,51 @@ void main() {
     },
   );
 
-  test(
-    'clearActiveSession resets the in-memory turn state — working/streaming '
-    'converge false on a mid-turn session wipe (plan/32)',
-    () async {
-      final s = await setup();
+  test('clearActiveSession resets the in-memory turn state — working/streaming '
+      'converge false on a mid-turn session wipe (plan/32)', () async {
+    final s = await setup();
 
-      // Mid-turn: working flag up, streaming buffer populated, reply target set.
-      s.ch.push(AgentChunk(inReplyTo: 'r1', delta: 'thinking...'));
-      await _settle();
-      expect(s.sync.isWorking, isTrue);
-      expect(s.sync.streaming, isNotNull);
-      expect(s.sync.workingReplyTo, 'r1');
+    // Mid-turn: working flag up, streaming buffer populated, reply target set.
+    s.ch.push(AgentChunk(inReplyTo: 'r1', delta: 'thinking...'));
+    await _settle();
+    expect(s.sync.isWorking, isTrue);
+    expect(s.sync.streaming, isNotNull);
+    expect(s.sync.workingReplyTo, 'r1');
 
-      final flags = <bool>[];
-      final sub = s.sync.workingStream.listen(flags.add);
+    final flags = <bool>[];
+    final sub = s.sync.workingStream.listen(flags.add);
 
-      // `session_new` wipe boundary: clear must converge working state false,
-      // not leave a stale cancel target / streaming cursor.
-      await s.sync.clearActiveSession();
-      await _settle();
+    // `session_new` wipe boundary: clear must converge working state false,
+    // not leave a stale cancel target / streaming cursor.
+    await s.sync.clearActiveSession();
+    await _settle();
 
-      expect(
-        s.sync.isWorking,
-        isFalse,
-        reason: 'session clear must idle the in-memory working flag',
-      );
-      expect(
-        s.sync.streaming,
-        isNull,
-        reason: 'session clear must drop the streaming cursor',
-      );
-      expect(
-        s.sync.workingReplyTo,
-        isNull,
-        reason: 'session clear must clear the stale cancel target',
-      );
-      expect(
-        flags,
-        contains(false),
-        reason: 'listeners are notified the flag cleared',
-      );
-      expect(messages(s.epk), isEmpty);
+    expect(
+      s.sync.isWorking,
+      isFalse,
+      reason: 'session clear must idle the in-memory working flag',
+    );
+    expect(
+      s.sync.streaming,
+      isNull,
+      reason: 'session clear must drop the streaming cursor',
+    );
+    expect(
+      s.sync.workingReplyTo,
+      isNull,
+      reason: 'session clear must clear the stale cancel target',
+    );
+    expect(
+      flags,
+      contains(false),
+      reason: 'listeners are notified the flag cleared',
+    );
+    expect(messages(s.epk), isEmpty);
 
-      await sub.cancel();
-      s.conn.dispose();
-      s.sync.dispose();
-    },
-  );
+    await sub.cancel();
+    s.conn.dispose();
+    s.sync.dispose();
+  });
 
   test(
     'clearActiveSession with no-index session accepts replay after clear',
@@ -1623,6 +1621,199 @@ void main() {
       expect(s.sync.debugPendingSendTimerCount, 0);
       s.conn.dispose();
       s.sync.dispose();
+    });
+  });
+
+  group('turn projection convergence', () {
+    test('agent_done projects idle', () async {
+      final s = await setup();
+      s.ch.push(UserInput(id: 'u_agent_done', text: 'hi'));
+      await _settle();
+      expect(s.sync.turnProjection.working, isTrue);
+
+      s.ch.push(AgentDone(inReplyTo: 'u_agent_done'));
+      await _settle();
+
+      expect(s.sync.turnProjection.working, isFalse);
+      expect(s.sync.turnProjection.cancelTargetId, isNull);
+      s.conn.dispose();
+      s.sync.dispose();
+    });
+
+    test('provider error projects idle', () async {
+      final s = await setup();
+      s.ch.push(AgentChunk(inReplyTo: 'u_provider_error', delta: 'partial'));
+      await _settle();
+      expect(s.sync.turnProjection.working, isTrue);
+
+      s.ch.push(
+        ErrorMessage(
+          inReplyTo: 'u_provider_error',
+          code: 'provider_error',
+          message: 'model failed',
+        ),
+      );
+      await _settle();
+
+      expect(s.sync.turnProjection.working, isFalse);
+      expect(s.sync.turnProjection.cancelTargetId, isNull);
+      s.conn.dispose();
+      s.sync.dispose();
+    });
+
+    test('cancel/abort projects idle', () async {
+      final s = await setup();
+      s.ch.push(UserInput(id: 'u_cancel', text: 'stop me'));
+      await _settle();
+      expect(s.sync.turnProjection.working, isTrue);
+
+      s.ch.push(Cancelled(inReplyTo: 'cancel-1', targetId: 'u_cancel'));
+      await _settle();
+
+      expect(s.sync.turnProjection.working, isFalse);
+      expect(s.sync.turnProjection.cancelTargetId, isNull);
+      s.conn.dispose();
+      s.sync.dispose();
+    });
+
+    test('send timeout projects idle', () async {
+      final s = await setup(
+        pendingSendTimeout: const Duration(milliseconds: 120),
+      );
+      await s.sync.sendMessage('no echo');
+      await _settle();
+      expect(s.sync.turnProjection.working, isTrue);
+
+      await Future<void>.delayed(const Duration(milliseconds: 180));
+      await _settle();
+
+      expect(s.sync.turnProjection.working, isFalse);
+      expect(s.sync.turnProjection.cancelTargetId, isNull);
+      s.conn.dispose();
+      s.sync.dispose();
+    });
+
+    test('compaction live event projects idle and clears streaming', () async {
+      final s = await setup();
+      s.ch.push(AgentChunk(inReplyTo: 'u_compact', delta: 'partial'));
+      await _settle();
+      expect(s.sync.turnProjection.working, isTrue);
+      expect(s.sync.streaming, isNotNull);
+
+      s.ch.push(
+        Compaction(
+          summary: 'compacted context',
+          tokensBefore: 12000,
+          ts: 1700000000000,
+        ),
+      );
+      await _settle();
+
+      expect(s.sync.turnProjection.working, isFalse);
+      expect(s.sync.turnProjection.cancelTargetId, isNull);
+      expect(s.sync.streaming, isNull);
+      s.conn.dispose();
+      s.sync.dispose();
+    });
+
+    test(
+      'history replay projects idle after a previously active turn',
+      () async {
+        final s = await setup();
+        s.ch.push(AgentChunk(inReplyTo: 'u_history', delta: 'partial'));
+        await _settle();
+        expect(s.sync.turnProjection.working, isTrue);
+
+        s.ch.push(
+          SessionHistory(
+            sessionId: s.sessionId,
+            inReplyTo: 'sync-history-terminal',
+            sessionStartedAt: DateTime.now().millisecondsSinceEpoch,
+            events: const [
+              UserInputEvt(ts: 1, id: 'u_history', text: 'hi'),
+              AgentMessageEvt(ts: 2, inReplyTo: 'u_history', text: 'done'),
+            ],
+            eos: true,
+          ),
+        );
+        await _settle();
+
+        expect(s.sync.turnProjection.working, isFalse);
+        expect(s.sync.turnProjection.cancelTargetId, isNull);
+        expect(s.sync.streaming, isNull);
+        s.conn.dispose();
+        s.sync.dispose();
+      },
+    );
+
+    test('session switch projects idle', () async {
+      final s = await setup();
+      s.ch.push(AgentChunk(inReplyTo: 'u_switch', delta: 'partial'));
+      await _settle();
+      expect(s.sync.turnProjection.working, isTrue);
+
+      await s.sync.activate('epk_projection_switch', 'main');
+      await _settle();
+
+      expect(s.sync.turnProjection.working, isFalse);
+      expect(s.sync.turnProjection.cancelTargetId, isNull);
+      s.conn.dispose();
+      s.sync.dispose();
+    });
+
+    test('connection loss and reconnect project idle', () async {
+      final s = await setup();
+      final retrying = s.conn.statusStream.firstWhere(
+        (status) => status is StatusRetrying,
+      );
+      s.ch.push(AgentChunk(inReplyTo: 'u_disconnect', delta: 'partial'));
+      await _settle();
+      expect(s.sync.turnProjection.working, isTrue);
+
+      await s.ch.close();
+      await retrying;
+      await _settle();
+      expect(s.sync.turnProjection.working, isFalse);
+      expect(s.sync.turnProjection.cancelTargetId, isNull);
+
+      final reconnect = _FakeChannel()..defaultSessionId = s.sessionId;
+      s.conn.adopt(
+        reconnect,
+        PeerRecord(
+          remoteEpk: s.epk,
+          sessionName: 'Pi',
+          relayUrl: 'ws://localhost',
+          pairedAt: '2026-01-01T00:00:00Z',
+        ),
+      );
+      await _settle();
+      expect(s.sync.turnProjection.working, isFalse);
+      expect(s.sync.turnProjection.cancelTargetId, isNull);
+      s.conn.dispose();
+      s.sync.dispose();
+    });
+
+    test('dispose projects idle and closes turn stream', () async {
+      final s = await setup();
+      s.ch.push(AgentChunk(inReplyTo: 'u_dispose', delta: 'partial'));
+      await _settle();
+      expect(s.sync.turnProjection.working, isTrue);
+      final done = expectLater(
+        s.sync.turnViewStream,
+        emitsInOrder([
+          isA<TranscriptTurnView>()
+              .having((turn) => turn.working, 'working', isFalse)
+              .having((turn) => turn.replyTo, 'replyTo', isNull),
+          emitsDone,
+        ]),
+      );
+
+      s.sync.dispose();
+
+      expect(s.sync.turnProjection.working, isFalse);
+      expect(s.sync.turnProjection.cancelTargetId, isNull);
+      await done;
+      s.conn.dispose();
     });
   });
 }

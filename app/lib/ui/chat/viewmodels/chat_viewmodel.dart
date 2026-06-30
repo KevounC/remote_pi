@@ -8,6 +8,7 @@ import 'package:app/data/sync/sync_events.dart';
 import 'package:app/data/sync/sync_service.dart';
 import 'package:app/data/transport/connection_manager.dart';
 import 'package:app/domain/session_state.dart';
+import 'package:app/domain/transcript/transcript_projection.dart';
 import 'package:app/pairing/storage.dart';
 import 'package:app/protocol/protocol.dart';
 import 'package:app/ui/chat/states/chat_state.dart';
@@ -30,7 +31,7 @@ class ChatViewModel extends ViewModel<ChatState> {
   StreamSubscription<List<MessageRecord>>? _msgsSub;
   StreamSubscription<RuntimeRecord>? _runtimeSub;
   StreamSubscription<StreamingMessage?>? _streamingSub;
-  StreamSubscription<bool>? _workingSub;
+  StreamSubscription<TranscriptTurnView>? _turnViewSub;
   StreamSubscription<String?>? _queuedSub;
   StreamSubscription<SessionEvent>? _eventSub;
   StreamSubscription<Map<String, List<RoomInfo>>>? _roomsSub;
@@ -43,7 +44,8 @@ class ChatViewModel extends ViewModel<ChatState> {
 
   List<ChatMessage> _messages = const [];
   StreamingMessage? _streaming;
-  bool _working = false;
+  TranscriptTurnView _transcriptTurn = TranscriptTurnView.idle;
+  AppTurnProjection _turnProjection = AppTurnProjection.stale;
   String? _queuedText;
   RuntimeRecord _runtime = const RuntimeRecord();
   bool _pairingRevoked = false;
@@ -52,13 +54,13 @@ class ChatViewModel extends ViewModel<ChatState> {
 
   ChatViewModel(this._read, this._sync, this._conn, this._prefs, this._storage)
     : super(const ChatReady(messages: [])) {
-    // Plan/32f — do NOT seed _streaming/_working from the shared SyncService
-    // here: it may still be bound to the PREVIOUS chat (this VM is recreated
+    // Plan/32f — do NOT seed the shared SyncService turn projection here: it
+    // may still be bound to the PREVIOUS chat (this VM is recreated
     // on session switch, before _bootstrap rebinds via activate). Seeding now
     // would briefly paint the old chat's streaming bubble / working pill. We
     // seed AFTER activate() in _bootstrap, when the sync owns THIS session.
     _streamingSub = _sync.streamingStream.listen(_onStreaming);
-    _workingSub = _sync.workingStream.listen(_onWorking);
+    _turnViewSub = _sync.turnViewStream.listen(_onTurnView);
     _queuedSub = _sync.queuedStream.listen(_onQueued);
     _eventSub = _sync.events.listen(_onEvent);
     _roomsSub = _conn.roomsStream.listen((_) => _recompute());
@@ -86,27 +88,15 @@ class ChatViewModel extends ViewModel<ChatState> {
     return _conn.isRoomLive(epk, _activeRoomId);
   }
 
-  /// Whole-turn working signal for the room THIS chat is viewing — the
-  /// same mechanism as the Home dot. The relay broadcasts `meta.working`
-  /// per-room (turn_start/turn_end), so switching to another chat never
-  /// inherits the previous one's working state (previously `_working`
-  /// was a single global flag that leaked across sessions).
+  /// Whole-turn working signal for the room THIS chat is viewing.
   ///
-  /// OR'd with the local SyncService signals for the CONNECTED session:
-  /// `_working` is set optimistically on send (before the relay's
-  /// turn_start round-trips) and `_streaming != null` keeps the pill blue
-  /// during token flow — both are reset by [SyncService.activate] on a
-  /// session switch, so they only ever refer to the current chat.
-  bool get isWorking {
-    final epk = _activePeer?.remoteEpk;
-    final roomWorking = epk != null && _conn.isRoomWorking(epk, _activeRoomId);
-    return roomWorking || _working || _streaming != null;
-  }
+  /// A single [AppTurnProjection] composes the fresh room projection with the
+  /// active-room transcript/streaming projection. No sticky OR of unrelated
+  /// booleans lives in the ViewModel.
+  bool get isWorking => _turnProjection.working;
 
-  /// The id to `cancel` to stop the in-flight reply (the user message the
-  /// agent is answering). Null when idle. Prefers the live streaming target,
-  /// falls back to the SyncService's tracked turn id.
-  String? get cancelTargetId => _streaming?.inReplyTo ?? _sync.workingReplyTo;
+  /// The id to `cancel` to stop the in-flight reply. Null when idle/stale.
+  String? get cancelTargetId => _turnProjection.cancelTargetId;
 
   String? get queuedText => _queuedText;
 
@@ -157,8 +147,9 @@ class ChatViewModel extends ViewModel<ChatState> {
     // seed the in-memory streaming/working from it. Doing this here instead of
     // the constructor avoids inheriting the previous chat's bubble/pill.
     _streaming = _sync.streaming;
-    _working = _sync.isWorking;
+    _transcriptTurn = _sync.turnView;
     _queuedText = _sync.queuedText;
+    _updateTurnProjection();
     _msgsSub = _read.watchMessages(epk, roomId).listen(_onMessages);
     _runtimeSub = _read.watchRuntime(epk, roomId).listen(_onRuntime);
 
@@ -174,12 +165,26 @@ class ChatViewModel extends ViewModel<ChatState> {
 
   void _onStreaming(StreamingMessage? s) {
     _streaming = s;
+    _updateTurnProjection();
     _recompute();
   }
 
-  void _onWorking(bool working) {
-    _working = working;
+  void _onTurnView(TranscriptTurnView turn) {
+    _transcriptTurn = turn;
+    _updateTurnProjection();
     _recompute();
+  }
+
+  void _updateTurnProjection() {
+    final epk = _activePeer?.remoteEpk;
+    final room = epk == null
+        ? RoomTurnProjection.stale
+        : _conn.roomTurnProjection(epk, _activeRoomId);
+    _turnProjection = deriveChatTurnProjection(
+      room: room,
+      transcript: _transcriptTurn,
+      streaming: _streaming,
+    );
   }
 
   void _onQueued(String? text) {
@@ -220,6 +225,7 @@ class ChatViewModel extends ViewModel<ChatState> {
 
   void _recompute() {
     if (_disposed) return;
+    _updateTurnProjection();
     emit(_compose());
   }
 
@@ -286,7 +292,7 @@ class ChatViewModel extends ViewModel<ChatState> {
     _msgsSub?.cancel();
     _runtimeSub?.cancel();
     _streamingSub?.cancel();
-    _workingSub?.cancel();
+    _turnViewSub?.cancel();
     _queuedSub?.cancel();
     _eventSub?.cancel();
     _roomsSub?.cancel();

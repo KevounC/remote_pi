@@ -77,17 +77,12 @@ class SyncService extends Service {
   bool _pendingSyncRequest = false;
   Timer? _syncDebounce;
 
-  // Whether the active session's agent is currently producing a reply. Spans
-  // the WHOLE turn (send/echo → agent_done), not just the token-streaming
-  // window — restoring the old broad "working" signal. Mirrored into the
-  // session index (durable, for Home) and exposed in-memory (for the chat
-  // pill, no box-key matching needed).
-  bool _working = false;
-  // Id of the user message the in-flight reply is answering — the `cancel`
-  // target while working. Null when idle.
-  String? _workingReplyTo;
-  final StreamController<bool> _workingController =
-      StreamController<bool>.broadcast();
+  // Active-room turn projection derived from transcript events and local
+  // optimistic send state. This is the single in-memory source for chat
+  // working/cancel state; legacy boolean getters below derive from it.
+  TranscriptTurnView _turnView = TranscriptTurnView.idle;
+  final StreamController<TranscriptTurnView> _turnViewController =
+      StreamController<TranscriptTurnView>.broadcast();
 
   // Plan/32 safety net — if the relay never echoes a sent message back, the
   // optimistic `pending:true` bubble would spin forever. After this window we
@@ -119,12 +114,20 @@ class SyncService extends Service {
   String? get queuedText => _queuedText;
   Stream<String?> get queuedStream => _queuedController.stream;
 
-  /// True while the active session's agent is producing a reply (whole turn).
-  bool get isWorking => _working;
-  Stream<bool> get workingStream => _workingController.stream;
+  TranscriptTurnView get turnView => _turnView;
+  Stream<TranscriptTurnView> get turnViewStream => _turnViewController.stream;
+  AppTurnProjection get turnProjection => _turnView.toAppProjection();
+  Stream<AppTurnProjection> get turnProjectionStream =>
+      _turnViewController.stream.map((turn) => turn.toAppProjection());
+
+  /// Compatibility getters. They are derived from [_turnView], never written as
+  /// independent mutable booleans/ids.
+  bool get isWorking => turnProjection.working;
+  Stream<bool> get workingStream =>
+      turnProjectionStream.map((projection) => projection.working).distinct();
 
   /// `cancel` target for the in-flight reply (null when idle).
-  String? get workingReplyTo => _workingReplyTo;
+  String? get workingReplyTo => turnProjection.cancelTargetId;
 
   String? get activeEpk => _activeEpk;
   String get activeRoomId => _activeRoomId;
@@ -162,12 +165,8 @@ class SyncService extends Service {
       // to confirm — drop their backstops so a stale timer can't fire later.
       _cancelAllSendTimers();
     }
-    _workingReplyTo = null;
     if (_streaming != null) _emitStreaming(null);
-    if (_working) {
-      _working = false;
-      if (!_workingController.isClosed) _workingController.add(false);
-    }
+    _setTurnViewLocalOnly(TranscriptTurnView.idle);
   }
 
   Future<void> sendMessage(
@@ -194,7 +193,11 @@ class SyncService extends Service {
         preserveTurnState: isSteer,
       );
       if (!isSteer) {
-        _setWorking(true, preview: _preview(text, image), replyTo: id);
+        _setTurnActive(
+          status: AppTurnStatus.working,
+          preview: _preview(text, image),
+          replyTo: id,
+        );
       }
       // Arm the no-echo backstop for this row. The timeout is keyed off the
       // row's `ts`, NOT online-ness: an offline "held pending" send fails
@@ -313,7 +316,7 @@ class SyncService extends Service {
     if (_streaming?.inReplyTo == id) _emitStreaming(null);
     // Clear working ONLY if this id owns it — never knock down a turn that a
     // different (echoed) message is already driving.
-    if (_workingReplyTo == id) _setWorking(false);
+    if (turnProjection.cancelTargetId == id) _setTurnIdle();
     await _upsert(
       MsgRole.assistant,
       'err_$id',
@@ -447,9 +450,9 @@ class SyncService extends Service {
       _indexLoaded = true;
       _clearTranscriptEventBuffer();
       // Session-clear is a `session_new` wipe boundary: a clear during an
-      // active turn would otherwise leave `_working` / `_workingReplyTo` /
-      // streaming cursor stuck on a stale cancel target. Reset the whole-turn
-      // working flag + streaming buffer so working state converges false.
+      // active turn would otherwise leave the turn projection / streaming
+      // cursor stuck on a stale cancel target. Reset the whole-turn state so
+      // working converges false.
       // (`_cancelAllSendTimers()` already ran above; no need to repeat.)
       _resetTurnState();
     });
@@ -489,7 +492,7 @@ class SyncService extends Service {
       // pending-send backstops armed so a disconnect can still become a visible
       // failure if no echo ever arrives.
       _resetTurnState(clearPendingSendTimers: false);
-      _setWorking(false);
+      _setTurnIdle();
     }
     _writeRuntime();
   }
@@ -537,7 +540,7 @@ class SyncService extends Service {
             delta: delta,
           ),
         );
-        _setWorking(true, replyTo: inReplyTo);
+        _setTurnActive(status: AppTurnStatus.streaming, replyTo: inReplyTo);
 
       case AgentDone(:final inReplyTo):
         final buffered = _streaming?.buffer ?? '';
@@ -563,7 +566,7 @@ class SyncService extends Service {
             replyTo: inReplyTo,
           ),
         );
-        _setWorking(false, preview: buffered.isEmpty ? null : buffered);
+        _setTurnIdle(preview: buffered.isEmpty ? null : buffered);
 
       case AgentMessage(:final inReplyTo, :final text):
         // ignore: discarded_futures
@@ -615,7 +618,11 @@ class SyncService extends Service {
         if (streamingBehavior == UserMessageStreamingBehavior.steer) {
           _setActivity(SessionActivity.working, preview: text);
         } else {
-          _setWorking(true, preview: text, replyTo: id);
+          _setTurnActive(
+            status: AppTurnStatus.working,
+            preview: text,
+            replyTo: id,
+          );
           // Show the thinking cursor for this turn (foreign-device echo, or the
           // local echo when the send-seed was already cleared). Guarded so it
           // never wipes a buffer that's already accumulating for this id.
@@ -675,13 +682,13 @@ class SyncService extends Service {
         // confirmed user/tool rows as the audit trail of what happened.
         // ignore: discarded_futures
         _removePendingById(targetId);
-        _setWorking(false);
+        _setTurnIdle();
 
       case Bye(:final rawReason):
         if (!_eventController.isClosed) {
           _eventController.add(PeerWentOffline(rawReason));
         }
-        _setWorking(false);
+        _setTurnIdle();
         final peer = _conn.activePeer;
         if (peer != null) {
           // ignore: discarded_futures
@@ -700,7 +707,7 @@ class SyncService extends Service {
           break;
         }
         _discardStreamingState();
-        _setWorking(false);
+        _setTurnIdle();
         // ignore: discarded_futures
         _upsert(
           MsgRole.assistant,
@@ -793,12 +800,7 @@ class SyncService extends Service {
     );
     if (!preserveTurnState) {
       _emitStreaming(projection.streaming);
-      final turn = projection.turn;
-      _setWorking(
-        turn.status == TranscriptTurnStatus.working ||
-            turn.status == TranscriptTurnStatus.streaming,
-        replyTo: turn.replyTo,
-      );
+      _setTurnView(projection.turn);
     }
     await _writeProjectionDiff(projection);
   }
@@ -830,12 +832,7 @@ class SyncService extends Service {
       events: _transcriptEvents,
     );
     _emitStreaming(projection.streaming);
-    final turn = projection.turn;
-    _setWorking(
-      turn.status == TranscriptTurnStatus.working ||
-          turn.status == TranscriptTurnStatus.streaming,
-      replyTo: turn.replyTo,
-    );
+    _setTurnView(projection.turn);
     await _writeProjectionDiff(projection);
   }
 
@@ -1138,33 +1135,60 @@ class SyncService extends Service {
     );
   }
 
-  /// Single source of "the active session is working". Drives the in-memory
-  /// flag/stream (chat pill) AND the durable session index (Home dot).
   void _setQueuedText(String? text) {
     if (_queuedText == text) return;
     _queuedText = text;
     if (!_queuedController.isClosed) _queuedController.add(text);
   }
 
-  void _setWorking(bool on, {String? preview, String? replyTo}) {
+  void _setTurnViewLocalOnly(TranscriptTurnView next) {
+    if (_sameTurnView(_turnView, next)) return;
+    _turnView = next;
+    if (!_turnViewController.isClosed) _turnViewController.add(next);
+  }
+
+  /// Single source of the active session's turn projection. Drives the
+  /// in-memory turn stream (chat pill/cancel target), durable session index,
+  /// and the active-room relay compatibility correction.
+  void _setTurnView(TranscriptTurnView next, {String? preview}) {
     _setActivity(
-      on ? SessionActivity.working : SessionActivity.idle,
+      next.working ? SessionActivity.working : SessionActivity.idle,
       preview: preview,
     );
-    // Snapshot nullable field once; Dart won't promote mutable fields safely.
     final epk = _activeEpk;
     if (epk != null) {
-      _conn.markRoomWorking(epk, _activeRoomId, on);
+      _conn.markRoomWorking(epk, _activeRoomId, next.working);
     }
-    if (on) {
-      if (replyTo != null) _workingReplyTo = replyTo;
-    } else {
-      _workingReplyTo = null;
-    }
-    if (_working == on) return;
-    _working = on;
-    if (!_workingController.isClosed) _workingController.add(on);
+    if (_sameTurnView(_turnView, next)) return;
+    _turnView = next;
+    if (!_turnViewController.isClosed) _turnViewController.add(next);
   }
+
+  void _setTurnActive({
+    required AppTurnStatus status,
+    String? preview,
+    String? turnId,
+    String? replyTo,
+  }) {
+    final target = replyTo ?? _turnView.replyTo ?? turnId;
+    _setTurnView(
+      TranscriptTurnView(
+        status: status,
+        turnId: turnId ?? _turnView.turnId ?? target,
+        replyTo: target,
+      ),
+      preview: preview,
+    );
+  }
+
+  void _setTurnIdle({String? preview}) =>
+      _setTurnView(TranscriptTurnView.idle, preview: preview);
+
+  bool _sameTurnView(TranscriptTurnView left, TranscriptTurnView right) =>
+      left.status == right.status &&
+      left.turnId == right.turnId &&
+      left.replyTo == right.replyTo &&
+      left.error == right.error;
 
   void _updateIndex(SessionIndexRecord Function(SessionIndexRecord cur) build) {
     final epk = _activeEpk;
@@ -1268,6 +1292,7 @@ class SyncService extends Service {
 
   @override
   void dispose() {
+    _resetTurnState(clearPendingSendTimers: true);
     _flushTimer?.cancel();
     _syncDebounce?.cancel();
     _cancelAllSendTimers();
@@ -1277,7 +1302,7 @@ class SyncService extends Service {
     _presenceSub?.cancel();
     _streamingController.close();
     _eventController.close();
-    _workingController.close();
+    _turnViewController.close();
     _queuedController.close();
   }
 }

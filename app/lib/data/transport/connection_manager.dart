@@ -36,6 +36,7 @@ import 'package:app/data/transport/channel.dart';
 import 'package:app/data/transport/epk_encoding.dart';
 import 'package:app/data/transport/reachability_adapter.dart';
 import 'package:app/domain/contracts/service.dart';
+import 'package:app/domain/session_state.dart';
 import 'package:app/pairing/storage.dart';
 import 'package:app/protocol/protocol.dart';
 
@@ -448,6 +449,7 @@ class ConnectionManager extends Service {
   /// avoiding the visible Online → NoPeer → Connecting flicker that used
   /// to trip up `ChatViewModel._bootstrap`.
   Future<void> _teardownActive({required bool emitNoPeer}) async {
+    _clearActiveRoomWorking();
     _cancelRetry();
     _cancelPing();
     _connectCancel?.cancel();
@@ -471,6 +473,7 @@ class ConnectionManager extends Service {
 
   @override
   void dispose() {
+    _clearActiveRoomWorking();
     _cancelRetry();
     _cancelPing();
     _watchdogTimer?.cancel();
@@ -665,13 +668,22 @@ class ConnectionManager extends Service {
       case RoomEnded(:final peer, :final roomId):
         final key = toStandardB64(peer);
         // Mark the room offline but KEEP it in the cached set so the
-        // tile stays in Home (now grey). Removing from _liveRoomIds
-        // is enough.
+        // tile stays in Home (now grey). A room end is also terminal for
+        // the room projection, so clear any cached working=true.
         final removed = _liveRoomIds[key]?.remove(roomId) ?? false;
+        final list = _roomsByPeer[key];
+        var clearedWorking = false;
+        if (list != null) {
+          final idx = list.indexWhere((r) => r.roomId == roomId);
+          if (idx >= 0 && list[idx].working) {
+            list[idx] = list[idx].copyWith(working: false);
+            clearedWorking = true;
+          }
+        }
         if (_liveRoomIds[key]?.isEmpty ?? false) {
           _liveRoomIds.remove(key);
         }
-        if (removed) roomsDirty = true;
+        if (removed || clearedWorking) roomsDirty = true;
       case RoomMetaUpdated(
         :final peer,
         :final roomId,
@@ -746,8 +758,13 @@ class ConnectionManager extends Service {
             working: r.working,
           );
         }
-        final newList = byId.values.toList();
         final newLive = rooms.map((r) => r.roomId).toSet();
+        for (final entry in byId.entries.toList()) {
+          if (!newLive.contains(entry.key) && entry.value.working) {
+            byId[entry.key] = entry.value.copyWith(working: false);
+          }
+        }
+        final newList = byId.values.toList();
         final liveChanged = !_setEquals(
           newLive,
           _liveRoomIds[key] ?? const <String>{},
@@ -857,34 +874,44 @@ class ConnectionManager extends Service {
     return live != null && live.contains(roomId);
   }
 
-  /// Plan/32 — `true` when the relay's last room-meta broadcast for
-  /// `(epk, roomId)` carried `working: true` (an in-flight agent turn).
-  /// Unlike the DB session-index signal (which only covers the single
-  /// connected room), this reflects EVERY subscribed room because the
-  /// relay broadcasts `meta.working` to all room subscribers — the same
-  /// fan-out as presence. Drives the blue Home dot on non-active
-  /// sessions.
-  ///
-  /// Gated on `StatusOnline` (same as [isRoomLive]): a dropped WS means
-  /// we have no fresh signal, so we report not-working and let the tile
-  /// fall back to the amber "reconnecting" / grey state.
-  bool isRoomWorking(String epk, String roomId) {
-    if (_status is! StatusOnline) return false;
+  /// Room-level turn projection. Cached room metadata is only trusted while
+  /// the relay connection is online AND the room is present in the current live
+  /// set. Unknown, ended, offline, or not-yet-hydrated rooms project stale and
+  /// therefore `working:false`.
+  RoomTurnProjection roomTurnProjection(String epk, String roomId) {
+    if (_status is! StatusOnline) return RoomTurnProjection.stale;
+    if (!isRoomLive(epk, roomId)) return RoomTurnProjection.stale;
     final list = _roomsByPeer[toStandardB64(epk)];
-    if (list == null) return false;
+    if (list == null) return RoomTurnProjection.stale;
     for (final r in list) {
-      if (r.roomId == roomId) return r.working;
+      if (r.roomId == roomId) {
+        return r.working ? RoomTurnProjection.active : RoomTurnProjection.idle;
+      }
     }
-    return false;
+    return RoomTurnProjection.stale;
   }
 
-  /// App-side correction for the connected room's working flag.
+  /// Compatibility getter for Home and staged callers.
+  bool isRoomWorking(String epk, String roomId) =>
+      roomTurnProjection(epk, roomId).working;
+
+  /// App-side correction for the connected room's working projection.
   ///
-  /// The relay remains the source for non-active rooms, but the active channel
-  /// also sees the actual `user_input` / `agent_done` frames. Use that local
-  /// observation as a backstop so a missed or delayed `meta.working=false`
-  /// broadcast cannot leave the active chat/Home tile stuck as working.
+  /// The relay remains the source for non-active rooms. This compatibility
+  /// backstop is deliberately narrowed to the active, live room so local chat
+  /// observations can clear a missed `meta.working=false` without mutating a
+  /// different room's projection.
   void markRoomWorking(String epk, String roomId, bool working) {
+    final active = _activePeer;
+    if (active == null ||
+        toStandardB64(active.remoteEpk) != toStandardB64(epk)) {
+      return;
+    }
+    if (roomId != _activeRoomId) return;
+    if (_status is! StatusOnline || !isRoomLive(epk, roomId)) {
+      if (!working) _clearRoomWorking(epk, roomId);
+      return;
+    }
     final key = toStandardB64(epk);
     final list = _roomsByPeer[key];
     if (list == null) return;
@@ -894,6 +921,24 @@ class ConnectionManager extends Service {
     _scheduleRoomsEmit();
     // ignore: unawaited_futures
     _persistRoomsForPeer(key);
+  }
+
+  void _clearRoomWorking(String epk, String roomId) {
+    final key = toStandardB64(epk);
+    final list = _roomsByPeer[key];
+    if (list == null) return;
+    final idx = list.indexWhere((r) => r.roomId == roomId);
+    if (idx < 0 || !list[idx].working) return;
+    list[idx] = list[idx].copyWith(working: false);
+    _scheduleRoomsEmit();
+    // ignore: unawaited_futures
+    _persistRoomsForPeer(key);
+  }
+
+  void _clearActiveRoomWorking() {
+    final active = _activePeer;
+    if (active == null) return;
+    _clearRoomWorking(active.remoteEpk, _activeRoomId);
   }
 
   void _learnSessionFromPairOk(PeerRecord peer, PairOk msg) {
@@ -1188,6 +1233,7 @@ class ConnectionManager extends Service {
     if (live == null || !live.contains(_activeRoomId)) return;
     live.remove(_activeRoomId);
     if (live.isEmpty) _liveRoomIds.remove(key);
+    _clearRoomWorking(activeEpk, _activeRoomId);
     if (!_roomsController.isClosed) {
       _roomsController.add(_roomsSnapshot());
     }
@@ -1212,6 +1258,7 @@ class ConnectionManager extends Service {
     final wasOnline = _status is StatusOnline;
     final nowOnline = s is StatusOnline;
     _status = s;
+    if (wasOnline && !nowOnline) _clearActiveRoomWorking();
     if (!_statusController.isClosed) _statusController.add(s);
     if (wasOnline != nowOnline && !_roomsController.isClosed) {
       _roomsController.add(_roomsSnapshot());

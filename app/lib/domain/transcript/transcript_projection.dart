@@ -1,20 +1,86 @@
 import 'package:app/domain/session_state.dart';
 import 'package:app/domain/transcript/transcript_event.dart';
 
-enum TranscriptTurnStatus { idle, working, streaming, error }
+/// Backward-compatible aliases for the transcript seam. The canonical variant
+/// set is [AppTurnStatus]; keep this wrapper so older tests/callers do not
+/// grow a second enum.
+abstract final class TranscriptTurnStatus {
+  static const idle = AppTurnStatus.idle;
+  static const working = AppTurnStatus.working;
+  static const awaitingTool = AppTurnStatus.awaitingTool;
+  static const streaming = AppTurnStatus.streaming;
+  static const done = AppTurnStatus.done;
+  static const error = AppTurnStatus.error;
+  static const stale = AppTurnStatus.stale;
+}
 
 final class TranscriptTurnView {
   const TranscriptTurnView({
     required this.status,
+    this.turnId,
     this.replyTo,
     this.error,
   });
 
-  final TranscriptTurnStatus status;
+  final AppTurnStatus status;
+  final String? turnId;
   final String? replyTo;
   final String? error;
 
-  static const idle = TranscriptTurnView(status: TranscriptTurnStatus.idle);
+  static const idle = TranscriptTurnView(status: AppTurnStatus.idle);
+
+  bool get working => switch (status) {
+    AppTurnStatus.working ||
+    AppTurnStatus.awaitingTool ||
+    AppTurnStatus.streaming => true,
+    AppTurnStatus.idle ||
+    AppTurnStatus.done ||
+    AppTurnStatus.error ||
+    AppTurnStatus.stale => false,
+  };
+
+  AppTurnProjection toAppProjection() => AppTurnProjection(
+    status: status,
+    turnId: turnId,
+    replyTo: replyTo,
+    error: error,
+  );
+}
+
+AppTurnProjection deriveChatTurnProjection({
+  required RoomTurnProjection room,
+  required TranscriptTurnView transcript,
+  required StreamingMessage? streaming,
+}) {
+  if (room.status == AppTurnStatus.stale) {
+    return AppTurnProjection.stale;
+  }
+
+  if (streaming != null) {
+    return AppTurnProjection(
+      status: AppTurnStatus.streaming,
+      turnId: transcript.turnId ?? streaming.inReplyTo,
+      replyTo: streaming.inReplyTo,
+      error: transcript.error,
+    );
+  }
+
+  if (room.status == AppTurnStatus.working) {
+    final transcriptProjection = transcript.toAppProjection();
+    if (transcriptProjection.working) return transcriptProjection;
+    return AppTurnProjection(
+      status: AppTurnStatus.working,
+      turnId: transcript.turnId ?? transcript.replyTo,
+      replyTo: transcript.replyTo,
+      error: transcript.error,
+    );
+  }
+
+  if (transcript.working || transcript.status == AppTurnStatus.error) {
+    return transcript.toAppProjection();
+  }
+
+  return AppTurnProjection.idle;
 }
 
 final class TranscriptProjection {
@@ -88,7 +154,8 @@ TranscriptProjection deriveTranscriptProjection({
       case UserMessageSubmitted():
         submittedUsers[event.clientMessageId] = event;
         turn = TranscriptTurnView(
-          status: TranscriptTurnStatus.working,
+          status: AppTurnStatus.working,
+          turnId: event.turnId ?? event.clientMessageId,
           replyTo: event.clientMessageId,
         );
       case UserMessageConfirmed():
@@ -104,22 +171,27 @@ TranscriptProjection deriveTranscriptProjection({
         failedUsers[event.clientMessageId] = event;
         if (!confirmedUsers.containsKey(event.clientMessageId)) {
           turn = TranscriptTurnView(
-            status: TranscriptTurnStatus.error,
+            status: AppTurnStatus.error,
+            turnId: event.turnId ?? event.clientMessageId,
             replyTo: event.clientMessageId,
             error: event.message,
           );
         }
       case AssistantDeltaReceived():
-        streaming = (streaming?.inReplyTo == event.replyTo
-                ? streaming
-                : StreamingMessage(inReplyTo: event.replyTo))
-            ?.appendDelta(event.delta);
+        streaming =
+            (streaming?.inReplyTo == event.replyTo
+                    ? streaming
+                    : StreamingMessage(inReplyTo: event.replyTo))
+                ?.appendDelta(event.delta);
         turn = TranscriptTurnView(
-          status: TranscriptTurnStatus.streaming,
+          status: AppTurnStatus.streaming,
+          turnId: event.turnId ?? event.replyTo,
           replyTo: event.replyTo,
         );
       case AssistantMessageCommitted():
-        appendAuthoritative(AssistantMsg(id: event.messageId, text: event.text));
+        appendAuthoritative(
+          AssistantMsg(id: event.messageId, text: event.text),
+        );
         streaming = null;
         turn = TranscriptTurnView.idle;
       case AssistantDoneReceived():
@@ -134,6 +206,13 @@ TranscriptProjection deriveTranscriptProjection({
             args: event.args,
           ),
         );
+        if (streaming != null || turn.working) {
+          turn = TranscriptTurnView(
+            status: AppTurnStatus.awaitingTool,
+            turnId: turn.turnId ?? event.turnId ?? streaming?.inReplyTo,
+            replyTo: turn.replyTo ?? streaming?.inReplyTo,
+          );
+        }
       case ToolFinished():
         upsertTool(
           ToolEvent(
@@ -148,6 +227,13 @@ TranscriptProjection deriveTranscriptProjection({
             error: event.error,
           ),
         );
+        if (turn.status == AppTurnStatus.awaitingTool) {
+          turn = TranscriptTurnView(
+            status: AppTurnStatus.working,
+            turnId: turn.turnId,
+            replyTo: turn.replyTo,
+          );
+        }
       case CompactionRecorded():
         appendAuthoritative(
           CompactionMsg(
@@ -156,6 +242,7 @@ TranscriptProjection deriveTranscriptProjection({
             tokensBefore: event.tokensBefore,
           ),
         );
+        streaming = null;
         turn = TranscriptTurnView.idle;
     }
   }

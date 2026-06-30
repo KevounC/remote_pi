@@ -178,3 +178,75 @@ class StreamingMessage {
   @override
   int get hashCode => Object.hash(inReplyTo, buffer);
 }
+
+/// Canonical app-side turn status projection.
+///
+/// This mirrors the pi-extension `TurnProjection.phase` vocabulary while
+/// keeping the mobile domain pure: no Flutter, storage, transport, or context
+/// imports. UI and data adapters derive booleans/cancel targets from this value
+/// instead of carrying independent sticky flags.
+enum AppTurnStatus {
+  idle,
+  working,
+  awaitingTool,
+  streaming,
+  done,
+  error,
+  stale,
+}
+
+final class AppTurnProjection {
+  const AppTurnProjection({
+    required this.status,
+    this.turnId,
+    this.replyTo,
+    this.error,
+  });
+
+  final AppTurnStatus status;
+  final String? turnId;
+  final String? replyTo;
+  final String? error;
+
+  static const idle = AppTurnProjection(status: AppTurnStatus.idle);
+  static const stale = AppTurnProjection(status: AppTurnStatus.stale);
+
+  bool get working => switch (status) {
+    AppTurnStatus.working ||
+    AppTurnStatus.awaitingTool ||
+    AppTurnStatus.streaming => true,
+    AppTurnStatus.idle ||
+    AppTurnStatus.done ||
+    AppTurnStatus.error ||
+    AppTurnStatus.stale => false,
+  };
+
+  String? get cancelTargetId => working ? replyTo : null;
+
+  @override
+  bool operator ==(Object other) =>
+      other is AppTurnProjection &&
+      other.status == status &&
+      other.turnId == turnId &&
+      other.replyTo == replyTo &&
+      other.error == error;
+
+  @override
+  int get hashCode => Object.hash(status, turnId, replyTo, error);
+}
+
+/// Room-level transport projection. The relay only carries the compatibility
+/// `working` bit; stale/idle gating lives here so cached room metadata cannot
+/// render as an active turn after disconnect, room end, or unhydrated reconnect.
+final class RoomTurnProjection {
+  const RoomTurnProjection({required this.status});
+
+  final AppTurnStatus status;
+
+  static const idle = RoomTurnProjection(status: AppTurnStatus.idle);
+  static const active = RoomTurnProjection(status: AppTurnStatus.working);
+  static const stale = RoomTurnProjection(status: AppTurnStatus.stale);
+
+  bool get isFresh => status != AppTurnStatus.stale;
+  bool get working => status == AppTurnStatus.working;
+}
