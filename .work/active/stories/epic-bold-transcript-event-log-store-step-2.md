@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-store-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-store
 depends_on: [epic-bold-transcript-event-log-store-step-1]
@@ -80,3 +80,25 @@ Future<void> _appendTranscriptEvents(Iterable<TranscriptEvent> events) async {
 ## Rollback
 
 Restore `SyncService` direct `_upsert`/`_applyHistory` writes and leave the event store unused. Because projection boxes were not deleted as part of rollback, the old row-based cache remains available.
+
+## Review
+
+Approved (2026-06-30) with HIGH-risk convergence verification. Independently
+re-ran: whole-app `flutter analyze` → only known `axisAlignment` info; full
+`flutter test` → 597/597 (incl. sync_service 56/56). Commit `657bf3c` scoped to
+app only (sync_service.dart refactor + message_record + boxes + sync_service_test
++ pubspec.lock transitive update + story .md); no cross-subproject collision.
+
+Projection switchover verified: `SyncService` appends `TranscriptEvent` to
+`TranscriptEventStore` FIRST, then reads the stored session log → derives
+`TranscriptProjection` → rewrites the disposable `msgs` projection under
+`_writeChain`. `MessageRecord` boxes are no longer transcript truth (derived).
+Convergence invariants verified directly in tests: same-session reconnect
+replay hydrates idempotently; re-applying IDENTICAL SessionHistory = no box churn;
+pending-send timeout appends `UserMessageFailed` + late `UserMessageConfirmed`
+wins in the derived projection; `session_history` replay appends/dedupes without
+deleting unseen local events; `msgs` rebuildable from event log (clearing +
+fresh SyncService recovers the same ordered projection). Working/streaming
+convergence covered across success/timeout/late-confirm/cancel-error/compaction/
+reconnect-replay/session-switch. The `pubspec.lock` change is a benign transitive
+`meta`/`test_api` update from `flutter pub get`.
