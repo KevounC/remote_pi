@@ -57,20 +57,25 @@ broker.sock read-only FS" — a plausible-sounding but incorrect env explanation
 (borrowed from the now-resolved historical ceiling described in old session
 notes the agents may have read).
 
-## Triage next step
+## UPDATE (2026-06-30, 5th data point — cause may NOT be a simple flake)
 
-Reproduce inside a fresh pi-ext subagent context: have it run
-`corepack pnpm exec vitest run src/extension.test.ts` TWICE in immediate
-succession (no edits between) and capture both outputs. If run #1 shows
-failures and run #2 is clean, it's a transient/cache issue → clear vitest
-cache (`node_modules/.vitest`, `node_modules/.vite`) in the agent briefing
-before the run. If both runs show the same failures but the orchestrator's
-run is clean, it's a working-tree-state issue → brief agents to commit (or
-stash) before running the suite, OR have the orchestrator's independent re-run
-remain the gate (current workaround).
+A FIFTH pi-ext agent (`owner-multiplexer-step-4`) reported "4 failed, persistent
+across both runs" — i.e. the enhanced briefing (re-run 2-3x to distinguish
+flakes from real failures) did NOT help; the agent reported the failures as
+non-flaky/persistent. Yet the orchestrator's independent re-run immediately
+after showed 643/646, 0 failures. This suggests the cause may NOT be a
+simple transient flake but something about the SUBAGENT'S EXECUTION
+ENVIRONMENT that differs from the orchestrator's:
+- a stale vitest/transform cache unique to the subagent's working dir;
+- the subagent's working-tree state (its own mid-write files + parallel
+  agents' unstaged files) genuinely breaking the run in a way the
+  post-commit orchestrator run doesn't see;
+- or a genuinely different runtime context (env vars, cwd, node resolution).
 
-Also: update the pi-extension skill / agent briefing to explicitly state "the
-UDS ceiling is LIFTED; baseline is 0 failures; if you see failures they are
-REAL — investigate, do not blame UDS/broker.sock." (The late-attach and
-cli-daemon briefings already said this; the agents ignored it — so the fix may
-need to be structural, not just instructional.)
+The investigation should now focus on REPRODUCING the subagent's exact run
+environment (not just re-running from the orchestrator context) — e.g. capture
+the subagent's `env`, `pwd`, `git status`, and vitest cache state at test time,
+and diff against the orchestrator's. The structural fix (not just
+instructional) is likely needed: have pi-ext subagents commit BEFORE running
+the full suite, OR have the orchestrator's post-commit re-run remain the sole
+gate (current workaround).
