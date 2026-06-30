@@ -24,10 +24,11 @@ type ConnEntry = (u64, RoomMeta, mpsc::UnboundedSender<Message>);
 /// independently via challenge-response, so admission is still controlled by
 /// possession of the private key.
 ///
-/// When another peer forwards a message to `(owner_pk, room_id)`, every live
-/// conn in the corresponding `Vec` receives a copy. The originating connection
-/// skips itself via `from_conn_id`, so a multi-device app sees outgoing
-/// messages only on the device that sent them.
+/// Data-plane forwarding is keyed by explicit `(owner_pk, room_id)` targets;
+/// the registry never derives a route from endpoint-owned session metadata.
+/// Every live conn in the corresponding `Vec` receives a copy. The originating
+/// connection skips itself via `from_conn_id`, so a multi-device app sees
+/// outgoing messages only on the device that sent them.
 ///
 /// Lifecycle events:
 /// - `room_announced` fires once, when the *first* conn opens a room.

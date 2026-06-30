@@ -1,14 +1,14 @@
 ---
 id: epic-bold-canonical-session-relay-opaque-targeting-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-canonical-session-relay-opaque-targeting
 depends_on: [epic-bold-canonical-session-relay-opaque-targeting-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Lock the opaque relay boundary with regression tests and comments
@@ -48,3 +48,10 @@ Low. This is a regression-lock and documentation cleanup step after the behavior
 ## Rollback
 
 Revert the tests/comments only if they block an emergency rollback to peer-wide forwarding; do not leave comments claiming room-targeted routing while fanout is restored.
+
+## Implementation notes
+
+- Added `relay/tests/pi_forward_test.rs` integration coverage for endpoint-owned `session_id` opacity: forwarded `pi_envelope_in` wrappers contain only relay-owned fields and preserve the generic envelope JSON unchanged.
+- Added an end-to-end targeted-room regression: one destination peer connected in `main` and `work`, a `to_room=work` frame reaches only `work` and does not fan out to `main`.
+- Cleaned relay comments in `relay/src/handlers/pi_forward.rs` and `relay/src/peers/registry.rs` to state the `(to_pc, to_room)` targeting invariant and opaque session metadata boundary.
+- Verification from `relay/`: `cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed; `tests/pi_forward_test.rs` now runs 9 tests.

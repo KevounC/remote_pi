@@ -15,6 +15,11 @@
 //! { "type": "pi_envelope_in", "from_pc": "<Pi-A-pubkey>", "to_room": "<room>", "envelope": <verbatim> }
 //! ```
 //!
+//! Cross-PC data-plane forwarding is always room-targeted by relay-owned
+//! `(to_pc, to_room)` metadata. Any `session_id` inside `ct`, room metadata, or
+//! the generic `AgentEnvelope.body` is endpoint-owned opaque data: this module
+//! does not parse it, derive targets from it, log it, or use it as a metric key.
+//!
 //! Failures don't use a custom error frame — the relay synthesizes an envelope
 //! with `body.type = "transport_error"` (per the plan's ACK protocol section),
 //! correlated to the sender's original envelope via `re: <original_id>`.
