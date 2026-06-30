@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-cockpit-control-rpc
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, cockpit, pi-extension]
 parent: epic-bold-generated-protocol
 depends_on: [epic-bold-generated-protocol-schema-source]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Generated protocol — fold cockpit control transport into schema/types
@@ -169,3 +169,9 @@ yet include the generated schema vocabulary for both sides of the control path.
 - This rollback is behavior-safe and does not touch relay/app meshes or core
   process lifecycle semantics.
 
+
+## Review — advanced to done (2026-06-30)
+
+All 3 child steps `done` (pi-ext parser → cockpit schema-envelope emission → event-map alignment).
+Cross-subproject arc complete: pi-ext emits/parses structured `remote_pi_control`,
+cockpit emits schema command envelopes + aligns overlay event parsing with the protocol map.
