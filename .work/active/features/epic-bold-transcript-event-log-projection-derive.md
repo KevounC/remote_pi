@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension, app, cockpit]
 parent: epic-bold-transcript-event-log
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Transcript event log — projection derive (riskiest — design first)
@@ -422,3 +422,9 @@ messages in app, pi-extension history, and cockpit.
 ## Atomic / rollback notes
 
 No step is intentionally irreversible. Step 3 is the riskiest runtime switchover because it changes the app writer from direct row mutation to projection-diff writes; keep it in a single commit so rollback can restore the current `_upsert` / `_applyHistory` path without reverting the event algebra. Step 4 similarly keeps the public `session_history` wire unchanged while moving pi-extension internals, so rollback is local to the extension projection adapter.
+
+## Review — advanced to done (2026-06-30)
+
+All 6 child stories `done`. Decomposition realized as designed; rollback notes
+documented. Epic complete. (Advancing unblocks downstream stories that
+depended on this epic-level completion.)

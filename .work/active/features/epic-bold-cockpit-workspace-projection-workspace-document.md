@@ -1,14 +1,14 @@
 ---
 id: epic-bold-cockpit-workspace-projection-workspace-document
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, cockpit]
 parent: epic-bold-cockpit-workspace-projection
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Cockpit workspace — workspace as document (riskiest — design first)
@@ -671,3 +671,9 @@ No active item depends on any of these new story ids before creation, and the pa
 - Rewriting Cockpit UI widgets or changing visible pane behavior. The UI should continue to consume `tree(projectId)`, `focusedPaneId(projectId)`, and `session(tabId)` while the model changes underneath.
 - Changing the Hive `WorkspaceLayoutStore` persistence contract to a typed store. The Map boundary is acceptable while the domain codec owns the schema; changing adapter signatures can be a later cleanup.
 - Adding patchbay-specific concepts. The document is intentionally generic and deterministic so a future patchbay migration can reuse or replace the projection layer without being blocked by Cockpit-specific process assumptions.
+
+## Review — advanced to done (2026-06-30)
+
+All 6 child stories `done`. Decomposition realized as designed; rollback notes
+documented. Epic complete. (Advancing unblocks downstream stories that
+depended on this epic-level completion.)
