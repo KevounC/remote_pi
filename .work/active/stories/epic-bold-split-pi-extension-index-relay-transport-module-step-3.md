@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-relay-transport-module-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-relay-transport-module
 depends_on: [epic-bold-split-pi-extension-index-relay-transport-module-step-2]
@@ -83,3 +83,19 @@ later retry.
 - Added targeted coverage for a closed-relay model/working update before reconnect, proving reconnect replays `model: "gpt-4o"` and `working: false` from the cached room meta.
 - Verification: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; targeted Vitest command passed with 1 file, 19 passed, 131 skipped, 0 failed.
 - Observed only the known harmless `/home/agent/.npmrc` EACCES warning; no false-failure suite pattern was hit in targeted verification.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: `corepack pnpm typecheck` clean;
+`corepack pnpm build` clean; **full pi-ext suite 652 passed | 3 skipped | 0 failed
+(44 files)** — fully green (up from 651 — the agent's new reconnect-replay tests).
+
+Commit `e66765a` scoped to pi-ext only (relay_transport.ts sendRoomMeta +
+extension.test.ts +42 reconnect coverage + story .md); collision guard held.
+Centralization verified: no direct `room_meta_update` sends remain in index.ts
+(grep count 0); all route through `RelayTransportPort.sendRoomMeta()`. Best-effort
+no-throw policy preserved (closed relay = dropped frame, no thrown callback).
+Cache-replay preserved: `sendRoomMeta` updates cached `roomMeta` + best-effort
+`relay?.sendControl(...)`, so reconnect hello carries latest model/thinking/
+working/session. Targeted reconnect tests (19 passed, 0 failed) prove the
+closed-relay-cache-then-replay path.
