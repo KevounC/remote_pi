@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-relay-transport-module-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-relay-transport-module
 depends_on: [epic-bold-split-pi-extension-index-relay-transport-module-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Centralize relay control frames and room-meta updates behind RelayTransportPort
@@ -76,3 +76,10 @@ delivery.
 Restore the direct `_relay.sendControl({ type: "room_meta_update", ... })` call
 sites in `index.ts` and keep the transport module's `sendRoomMeta` unused until a
 later retry.
+
+## Implementation
+- Confirmed `index.ts` room-meta publishers (`model`, `thinking`, `session_id`, and `working`) route through `_publishRoomMetaPatch()` into `RelayTransportPort.sendRoomMeta()`; there are no direct `sendControl` room-meta call sites left in `index.ts`.
+- Preserved best-effort behavior: closed relay control frames do not throw from SDK callbacks, and the relay transport cache supplies the latest room meta on the next reconnect hello.
+- Added targeted coverage for a closed-relay model/working update before reconnect, proving reconnect replays `model: "gpt-4o"` and `working: false` from the cached room meta.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; targeted Vitest command passed with 1 file, 19 passed, 131 skipped, 0 failed.
+- Observed only the known harmless `/home/agent/.npmrc` EACCES warning; no false-failure suite pattern was hit in targeted verification.

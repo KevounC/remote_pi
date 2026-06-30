@@ -232,9 +232,9 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
   function sendRoomMeta(
     patch: Partial<RoomMeta> & { working?: boolean; thinking?: ThinkingLevel },
   ): void {
+    if (!roomId) return;
     if (roomMeta) roomMeta = { ...roomMeta, ...patch };
-    if (!relay || !roomId) return;
-    relay.sendControl({ type: "room_meta_update", room_id: roomId, meta: patch });
+    relay?.sendControl({ type: "room_meta_update", room_id: roomId, meta: patch });
   }
 
   function onOuterMessage(handler: (line: string) => void | Promise<void>): () => void {

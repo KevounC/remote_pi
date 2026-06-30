@@ -4215,6 +4215,7 @@ describe("model meta", () => {
     relayRef.current = null;
     relayInstances.length = 0;
     _defaultConnectImpl = async () => undefined;
+    _setDisposedForTest(false);
     delete process.env["REMOTE_PI_RELAY"];
     _setCurrentModelForTest(undefined);
     const qr = await import("./pairing/qr.js");
@@ -4485,6 +4486,47 @@ describe("model meta", () => {
       expect(capturedOpts).toHaveLength(2);
       expect(capturedOpts[0]!.roomMeta?.model).toBe("claude-sonnet-4.5");  // initial
       expect(capturedOpts[1]!.roomMeta?.model).toBe("gpt-4o");             // post-switch
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("reconnect after model_select preserves closed-relay working updates in room_meta", async () => {
+    vi.useFakeTimers();
+    try {
+      const capturedOpts: Array<{ roomMeta?: { model?: string; working?: boolean } }> = [];
+      _defaultConnectImpl = async (opts?: unknown) => {
+        capturedOpts.push(opts as { roomMeta?: { model?: string; working?: boolean } });
+      };
+
+      captureHandler("remote-pi");
+      const ctx = {
+        ui: { notify: vi.fn() },
+        cwd: "/tmp/remote-pi-reconnect-working-cache",
+        abort: vi.fn(),
+        model: { id: "claude-sonnet-4-5", name: "claude-sonnet-4.5" },
+      } as unknown as ReturnType<typeof makeMockCtx>;
+      await _connectForTest(ctx);
+
+      const onModelSelect = captureEventHandler("model_select");
+      onModelSelect({
+        type: "model_select",
+        model: { id: "gpt-4o-2024-08-06", name: "gpt-4o" },
+      });
+
+      relayInstances[0]!.emit("close");
+      const onTurnStart = captureEventHandler("turn_start");
+      const onTurnEnd = captureEventHandler("turn_end");
+      expect(() => {
+        onTurnStart({ type: "turn_start", turnIndex: 0, timestamp: 0 });
+        onTurnEnd({ type: "turn_end", turnIndex: 0 });
+      }).not.toThrow();
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(capturedOpts).toHaveLength(2);
+      expect(capturedOpts[1]!.roomMeta?.model).toBe("gpt-4o");
+      expect(capturedOpts[1]!.roomMeta?.working).toBe(false);
     } finally {
       vi.useRealTimers();
     }
