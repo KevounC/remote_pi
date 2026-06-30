@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-store
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension, app]
 parent: epic-bold-transcript-event-log
 depends_on: [epic-bold-transcript-event-log-projection-derive]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Transcript event log — append-only store
@@ -386,3 +386,11 @@ message rows are disposable projections.
 ## Atomic / rollback notes
 
 No step is intentionally irreversible. The highest-risk step is step 2 because it changes the mobile writer's source of truth; keep it isolated so rollback can restore direct `_upsert`/`_applyHistory` writes while leaving the side-by-side store unused. Step 3 is an internal extension source swap but preserves the outgoing `session_history` wire, so rollback is local to the extension. Step 4 must not delete old boxes; old projection caches are the rollback safety net until release cleanup explicitly removes them.
+
+## Review — advanced to done (2026-06-30)
+
+All 5 child steps `done` (pi-ext `TranscriptEventLog` → app canonical-session re-keying
+→ cross-surface store/replay regression tests). Transcript retention is now keyed by
+canonical `(peer, room, session_id)` across both pi-ext and app; old peer+room boxes
+preserved for rollback. Epic complete — unblocks `transcript-event-log-hydration-replay`
+(app arc, steps 1-5).
