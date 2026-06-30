@@ -133,3 +133,62 @@ Contract: approve → review→done + `## Review`; bounce → review→implement
 Do NOT run `git add`/`git commit` while parallel write-subagents are in flight —
 it can sweep in an agent's in-progress story transition. Agents commit their own
 work; orchestrator commits only its own notes/docs when no agents are writing.
+
+---
+
+## Wave 2 results — 6/9 done (fast-lane verified by orchestrator)
+
+| Story | Commit | Verdict |
+|---|---|---|
+| wire-discriminator-step-4 | 8bad735 | ✅ done (land-mode; regen/test lock genuine) |
+| app-attribution-hydration-step-2 | 8efd13e | ✅ done (5 demux outcomes, 5/5 tests) |
+| relay-typed-actor-control-handlers-step-4 | 1f8544c | ✅ done (120 relay tests, fmt/clippy green) |
+| reachability-contract-app-adapter-step-2 (BOUNCED) | 38ab178 | ✅ done (bounce fixed: `onRelayConnectionEstablished` preserves retryAttempt; 0→1→2 ladder regression) |
+| reachability-contract-pi-adapter-step-3 | 84402d8 | ✅ done (1,2,5,10,30s ladder+cap test) |
+| cockpit-workspace-projection-settings-split-step-4 | 89658c5 | ✅ done (DaemonSettingsPanel extracted; 7/7 tests) |
+
+Reviews: fast-lane (story + green verification → orchestrator independently
+re-ran tests + read code + confirmed ownership; review skill authorizes fast-lane
+for stories). The bounced story got deeper code+test verification of the specific
+invariant. Each review committed `review: <slug> (approve)`.
+
+Remaining Wave-2 in-flight at W3 launch: dart-codegen-step-3 (94+ tools,
+generated-contract), cockpit-workspace-document-step-4 (58 tools, mid-refactor
+_trees/_focused→_documents), turn-state-algebraic-step-3 (28 tools).
+
+## Wave 3 — launched 2026-06-30 (4 disjoint bundles)
+
+Re-probed ready-set after 6 W2 done: 14 newly-ready. Collision constraints
+respected: relay `handlers/peer.rs` cluster (serialize — only 1 relay story this
+wave), app `connection_manager.dart` (turn-state-projection-consumers owns it;
+reachability-app-adapter-step-3 deferred to W4), pi-ext `index.ts` god-file
+(serialize — NO index.ts-writer this wave; all 4 W3 pi-ext choices avoid it).
+
+| Agent ID | Story | Subproject | Model/Tier | Owns |
+|---|---|---|---|---|
+| 72f6344a | canonical-session-relay-opaque-targeting-step-4 | relay | gpt-5.5 med | pi_forward_test.rs, pi_forward.rs (comments), registry.rs (comments) |
+| 298076b5 | turn-state-machine-projection-consumers-step-2 | app | gpt-5.5 HIGH | session_state.dart, transcript_projection.dart, sync_service.dart, connection_manager.dart, chat_viewmodel.dart, sync/transport tests |
+| 3d8451af | reachability-contract-pi-adapter-step-4 | pi-ext | spark med | relay_client.ts + test (avoids index.ts) |
+| 1976838e | cockpit-workspace-projection-settings-split-step-5 | cockpit | gpt-5.5 med | settings_page.dart, settings_category_panel.dart (new), settings_category.dart, schedule panel/dialogs/tests |
+
+Deferred to W4+ (by collision):
+- relay `generated-protocol-rust-codegen-step-3` (peer.rs/auth/challenge.rs/frame.rs/generated control.rs — collides with relay-opaque-targeting's peer.rs).
+- relay `relay-typed-actor-control-handlers-step-5` (handlers/peer.rs + registry.rs + rooms.rs — collides with relay-opaque-targeting).
+- app `reachability-contract-app-adapter-step-3` (connection_manager_test.dart — collides with turn-state-projection-consumers' connection_manager.dart ownership).
+- app `canonical-session-app-attribution-hydration-step-3` (depends on step-2 done; ready — bundle with W4 app cluster).
+- app `canonical-session-identity-model-step-5` (HIGH-risk re-key; needs projection-consumers-step-2 done first per W4 plan).
+- pi-ext `index.ts` god-file front (5 stories: composition-root-step-4,
+  owner-multiplexer-step-2, sdk-session-projection-step-2,
+  cli-daemon-pairing-step-3, transcript-projection-derive-step-4) — serialize one
+  per wave starting W4 (pick transcript-projection-derive-step-4 first: unblocks
+  a cockpit feature arc).
+- pi-ext `turn-state-machine-late-attach-step-3` (mesh_node.ts/bridge.ts —
+  collides with reachability-pi-adapter-step-4's relay_client.ts? No, disjoint;
+  but collides with turn-state-algebraic's turn_state.ts if that's still in-flight.
+  Re-check at W4 launch.)
+
+Transient-tree note for W3 agents: the dart-codegen agent's uncommitted
+`protocol.g.dart`/`protocol.dart` and the workspace-document agent's uncommitted
+`cockpit_viewmodel.dart` may make whole-project `analyze` show transient errors
+in THOSE files. W3 agents were told to run their targeted tests as the regression
+signal and ignore analyze errors confined to other agents' in-flight files.
