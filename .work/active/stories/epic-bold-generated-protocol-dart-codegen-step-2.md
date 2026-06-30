@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen-step-2
 kind: story
-stage: review
+stage: implementing
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: [epic-bold-generated-protocol-dart-codegen-step-1]
 tags: [refactor]
@@ -113,3 +113,20 @@ Remove the generated client output and tests. The handwritten protocol remains t
 - Discrepancies from design: generated client constructors include the now-current canonical `session_id` fields present in the hand mirror; no production import was switched.
 - Adjacent issues parked: none.
 - Verification: `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze lib/protocol/generated/protocol.g.dart test/protocol_codegen/client_messages_codegen_test.dart` passed. Minimal codegen fixture regeneration still matches the checked-in compile fixture. `dart test test/protocol_codegen/client_messages_codegen_test.dart` could not run because pub network access failed with `403 Forbidden`; `flutter analyze` cannot start because `/opt/flutter/bin/cache` is read-only.
+
+## Review bounce (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blockers**:
+- `app/lib/protocol/generated/protocol.g.dart:1` / `tools/protocol-codegen/bin/protocol-codegen.mjs:436`: the committed generated file is stale relative to the current generator output. Regenerating from `tools/protocol-codegen/fixtures/app_pi_client_dart_ir.json` produces formatting/content differences, so `protocol.g.dart` is not the exact checked-in output of the tool and the determinism test fails.
+- `app/test/protocol_codegen/client_messages_codegen_test.dart:34`: the test intended to prove the committed file matches regenerated output fails for the same mismatch, so the review-requested targeted test and generated-contract proof are not green.
+
+**Verification run**:
+- Acceptance criteria: generated client classes exist for every current `ClientMessage` variant — pass by inspection of `generatedClientMessageTypes` and generated classes.
+- Acceptance criteria: generated `toJson()` matches handwritten output for representative payloads, including optional image/streaming fields — not fully verified because the targeted test file fails before green completion, though the parity subtest itself passed after the determinism failure.
+- Acceptance criteria: shared generated enums/value types preserve current public names and wire strings — not fully verified because the targeted test file fails before green completion, though the shared-value subtest itself passed after the determinism failure.
+- Acceptance criteria: no production app imports are switched to generated code yet — pass; grep found no `protocol/generated` imports under `app/lib`.
+- `cd /home/agent/forks/remote_pi && node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema tools/protocol-codegen/fixtures/app_pi_client_dart_ir.json --out /tmp/<temp>/protocol.g.dart && cmp -s /tmp/<temp>/protocol.g.dart app/lib/protocol/generated/protocol.g.dart` — fail; regenerated output differs from committed `protocol.g.dart`.
+- `cd /home/agent/forks/remote_pi/app && HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter analyze` — exit 1 with the known unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802` only.
+- `cd /home/agent/forks/remote_pi/app && HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter test test/protocol_codegen/client_messages_codegen_test.dart` — exit 1; `generated Dart client protocol generator output is deterministic for the app client IR` fails because regenerated output differs from `lib/protocol/generated/protocol.g.dart`.
