@@ -31,7 +31,6 @@ pub enum ClientAuthMsg {
 pub struct ClientHelloRoomMeta {
     pub name: Option<String>,
     pub cwd: Option<String>,
-    pub session_id: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
     #[serde(default)]
@@ -105,7 +104,6 @@ pub fn parse_hello_bootstrap(line: &str, now_ms: i64) -> Result<AuthenticatedPee
                     room_id: room_id.unwrap_or_else(|| "main".to_string()),
                     name: meta.name,
                     cwd: meta.cwd,
-                    session_id: meta.session_id,
                     model: meta.model,
                     thinking: meta.thinking,
                     working: meta.working,

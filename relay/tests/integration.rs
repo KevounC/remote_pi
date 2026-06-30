@@ -14,7 +14,9 @@ async fn two_peers_route_message() {
     let (mut ws_a, peer_a) = connect_and_auth(port).await;
     let (mut ws_b, peer_b) = connect_and_auth(port).await;
 
-    let ct = "aGVsbG8="; // "hello" in base64, never decoded by relay
+    // Base64 for {"session_id":"opaque-session","text":"hello"}; the relay must
+    // carry it as opaque ciphertext and must not parse, log, compare, or route by it.
+    let ct = "eyJzZXNzaW9uX2lkIjoib3BhcXVlLXNlc3Npb24iLCJ0ZXh0IjoiaGVsbG8ifQ==";
     // A sends: peer = dest (peer_b)
     ws_a.send(Message::text(
         json!({"peer": peer_b, "room": "main", "ct": ct}).to_string(),

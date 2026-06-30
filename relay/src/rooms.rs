@@ -12,9 +12,6 @@ pub struct RoomMeta {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
-    /// Opaque endpoint-owned session discriminator. The relay carries this in room metadata for app bootstrap but never routes by it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
     /// Active Claude model for this room (plano 18). None = not reported yet.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -44,7 +41,6 @@ pub struct RoomMeta {
 pub struct RoomMetaPatch {
     pub model: Option<Option<String>>,
     pub thinking: Option<Option<String>>,
-    pub session_id: Option<Option<String>>,
     /// `working` is a non-nullable bool, so the patch is a single `Option`:
     /// `None` = field absent (leave current), `Some(b)` = set to `b`. There is
     /// no "clear to null" — `false` *is* the cleared state.
@@ -56,10 +52,7 @@ impl RoomMetaPatch {
     /// otherwise). Used by the registry to skip work when callers send empty
     /// `meta: {}`.
     pub fn is_empty(&self) -> bool {
-        self.model.is_none()
-            && self.thinking.is_none()
-            && self.session_id.is_none()
-            && self.working.is_none()
+        self.model.is_none() && self.thinking.is_none() && self.working.is_none()
     }
 }
 

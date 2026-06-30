@@ -1,14 +1,14 @@
 ---
 id: epic-bold-canonical-session-identity-model-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-canonical-session-identity-model
 depends_on: [epic-bold-canonical-session-identity-model-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Preserve relay opacity and route only by peer/room
@@ -92,3 +92,12 @@ Restore `OuterEnvelope` default-room parsing and `forward_to_peer` usage. This r
 **Verification run**:
 - `cd /home/agent/forks/remote_pi && git show --stat --patch 4ad5f2e0 && git log --oneline -5` — inspected commit `4ad5f2e0` and adjacent history.
 - `cd /home/agent/forks/remote_pi/relay && cargo fmt --check && cargo clippy -- -D warnings && cargo test` — passed; full suite: 63 lib tests, 3 integration tests, 13 mesh tests, 6 pi-forward tests, 10 presence tests, 19 rooms tests, and doc-tests all green.
+
+## Implementation notes (rework 2026-06-30)
+- Files changed: `relay/src/protocol/generated/outer.rs`, `relay/src/protocol/outer.rs`, `relay/src/rooms.rs`, `relay/src/auth/challenge.rs`, `relay/src/auth/auth_test.rs`, `relay/src/handlers/peer.rs`, `relay/src/handlers/pi_forward.rs`, `relay/src/peers/registry.rs`, `relay/tests/integration.rs`.
+- Fix 1 — missing outer `room` now fails closed: removed the `room = "main"` serde default from the generated outer mirror used by `parse_line`, added `deny_unknown_fields`, and replaced the unit test with `rejects_missing_room` plus `rejects_unknown_outer_field`. This is an intentional wire behavior change, not a pure refactor.
+- Fix 2 — relay no longer owns mutable session metadata: removed `RoomMeta.session_id`, removed `ClientHelloRoomMeta.session_id`, removed `RoomMetaPatch.session_id`, and removed `room_meta_update` parsing/broadcast mutation for `session_id`. Remaining `session_id` strings in relay tests are opaque payload fixtures only.
+- Fix 3 — integration coverage now carries opaque app↔Pi payload with session identity: `relay/tests/integration.rs` routes a `ct` value that is base64 for `{"session_id":"opaque-session","text":"hello"}` and asserts the relay rewrites only outer peer/room while preserving `ct` unchanged.
+- Discrepancies from design: none; the relay remains session-blind and routes by peer/room. Hand-edited the generated outer mirror minimally because `parse_line` reexports it; did not regenerate schema/codegen in this stride per the coordination note.
+- Adjacent issues parked: rust-codegen story should regenerate the outer schema/mirror so the generated source of truth also records required `room` and `deny_unknown_fields` without hand edits.
+- Verification: `cd /home/agent/projects/remote_pi/relay && cargo fmt --check` — passed; `cd /home/agent/projects/remote_pi/relay && cargo clippy -- -D warnings` — passed; `cd /home/agent/projects/remote_pi/relay && cargo test` — passed (64 lib tests, 3 integration tests, 13 mesh tests, 6 pi-forward tests, 10 presence tests, 19 rooms tests, doc-tests all green).

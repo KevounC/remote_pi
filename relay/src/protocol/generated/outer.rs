@@ -6,14 +6,10 @@
 
 use serde::{Deserialize, Serialize};
 
-fn default_room() -> String {
-    "main".to_owned()
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OuterEnvelope {
     pub peer: String,
-    #[serde(default = "default_room")]
     pub room: String,
     pub ct: String,
 }

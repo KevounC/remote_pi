@@ -62,10 +62,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_missing_room_to_main() {
+    fn rejects_missing_room() {
         let line = r#"{"peer":"abc","ct":"AAA="}"#;
-        let env = parse_line(line).unwrap();
-        assert_eq!(env.room, "main");
+        assert!(matches!(parse_line(line), Err(ParseError::InvalidJson(_))));
+    }
+
+    #[test]
+    fn rejects_unknown_outer_field() {
+        let line = r#"{"peer":"abc","room":"main","ct":"AAA=","unexpected":"opaque"}"#;
+        assert!(matches!(parse_line(line), Err(ParseError::InvalidJson(_))));
     }
 
     #[test]
