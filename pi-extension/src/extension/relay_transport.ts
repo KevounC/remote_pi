@@ -6,8 +6,11 @@ import {
   reachabilityBackoffMs,
 } from "../reachability/reachability_contract.js";
 import type { RelayClient, RoomMeta } from "../transport/relay_client.js";
+import { PlainPeerChannel } from "../transport/peer_channel.js";
 import type {
   CrossPcBridgeInput,
+  RelayPeerChannel,
+  RelayPeerChannelInput,
   RelayStartInput,
   RelayStartResult,
   RelayTransportPort,
@@ -44,8 +47,9 @@ export interface RelayTransportDeps {
   emitRelayState(snapshot: RelayStateSnapshot): void;
 }
 
-export interface RelayTransportAdapter extends Omit<RelayTransportPort, "start"> {
+export interface RelayTransportAdapter extends Omit<RelayTransportPort, "start" | "createPeerChannel"> {
   start(input: RelayTransportStartInput): Promise<RelayStartResult>;
+  createPeerChannel(input: RelayPeerChannelInput): RelayPeerChannel;
   emitRelayState(force?: boolean): void;
   hasPendingReconnect(): boolean;
   currentRelayUrl(): string | null;
@@ -81,6 +85,14 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
   let onUnexpectedClose: (() => void) | null = null;
   let onConnected: ((relay: RelayClient) => void | Promise<void>) | null = null;
   const outerMessageHandlers = new Set<(line: string) => void | Promise<void>>();
+  type BridgeAttachment = {
+    relay: RelayClient;
+    relayUrl: string;
+    meshNode: NonNullable<ReturnType<CrossPcBridgeInput["meshNode"]>>;
+    keyId: string;
+    pending: Promise<void>;
+  };
+  let activeBridge: BridgeAttachment | null = null;
 
   function setLastStatus(status: RelayConnectivity): RelayConnectivity {
     if (status !== lastStatus) {
@@ -250,6 +262,35 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
     };
   }
 
+  function createPeerChannel(input: RelayPeerChannelInput): RelayPeerChannel {
+    const current = relay;
+    if (!current) throw new Error("relay transport is not connected");
+    return new PlainPeerChannel(
+      current,
+      input.peerId,
+      input.roomId ?? roomId ?? undefined,
+      (message) => { void input.onMessage(message); },
+      () => input.onDisconnect(input.peerId),
+    );
+  }
+
+  function bridgeKeyId(nextKeypair: Ed25519Keypair): string {
+    return Buffer.from(nextKeypair.publicKey).toString("base64");
+  }
+
+  function sameBridgeAttachment(
+    attachment: BridgeAttachment,
+    nextRelay: RelayClient,
+    nextRelayUrl: string,
+    nextMeshNode: BridgeAttachment["meshNode"],
+    nextKeyId: string,
+  ): boolean {
+    return attachment.relay === nextRelay &&
+      attachment.relayUrl === nextRelayUrl &&
+      attachment.meshNode === nextMeshNode &&
+      attachment.keyId === nextKeyId;
+  }
+
   async function attachCrossPcBridge(input: CrossPcBridgeInput): Promise<void> {
     crossPcBridgeInput = input;
     const currentRelay = relay;
@@ -257,23 +298,58 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
     const meshNode = input.meshNode();
     const currentKeypair = input.keypair();
     if (!meshNode || !currentRelay || !currentRelayUrl || !currentKeypair) return;
-    try {
-      await meshNode.attachBridge({
-        relay: currentRelay,
-        relayUrl: currentRelayUrl,
-        keypair: currentKeypair,
-      });
-    } catch {
-      // Best-effort: local UDS mesh and app pairing continue without the
-      // cross-PC relay bridge.
+
+    const keyId = bridgeKeyId(currentKeypair);
+    if (activeBridge && sameBridgeAttachment(activeBridge, currentRelay, currentRelayUrl, meshNode, keyId)) {
+      await activeBridge.pending;
       return;
     }
-    if (relay !== currentRelay || relayUrl !== currentRelayUrl || stopping || isDisposed?.()) {
-      meshNode.detachBridge();
+
+    if (activeBridge) {
+      try { activeBridge.meshNode.detachBridge(); } catch { /* best-effort stale bridge cleanup */ }
+      activeBridge = null;
     }
+
+    const attachPromise = Promise.resolve().then(async () => {
+      try {
+        await meshNode.attachBridge({
+          relay: currentRelay,
+          relayUrl: currentRelayUrl,
+          keypair: currentKeypair,
+        });
+      } catch {
+        // Best-effort: local UDS mesh and app pairing continue without the
+        // cross-PC relay bridge.
+        if (activeBridge && sameBridgeAttachment(activeBridge, currentRelay, currentRelayUrl, meshNode, keyId)) {
+          activeBridge = null;
+        }
+        return;
+      }
+      if (relay !== currentRelay || relayUrl !== currentRelayUrl || stopping || isDisposed?.()) {
+        try { meshNode.detachBridge(); } catch { /* best-effort stale bridge cleanup */ }
+        if (activeBridge && sameBridgeAttachment(activeBridge, currentRelay, currentRelayUrl, meshNode, keyId)) {
+          activeBridge = null;
+        }
+      }
+    });
+
+    activeBridge = {
+      relay: currentRelay,
+      relayUrl: currentRelayUrl,
+      meshNode,
+      keyId,
+      pending: attachPromise,
+    };
+    await attachPromise;
   }
 
   function detachCrossPcBridge(): void {
+    const attachment = activeBridge;
+    activeBridge = null;
+    if (attachment) {
+      try { attachment.meshNode.detachBridge(); } catch { /* best-effort bridge cleanup */ }
+      return;
+    }
     crossPcBridgeInput?.meshNode()?.detachBridge();
   }
 
@@ -283,6 +359,7 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
     stop,
     sendRoomMeta,
     onOuterMessage,
+    createPeerChannel,
     attachCrossPcBridge,
     detachCrossPcBridge,
     emitRelayState,
