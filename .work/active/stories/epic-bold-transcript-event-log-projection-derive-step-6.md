@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-6
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension, app, cockpit]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-5]
@@ -76,3 +76,18 @@ Remove the new fixtures/tests. Runtime projection code from earlier steps remain
 - Pi-extension deferral: `pi-extension/src/extension.test.ts` fixture consumption was intentionally not implemented in this wave because `turn-state-machine-late-attach-step-3` owns pi-extension tests, and this wave was instructed not to edit `pi-extension/src/extension.test.ts` or `pi-extension/src/session/mesh_node.test.ts`.
 - Convergence cases covered: app fixture tests cover foreign `session_id` filtering, duplicate replay idempotence, failed send clearing `working`, late confirm after timeout, assistant done clearing streaming after a cancellation-style failed send, compaction system row projection, reconnect-style replay, and idle turn convergence. Cockpit fixture tests cover the shared authoritative replay projection plus failed-send and assistant-done non-working convergence; cockpit currently has no projected system-row message type, so the compaction system-row expectation remains pinned by the app fixture and noted for generated-protocol/future cockpit schema coverage.
 - Tests run: `~/projects/remote_pi/.tools/flutter/bin/flutter pub get` and `~/projects/remote_pi/.tools/flutter/bin/flutter test test/domain/transcript/` from `app/`; `~/projects/remote_pi/.tools/flutter/bin/flutter pub get --offline` and `~/projects/remote_pi/.tools/flutter/bin/flutter test` from `cockpit/`.
+
+## Review
+
+Fast-lane approved (2026-06-30). Independently re-ran: app
+`flutter test test/domain/transcript/` → 13/13 (incl. 2 new shared-fixture
+convergence tests); cockpit `flutter test test/data/rpc_data_mapper_transcript_projection_test.dart`
+→ 5/5 (#5's 3 original tests preserved + #6's 2 new shared-fixture tests — clean
+merge, no clobbering). Commit `43c268d` scoped to a new shared fixture
+(`transcript_projection_fixtures.json`, content-only — verified no secrets/paths)
++ app/cockpit test files + story .md; pi-ext deferral held (did NOT touch
+extension.test.ts / mesh_node.test.ts, owned by the concurrent late-attach
+agent). Acceptance criteria met: app + cockpit consume the shared fixture with
+identical expected projection; convergence/negative cases (foreign session_id,
+duplicate replay, failed-send clears working, late confirm, compaction system
+row) covered.
