@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-agent-session-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-agent-session
 depends_on: [epic-bold-cockpit-workspace-projection-agent-session-step-3, epic-bold-cockpit-workspace-projection-workspace-document-step-6]
@@ -122,3 +122,22 @@ Restore `_buildAgent`, `_restoreSession`, `_sessionToJson`, `onPreferenceChanged
 - Empty placeholders now use an explicit `isPlaceholder` marker, so unbooted real agent tabs persist as `type: agent` instead of being inferred from lifecycle `AgentStatus.empty`.
 - `v: 1` layout JSON shape is unchanged; existing round-trip tests still assert `agent` and `empty` descriptor keys.
 - Tests: `flutter pub get --offline`; `flutter analyze` (0 issues); targeted `flutter test test/ui/workspace_projection_test.dart test/domain/workspace_document_codec_test.dart` (9/9); full `flutter test` (221/221).
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: whole-cockpit `flutter analyze` →
+No issues found; full `flutter test` → 221/221 (incl. 3 new layout/projection
+tests). Commit `b920637` scoped to cockpit only (agent_session +
+cockpit_viewmodel + workspace_projection + test + story .md); no cross-subproject
+collision.
+
+Descriptor ownership verified moved: `WorkspaceProjection` now owns
+`realizeAgent`/`descriptorForAgent`/`AgentSession.fromWorkspaceTab`;
+`CockpitViewModel` no longer has `_sessionToJson`/`_buildAgent` (delegates
+through the projection). v:1 layout round-trip preserved
+(`workspace_document_codec_test.dart` asserts `agent`/`empty` descriptor keys
+unchanged). sessionPath/title/autoStartRelay/preferred-model/thinking update the
+document descriptor + save debounced (via `onProjectionChanged`). Empty
+placeholders now use explicit `isPlaceholder` (not `AgentStatus.empty` as
+persisted state — meets the acceptance criterion). The `onProjectionChanged`
+replacement of `onPreferenceChanged` is a clean simplification.
