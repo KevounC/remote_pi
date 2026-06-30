@@ -1,7 +1,7 @@
 ---
 source_handle: remote-pi-app-pubspec
 fetched: 2026-06-28
-source_path: /home/agent/forks/remote_pi/app/pubspec.yaml
+source_path: /home/agent/projects/remote_pi/app/pubspec.yaml
 provenance: source-direct
 substrate_confidence: source-direct
 ---
@@ -21,4 +21,4 @@ Paraphrased summary: The Flutter app package is private, versioned `1.1.1+6`, ta
 ## Structural metadata
 
 - Source type: local package manifest
-- Path: `/home/agent/forks/remote_pi/app/pubspec.yaml`
+- Path: `/home/agent/projects/remote_pi/app/pubspec.yaml`

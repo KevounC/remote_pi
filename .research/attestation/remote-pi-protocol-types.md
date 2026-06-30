@@ -1,7 +1,7 @@
 ---
 source_handle: remote-pi-protocol-types
 fetched: 2026-06-28
-source_path: /home/agent/forks/remote_pi/pi-extension/src/protocol/types.ts
+source_path: /home/agent/projects/remote_pi/pi-extension/src/protocol/types.ts
 provenance: source-direct
 ---
 
@@ -20,4 +20,4 @@ Paraphrased summary: `src/protocol/types.ts` defines the TypeScript unions for c
 ## Structural metadata
 
 - Source type: TypeScript source
-- Path: `/home/agent/forks/remote_pi/pi-extension/src/protocol/types.ts`
+- Path: `/home/agent/projects/remote_pi/pi-extension/src/protocol/types.ts`

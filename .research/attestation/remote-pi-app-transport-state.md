@@ -1,7 +1,7 @@
 ---
 source_handle: remote-pi-app-transport-state
 fetched: 2026-06-28
-source_path: /home/agent/forks/remote_pi/app/lib/data/transport/connection_manager.dart
+source_path: /home/agent/projects/remote_pi/app/lib/data/transport/connection_manager.dart
 provenance: source-direct
 substrate_confidence: source-direct
 ---
@@ -25,5 +25,5 @@ Paraphrased summary: `ConnectionManager` owns relay connection status, peer/room
 ## Structural metadata
 
 - Source type: local Dart source
-- Path: `/home/agent/forks/remote_pi/app/lib/data/transport/connection_manager.dart`
+- Path: `/home/agent/projects/remote_pi/app/lib/data/transport/connection_manager.dart`
 - Related local files read in this engagement: `ws_transport.dart`, `sync_service.dart`, `domain/session_state.dart`.

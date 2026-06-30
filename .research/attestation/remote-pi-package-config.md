@@ -1,7 +1,7 @@
 ---
 source_handle: remote-pi-package-config
 fetched: 2026-06-28
-source_path: /home/agent/forks/remote_pi/pi-extension/package.json
+source_path: /home/agent/projects/remote_pi/pi-extension/package.json
 provenance: source-direct
 ---
 
@@ -20,4 +20,4 @@ Paraphrased summary: The `pi-extension/package.json` declares `remote-pi` as an 
 ## Structural metadata
 
 - Source type: package manifest
-- Path: `/home/agent/forks/remote_pi/pi-extension/package.json`
+- Path: `/home/agent/projects/remote_pi/pi-extension/package.json`

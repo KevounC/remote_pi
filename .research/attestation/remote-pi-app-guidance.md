@@ -1,7 +1,7 @@
 ---
 source_handle: remote-pi-app-guidance
 fetched: 2026-06-28
-source_path: /home/agent/forks/remote_pi/app/CLAUDE.md
+source_path: /home/agent/projects/remote_pi/app/CLAUDE.md
 provenance: source-direct
 substrate_confidence: source-direct
 ---
@@ -22,4 +22,4 @@ Paraphrased summary: The app guidance identifies the mobile client stack, layer 
 ## Structural metadata
 
 - Source type: local project guidance
-- Path: `/home/agent/forks/remote_pi/app/CLAUDE.md`
+- Path: `/home/agent/projects/remote_pi/app/CLAUDE.md`

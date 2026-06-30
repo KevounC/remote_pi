@@ -1,7 +1,7 @@
 ---
 source_handle: remote-pi-relay-client
 fetched: 2026-06-28
-source_path: /home/agent/forks/remote_pi/pi-extension/src/transport/relay_client.ts
+source_path: /home/agent/projects/remote_pi/pi-extension/src/transport/relay_client.ts
 provenance: source-direct
 ---
 
@@ -20,4 +20,4 @@ Paraphrased summary: `RelayClient` is the extension-side WebSocket transport. It
 ## Structural metadata
 
 - Source type: TypeScript source
-- Path: `/home/agent/forks/remote_pi/pi-extension/src/transport/relay_client.ts`
+- Path: `/home/agent/projects/remote_pi/pi-extension/src/transport/relay_client.ts`

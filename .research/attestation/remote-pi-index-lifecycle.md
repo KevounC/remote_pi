@@ -1,7 +1,7 @@
 ---
 source_handle: remote-pi-index-lifecycle
 fetched: 2026-06-28
-source_path: /home/agent/forks/remote_pi/pi-extension/src/index.ts
+source_path: /home/agent/projects/remote_pi/pi-extension/src/index.ts
 provenance: source-direct
 ---
 
@@ -23,5 +23,5 @@ Paraphrased summary: `src/index.ts` is the Remote Pi extension factory and runti
 ## Structural metadata
 
 - Source type: TypeScript source
-- Path: `/home/agent/forks/remote_pi/pi-extension/src/index.ts`
+- Path: `/home/agent/projects/remote_pi/pi-extension/src/index.ts`
 - Relevant areas: module state, UI/context helpers, Pi hook registration, room meta publication, client-message router, session action handling.

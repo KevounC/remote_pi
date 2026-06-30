@@ -1,7 +1,7 @@
 ---
 source_handle: remote-pi-pairing-storage
 fetched: 2026-06-28
-source_path: /home/agent/forks/remote_pi/pi-extension/src/pairing/storage.ts
+source_path: /home/agent/projects/remote_pi/pi-extension/src/pairing/storage.ts
 provenance: source-direct
 ---
 
@@ -20,4 +20,4 @@ Paraphrased summary: Pairing storage owns the long-term Pi identity and paired p
 ## Structural metadata
 
 - Source type: TypeScript source
-- Path: `/home/agent/forks/remote_pi/pi-extension/src/pairing/storage.ts`
+- Path: `/home/agent/projects/remote_pi/pi-extension/src/pairing/storage.ts`

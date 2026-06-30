@@ -1,7 +1,7 @@
 ---
 source_handle: remote-pi-broker-remote
 fetched: 2026-06-28
-source_path: /home/agent/forks/remote_pi/pi-extension/src/session/broker_remote.ts
+source_path: /home/agent/projects/remote_pi/pi-extension/src/session/broker_remote.ts
 provenance: source-direct
 ---
 
@@ -20,4 +20,4 @@ Paraphrased summary: `BrokerRemote` bridges the local UDS broker to sibling Pi i
 ## Structural metadata
 
 - Source type: TypeScript source
-- Path: `/home/agent/forks/remote_pi/pi-extension/src/session/broker_remote.ts`
+- Path: `/home/agent/projects/remote_pi/pi-extension/src/session/broker_remote.ts`

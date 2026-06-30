@@ -1,7 +1,7 @@
 ---
 source_handle: remote-pi-rpc-child
 fetched: 2026-06-28
-source_path: /home/agent/forks/remote_pi/pi-extension/src/daemon/rpc_child.ts
+source_path: /home/agent/projects/remote_pi/pi-extension/src/daemon/rpc_child.ts
 provenance: source-direct
 ---
 
@@ -19,4 +19,4 @@ Paraphrased summary: `src/daemon/rpc_child.ts` wraps a `pi --mode rpc -e <extens
 ## Structural metadata
 
 - Source type: TypeScript source
-- Path: `/home/agent/forks/remote_pi/pi-extension/src/daemon/rpc_child.ts`
+- Path: `/home/agent/projects/remote_pi/pi-extension/src/daemon/rpc_child.ts`

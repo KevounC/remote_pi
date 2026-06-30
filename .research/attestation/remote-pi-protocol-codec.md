@@ -1,7 +1,7 @@
 ---
 source_handle: remote-pi-protocol-codec
 fetched: 2026-06-28
-source_path: /home/agent/forks/remote_pi/pi-extension/src/protocol/codec.ts
+source_path: /home/agent/projects/remote_pi/pi-extension/src/protocol/codec.ts
 provenance: source-direct
 ---
 
@@ -19,4 +19,4 @@ Paraphrased summary: `src/protocol/codec.ts` provides `encodeClient` and `decode
 ## Structural metadata
 
 - Source type: TypeScript source
-- Path: `/home/agent/forks/remote_pi/pi-extension/src/protocol/codec.ts`
+- Path: `/home/agent/projects/remote_pi/pi-extension/src/protocol/codec.ts`
