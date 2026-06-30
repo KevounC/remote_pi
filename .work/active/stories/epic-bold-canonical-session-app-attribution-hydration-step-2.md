@@ -1,14 +1,14 @@
 ---
 id: epic-bold-canonical-session-app-attribution-hydration-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-canonical-session-app-attribution-hydration
 depends_on: [epic-bold-canonical-session-app-attribution-hydration-step-1]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 2: Retire the transport legacy no-room fail-open route
@@ -67,3 +67,10 @@ Medium. Legacy Pi-extension builds that omit `room` will no longer stream chat i
 
 ## Rollback
 Restore the `senderRoom == null` unconditional enqueue branch. Do not replace it with `session_id` parsing in transport; session validation belongs in `SyncService`.
+
+## Implementation notes
+- Extracted `demuxPostAuthInboundFrame` from `WsTransport.connect` into `app/lib/data/transport/ws_transport.dart` as a pure helper.
+- Added new pure demux outcome enum/class: `WsInboundFrameKind` / `WsInboundFrameDecision`.
+- Enforced drop behavior for missing or empty room and room mismatch before any queueing.
+- Kept control-frame parsing on the same boundary: `{peer, ct}` envelopes are still routed through queueing logic and control frames still emit through `controlFrames`.
+- Added unit tests in `app/test/data/transport/ws_transport_demux_test.dart` covering all five outcomes: `enqueue`, `dropMissingRoom`, `dropRoomMismatch`, `control`, `dropMalformed`.

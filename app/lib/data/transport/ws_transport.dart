@@ -85,55 +85,59 @@ class WsTransport implements PeerTransport, IControlLink {
           }
           return;
         }
-        try {
-          final frame = jsonDecode(raw as String) as Map<String, dynamic>;
-          // Envelope: {peer, room?, ct} → enqueue payload bytes.
-          if (frame.containsKey('peer') && frame.containsKey('ct')) {
-            final bytes = _b64Decode(frame['ct'] as String);
-            final senderRoom = frame['room'] as String?;
-            // Plan-18 follow-up — DEMUX inbound by sender room.
-            // SessionRepository is singleton; without this guard,
-            // AgentChunks for a chat the user just left bleed into
-            // the chat they're now viewing. Clean-room session
-            // attribution is fail-closed: envelopes without a room
-            // are dropped instead of being routed around SessionGate.
-            if (senderRoom == null || senderRoom.isEmpty) {
-              debugPrint(
-                '[ws-in] bytes=${rawStr.length} kind=envelope '
-                'DROPPED (missing-room)',
-              );
-              return;
-            }
-            if (senderRoom != transport._activeRoom) {
-              debugPrint(
-                '[ws-in] bytes=${rawStr.length} kind=envelope '
-                'sender_room=$senderRoom DROPPED (room-mismatch)',
-              );
+        final decision = demuxPostAuthInboundFrame(
+          raw: rawStr,
+          activeRoom: transport._activeRoom,
+        );
+
+        switch (decision.kind) {
+          case WsInboundFrameKind.enqueue:
+            final envelopeBytes = decision.envelopeBytes;
+            if (envelopeBytes == null) {
+              debugPrint('[ws-in] kind=envelope DROPPED (malformed)');
               return;
             }
             debugPrint(
-              '[ws-in] bytes=${rawStr.length} kind=envelope '
-              'ct.bytes=${bytes.length}',
+              '[ws-in] kind=envelope ct.bytes=${envelopeBytes.length}',
             );
-            transport._queue.add(bytes);
+            transport._queue.add(envelopeBytes);
             return;
-          }
-          // Control: top-level `type` only → presence stream.
-          final ctrl = ControlInbound.tryFromJson(frame);
-          if (ctrl != null && !transport._controlController.isClosed) {
+
+          case WsInboundFrameKind.dropMissingRoom:
+            debugPrint('[ws-in] kind=envelope DROPPED (missing-room)');
+            return;
+
+          case WsInboundFrameKind.dropRoomMismatch:
             debugPrint(
-              '[ws-in] bytes=${rawStr.length} kind=control '
-              'type=${frame['type']}',
+              '[ws-in] kind=envelope sender_room=${decision.senderRoom} '
+              'DROPPED (room-mismatch)',
             );
-            transport._controlController.add(ctrl);
             return;
-          }
-          // Anything else: unknown shape — drop silently.
-          debugPrint('[ws-in] bytes=${rawStr.length} kind=unknown DROPPED');
-        } catch (e) {
-          debugPrint(
-            '[ws-in] bytes=${rawStr.length} kind=malformed DROPPED err=$e',
-          );
+
+          case WsInboundFrameKind.control:
+            if (!transport._controlController.isClosed) {
+              final control = decision.control;
+              if (control == null) {
+                debugPrint(
+                  '[ws-in] bytes=${rawStr.length} kind=control '
+                  'DROPPED (malformed)',
+                );
+                return;
+              }
+              debugPrint(
+                '[ws-in] bytes=${rawStr.length} kind=control '
+                'type=${decision.controlType}',
+              );
+              transport._controlController.add(control);
+            }
+            return;
+
+          case WsInboundFrameKind.dropMalformed:
+            debugPrint(
+              '[ws-in] bytes=${rawStr.length} kind=malformed '
+              'DROPPED err=${decision.error}',
+            );
+            return;
         }
       },
       onError: (e) {
@@ -243,6 +247,82 @@ class WsTransport implements PeerTransport, IControlLink {
     await _ws.sink.close();
     _queue.close();
     if (!_controlController.isClosed) await _controlController.close();
+  }
+}
+
+@visibleForTesting
+enum WsInboundFrameKind {
+  enqueue,
+  dropMissingRoom,
+  dropRoomMismatch,
+  control,
+  dropMalformed,
+}
+
+@visibleForTesting
+final class WsInboundFrameDecision {
+  final WsInboundFrameKind kind;
+  final Uint8List? envelopeBytes;
+  final ControlInbound? control;
+  final String? senderRoom;
+  final String? controlType;
+  final String? error;
+
+  const WsInboundFrameDecision({
+    required this.kind,
+    this.envelopeBytes,
+    this.control,
+    this.senderRoom,
+    this.controlType,
+    this.error,
+  });
+}
+
+@visibleForTesting
+WsInboundFrameDecision demuxPostAuthInboundFrame({
+  required String raw,
+  required String activeRoom,
+}) {
+  try {
+    final frame = jsonDecode(raw) as Map<String, dynamic>;
+
+    // Envelope: {peer, ct} with room-aware routing.
+    if (frame.containsKey('peer') && frame.containsKey('ct')) {
+      final bytes = _b64Decode(frame['ct'] as String);
+      final senderRoom = frame['room'] as String?;
+
+      if (senderRoom == null || senderRoom.isEmpty) {
+        return const WsInboundFrameDecision(
+          kind: WsInboundFrameKind.dropMissingRoom,
+        );
+      }
+      if (senderRoom != activeRoom) {
+        return WsInboundFrameDecision(
+          kind: WsInboundFrameKind.dropRoomMismatch,
+          senderRoom: senderRoom,
+        );
+      }
+      return WsInboundFrameDecision(
+        kind: WsInboundFrameKind.enqueue,
+        envelopeBytes: bytes,
+      );
+    }
+
+    final ctrl = ControlInbound.tryFromJson(frame);
+    if (ctrl != null) {
+      return WsInboundFrameDecision(
+        kind: WsInboundFrameKind.control,
+        control: ctrl,
+        controlType: frame['type'] as String?,
+      );
+    }
+
+    return const WsInboundFrameDecision(kind: WsInboundFrameKind.dropMalformed);
+  } on Object catch (e) {
+    return WsInboundFrameDecision(
+      kind: WsInboundFrameKind.dropMalformed,
+      error: e.toString(),
+    );
   }
 }
 
