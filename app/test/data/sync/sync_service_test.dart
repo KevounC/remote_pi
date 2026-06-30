@@ -197,12 +197,14 @@ void main() {
   }
 
   test(
-    'foreign or missing session history cannot replace active rows',
+    'foreign session_history is dropped before rows or index mutate',
     () async {
       final s = await setup();
       s.ch.push(UserInput(id: 'u1', text: 'keep me'));
       await _settle();
-      expect(messages(s.epk).map((m) => m.text), ['keep me']);
+      final beforeRows = [for (final m in messages(s.epk)) m.toJson()];
+      final beforeIndex = index(s.epk);
+      expect(beforeRows.map((m) => m['text']), ['keep me']);
 
       s.ch.pushRaw(
         SessionHistory(
@@ -214,7 +216,22 @@ void main() {
         ),
       );
       await _settle();
-      expect(messages(s.epk).map((m) => m.text), ['keep me']);
+
+      expect([for (final m in messages(s.epk)) m.toJson()], beforeRows);
+      expect(index(s.epk), beforeIndex);
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
+    'missing session_id session_history is dropped before clearing rows',
+    () async {
+      final s = await setup();
+      s.ch.push(UserInput(id: 'u1', text: 'keep me'));
+      await _settle();
+      final beforeRows = [for (final m in messages(s.epk)) m.toJson()];
+      final beforeIndex = index(s.epk);
 
       s.ch.pushRaw(
         SessionHistory(
@@ -225,7 +242,72 @@ void main() {
         ),
       );
       await _settle();
-      expect(messages(s.epk).map((m) => m.text), ['keep me']);
+
+      expect([for (final m in messages(s.epk)) m.toJson()], beforeRows);
+      expect(index(s.epk), beforeIndex);
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
+    'session gate drops foreign chunks, done, tools, queued, error, and compaction',
+    () async {
+      final s = await setup();
+      const foreignSession = 'foreign-session';
+
+      final foreignMessages = <ServerMessage>[
+        AgentChunk(
+          sessionId: foreignSession,
+          inReplyTo: 'u1',
+          delta: 'drop chunk',
+        ),
+        AgentDone(sessionId: foreignSession, inReplyTo: 'u1'),
+        AgentMessage(
+          sessionId: foreignSession,
+          inReplyTo: 'u1',
+          text: 'drop assistant',
+        ),
+        ToolRequest(
+          sessionId: foreignSession,
+          toolCallId: 'tool-foreign',
+          tool: 'Read',
+          args: const {'path': 'pubspec.yaml'},
+        ),
+        ToolResult(
+          sessionId: foreignSession,
+          toolCallId: 'tool-foreign',
+          result: const {'ok': true},
+        ),
+        QueuedMessageState(
+          sessionId: foreignSession,
+          id: 'queued-foreign',
+          text: 'drop queued',
+        ),
+        ErrorMessage(
+          sessionId: foreignSession,
+          inReplyTo: 'u1',
+          code: 'internal_error',
+          message: 'drop error',
+        ),
+        Compaction(
+          sessionId: foreignSession,
+          summary: 'drop compaction',
+          tokensBefore: 123,
+          ts: 1700000000000,
+        ),
+      ];
+
+      for (final message in foreignMessages) {
+        s.ch.pushRaw(message);
+        await _settle();
+      }
+
+      expect(messages(s.epk), isEmpty);
+      expect(index(s.epk), isNull);
+      expect(s.sync.streaming, isNull);
+      expect(s.sync.isWorking, isFalse);
+      expect(s.sync.queuedText, isNull);
       s.conn.dispose();
       s.sync.dispose();
     },
@@ -256,6 +338,58 @@ void main() {
       s.sync.dispose();
     },
   );
+
+  test('same-session reconnect history replay hydrates idempotently', () async {
+    final s = await setup();
+    const startedAt = 1_700_000_000;
+
+    SessionHistory history(String inReplyTo) => SessionHistory(
+      sessionId: s.sessionId,
+      inReplyTo: inReplyTo,
+      sessionStartedAt: startedAt,
+      events: const [
+        UserInputEvt(ts: 1, id: 'u1', text: 'hi'),
+        AgentMessageEvt(ts: 2, inReplyTo: 'u1', text: 'done'),
+        CompactionEvt(ts: 3, summary: 'compacted', tokensBefore: 5000),
+      ],
+      eos: true,
+    );
+
+    s.ch.pushRaw(history('sync-before-reconnect'));
+    await _settle();
+    final afterFirstRows = [for (final m in messages(s.epk)) m.toJson()];
+    final afterFirstIndex = index(s.epk);
+    expect(afterFirstRows.map((m) => m['text']), ['hi', 'done', 'compacted']);
+
+    final reconnect = _FakeChannel()..defaultSessionId = s.sessionId;
+    s.conn.adopt(
+      reconnect,
+      PeerRecord(
+        remoteEpk: s.epk,
+        sessionName: 'Pi',
+        relayUrl: 'ws://localhost',
+        pairedAt: '2026-01-01T00:00:00Z',
+      ),
+    );
+    await _settle();
+    reconnect.pushRaw(
+      PairOk(
+        inReplyTo: 'pair-reconnect',
+        sessionName: 'Pi',
+        sessionStartedAt: startedAt,
+        roomId: 'main',
+        sessionId: s.sessionId,
+      ),
+    );
+    await _settle();
+    reconnect.pushRaw(history('sync-after-reconnect'));
+    await _settle();
+
+    expect([for (final m in messages(s.epk)) m.toJson()], afterFirstRows);
+    expect(index(s.epk), afterFirstIndex);
+    s.conn.dispose();
+    s.sync.dispose();
+  });
 
   test(
     'user_message echo writes one MessageRecord + updates the index',

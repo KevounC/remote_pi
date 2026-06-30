@@ -1,14 +1,14 @@
 ---
 id: epic-bold-canonical-session-wire-discriminator-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-canonical-session-wire-discriminator
 depends_on: [epic-bold-canonical-session-wire-discriminator-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Drop foreign server messages in the app before any state mutation
@@ -81,3 +81,18 @@ Disable the app gate via one internal seam, then revert the protocol fields and 
 - Inspected `ee7aad2c:app/lib/data/sync/sync_service.dart` and `ee7aad2c:app/lib/data/sync/session_gate.dart` — prior code has a top-of-`_onServerMessage` `SessionGate`, so part of the target existed before this stride.
 - Inspected `ee7aad2c:app/lib/data/transport/ws_transport.dart` — legacy no-room envelopes are still accepted unconditionally.
 - `cd /home/agent/forks/remote_pi/app && flutter test test/data/sync/sync_service_test.dart` — failed before tests ran because Flutter attempted to write `/opt/flutter/bin/cache/engine.stamp.tmp.*` and `/opt/flutter/bin/cache/engine.realm` on a read-only filesystem.
+
+## Implementation notes (rework 2026-06-30)
+- Files changed: `app/lib/data/transport/ws_transport.dart`, `app/test/data/sync/sync_service_test.dart`.
+- WsTransport fix: removed the legacy no-room unconditional envelope route. Clean-room inbound envelopes now fail closed when `room` is absent/empty, and still drop explicit room mismatches. This intentionally changes legacy behavior so no-room frames cannot bypass session attribution.
+- Tests added in `app/test/data/sync/sync_service_test.dart`:
+  - `foreign session_history is dropped before rows or index mutate`
+  - `missing session_id session_history is dropped before clearing rows`
+  - `session gate drops foreign chunks, done, tools, queued, error, and compaction`
+  - `same-session reconnect history replay hydrates idempotently`
+- Discrepancies from design: app fail-fast gating through `SyncService._onServerMessage` and `SessionGate` already existed before this rework; this stride fixed the missing transport drop and added literal regression coverage. No existing test asserted legacy no-room routing, so none needed updating.
+- Adjacent issues parked: none.
+- Verification:
+  - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && FLUTTER=/home/agent/projects/remote_pi/.tools/flutter/bin/flutter && $FLUTTER pub get` — passed.
+  - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && FLUTTER=/home/agent/projects/remote_pi/.tools/flutter/bin/flutter && $FLUTTER test test/data/sync/sync_service_test.dart` — passed, 40 tests.
+  - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && FLUTTER=/home/agent/projects/remote_pi/.tools/flutter/bin/flutter && $FLUTTER analyze` — only the known unrelated `axisAlignment` info at `lib/ui/chat/widgets/input_bar.dart:802` remained (Flutter exits non-zero for the info).

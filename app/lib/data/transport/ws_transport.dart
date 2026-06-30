@@ -36,8 +36,7 @@ class WsTransportError implements Exception {
 class WsTransport implements PeerTransport, IControlLink {
   final WebSocketChannel _ws;
   final _queue = _MsgQueue();
-  final _controlController =
-      StreamController<ControlInbound>.broadcast();
+  final _controlController = StreamController<ControlInbound>.broadcast();
 
   WsTransport._(this._ws);
 
@@ -95,10 +94,17 @@ class WsTransport implements PeerTransport, IControlLink {
             // Plan-18 follow-up — DEMUX inbound by sender room.
             // SessionRepository is singleton; without this guard,
             // AgentChunks for a chat the user just left bleed into
-            // the chat they're now viewing. When senderRoom doesn't
-            // match the currently-addressed Pi cwd, drop the payload.
-            // Legacy Pis without `room` route unconditionally.
-            if (senderRoom != null && senderRoom != transport._activeRoom) {
+            // the chat they're now viewing. Clean-room session
+            // attribution is fail-closed: envelopes without a room
+            // are dropped instead of being routed around SessionGate.
+            if (senderRoom == null || senderRoom.isEmpty) {
+              debugPrint(
+                '[ws-in] bytes=${rawStr.length} kind=envelope '
+                'DROPPED (missing-room)',
+              );
+              return;
+            }
+            if (senderRoom != transport._activeRoom) {
               debugPrint(
                 '[ws-in] bytes=${rawStr.length} kind=envelope '
                 'sender_room=$senderRoom DROPPED (room-mismatch)',
@@ -131,12 +137,16 @@ class WsTransport implements PeerTransport, IControlLink {
         }
       },
       onError: (e) {
-        if (!challengeCompleter.isCompleted) challengeCompleter.completeError(e);
+        if (!challengeCompleter.isCompleted) {
+          challengeCompleter.completeError(e);
+        }
         transport._queue.error(e);
       },
       onDone: () {
         if (!challengeCompleter.isCompleted) {
-          challengeCompleter.completeError(const WsTransportError('WS closed during auth'));
+          challengeCompleter.completeError(
+            const WsTransportError('WS closed during auth'),
+          );
         }
         transport._queue.close();
         if (!transport._controlController.isClosed) {
@@ -151,11 +161,13 @@ class WsTransport implements PeerTransport, IControlLink {
       // on the canonical 'main' room. Pi-side hellos include their own
       // room_id (one per cwd) AND room_meta; that's not our concern here.
       final pub = await ed25519Key.extractPublicKey();
-      ws.sink.add(jsonEncode({
-        'type': 'hello',
-        'pubkey': base64.encode(pub.bytes),
-        'room_id': 'main',
-      }));
+      ws.sink.add(
+        jsonEncode({
+          'type': 'hello',
+          'pubkey': base64.encode(pub.bytes),
+          'room_id': 'main',
+        }),
+      );
 
       // 2. Challenge
       final ch = await challengeCompleter.future;
@@ -166,10 +178,9 @@ class WsTransport implements PeerTransport, IControlLink {
 
       // 3. Auth
       final sig = await Ed25519().sign(nonce, keyPair: ed25519Key);
-      ws.sink.add(jsonEncode({
-        'type': 'auth',
-        'sig': base64.encode(sig.bytes),
-      }));
+      ws.sink.add(
+        jsonEncode({'type': 'auth', 'sig': base64.encode(sig.bytes)}),
+      );
       authDone = true;
 
       transport._peerPubkey = _normalizeToStandard(peerPubkey);
@@ -202,11 +213,13 @@ class WsTransport implements PeerTransport, IControlLink {
 
   @override
   Future<void> send(Uint8List data) async {
-    _ws.sink.add(jsonEncode({
-      'peer': _peerPubkey,
-      'room': _activeRoom,
-      'ct': base64.encode(data),
-    }));
+    _ws.sink.add(
+      jsonEncode({
+        'peer': _peerPubkey,
+        'room': _activeRoom,
+        'ct': base64.encode(data),
+      }),
+    );
   }
 
   @override
@@ -265,7 +278,9 @@ class _MsgQueue {
   }
 
   Future<Uint8List> next() {
-    if (_closed) return Future.error(const WsTransportError('transport closed'));
+    if (_closed) {
+      return Future.error(const WsTransportError('transport closed'));
+    }
     if (_buf.isNotEmpty) return Future.value(_buf.removeAt(0));
     final c = Completer<Uint8List>();
     _waiters.add(c);
