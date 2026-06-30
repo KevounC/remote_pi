@@ -5,6 +5,11 @@ use tokio::sync::Mutex;
 use crate::subscriptions::SubscriptionIndex;
 
 /// Metadata about one active Pi room (sub-channel of a peer_id).
+///
+/// `working` is a compatibility projection cached by the relay. The
+/// pi-extension is the only authority for turn lifecycle; the relay stores and
+/// forwards the latest projected boolean for room subscribers and `rooms`
+/// snapshots. Do not derive turn phase, reply target, or cancel target here.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RoomMeta {
     pub room_id: String,
@@ -20,11 +25,11 @@ pub struct RoomMeta {
     /// never interprets it. None = not reported yet.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<String>,
-    /// Whether this room currently has an in-flight agent turn (plano 32).
-    /// A plain bool with the same merge-patch semantics as `thinking`: a
-    /// `room_meta_update` that omits `working` leaves it unchanged — it never
-    /// auto-clears. Defaults to `false` until the Pi reports otherwise, and is
-    /// always serialized so subscribers can rely on its presence.
+    /// Latest projected turn-working boolean (plano 32). A
+    /// `room_meta_update` that omits `working` leaves it unchanged; an explicit
+    /// `false` is the terminal/idle projection. Defaults to `false` until the
+    /// Pi reports otherwise, and is always serialized so subscribers can rely
+    /// on its presence.
     pub working: bool,
     pub started_at: i64,
 }
@@ -41,9 +46,10 @@ pub struct RoomMeta {
 pub struct RoomMetaPatch {
     pub model: Option<Option<String>>,
     pub thinking: Option<Option<String>>,
-    /// `working` is a non-nullable bool, so the patch is a single `Option`:
-    /// `None` = field absent (leave current), `Some(b)` = set to `b`. There is
-    /// no "clear to null" — `false` *is* the cleared state.
+    /// `working` is a non-nullable projection bool, so the patch is a single
+    /// `Option`: `None` = field absent (leave current), `Some(false)` =
+    /// terminal/idle projection, `Some(true)` = active projection. There is no
+    /// "clear to null" — `false` *is* the cleared state.
     pub working: Option<bool>,
 }
 

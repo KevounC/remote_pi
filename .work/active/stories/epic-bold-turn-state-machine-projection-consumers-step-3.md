@@ -1,14 +1,14 @@
 ---
 id: epic-bold-turn-state-machine-projection-consumers-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-turn-state-machine-projection-consumers
 depends_on: [epic-bold-turn-state-machine-projection-consumers-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Treat relay room metadata as a projection cache, not an authority
@@ -82,11 +82,22 @@ RoomTurnProjection roomTurnProjection(String epk, String roomId) {
 
 ## Acceptance Criteria
 
-- [ ] `cargo test` targeted relay registry/room tests pass from `relay/`.
-- [ ] Relay tests show `room_meta_updated` broadcasts post-patch `working:false` and that absent `working` does not zero an active projection.
-- [ ] App room-projection tests show ended/offline/stale rooms render not-working even if their cached `RoomInfo.working` was last true.
-- [ ] No relay code attempts to inspect or synthesize `turnId`, `replyTo`, or phase; it only forwards the projected compatibility bool.
-- [ ] `app/lib/protocol/protocol.dart` keeps field names compatible with existing `working` wire frames.
+- [x] `cargo test` targeted relay registry/room tests pass from `relay/`.
+- [x] Relay tests show `room_meta_updated` broadcasts post-patch `working:false` and that absent `working` does not zero an active projection.
+- [x] App room-projection tests show ended/offline/stale rooms render not-working even if their cached `RoomInfo.working` was last true.
+- [x] No relay code attempts to inspect or synthesize `turnId`, `replyTo`, or phase; it only forwards the projected compatibility bool.
+- [x] `app/lib/protocol/protocol.dart` keeps field names compatible with existing `working` wire frames.
+
+## Implementation
+
+- Files changed: `relay/src/rooms.rs`, `relay/src/peers/registry.rs`, `app/test/transport/connection_manager_working_test.dart`.
+- Relay room metadata is documented as a compatibility projection cache: `working` is forwarded from the pi-extension as the latest projected bool, `None`/absent patches preserve the current projection, and `Some(false)` is the terminal idle projection. No relay path derives turn phase, reply target, cancel target, `turnId`, or `replyTo`.
+- Relay registry tests added: `rooms_of_returns_latest_working_projection` proves `rooms_of` returns the latest projected `working` after true→false patches; `unregister_last_conn_ends_room_and_removes_it_from_rooms_of` proves last disconnect emits `room_ended` and removes the room from authoritative live snapshots. Existing registry tests preserve `room_meta_updated` `working:false` broadcasts and absent-`working` preservation.
+- App convergence tests added in `test/transport/connection_manager_working_test.dart`: `room_ended` clears cached `working:true` and projects stale/not-working; a fresh `RoomsSnapshot` missing a previously-working room clears its cached working bit and projects stale/not-working; offline projection assertion now checks `RoomTurnProjection.stale` as well as `isRoomWorking == false`.
+- `app/lib/data/transport/connection_manager.dart` already had the Step-2 `RoomTurnProjection` live-room gate and snapshot-missing working clear, so this step tightened tests/comments rather than churning the source. `app/lib/protocol/protocol.dart` and relay `peer.rs` wire parsing were left shape-compatible: the `working` field name and bool semantics remain unchanged.
+- Verification: `cd relay && cargo test peers::registry -- --nocapture` passed (13 registry tests); `cd relay && cargo fmt --check && cargo clippy -- -D warnings && cargo test` passed (70 unit + integration/mesh/pi_forward/presence/rooms suites); `cd app && flutter test test/transport/connection_manager_working_test.dart` passed (7 tests); `cd app && flutter test test/transport/` passed (64 tests). `flutter pub get` passed. `flutter analyze` was run and reported only the known unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802`, exiting non-zero per current Flutter analyzer behavior.
+- Discrepancies from design: none. Step 2 had already landed the app source-level `RoomTurnProjection`; this story adds focused app tests without editing the collision-guarded `app/test/transport/connection_manager_test.dart`.
+- Adjacent issues parked: none.
 
 ## Rollback
 

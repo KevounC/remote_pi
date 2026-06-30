@@ -221,7 +221,13 @@ impl PeerRegistry {
         lock.keys().any(|(p, _)| p == peer_id)
     }
 
-    /// Returns one `RoomMeta` per distinct room of `peer_id`.
+    /// Returns one `RoomMeta` per distinct live room of `peer_id`.
+    ///
+    /// This is the authoritative `rooms` snapshot for currently live rooms.
+    /// The `working` value inside each entry is only the latest compatibility
+    /// projection published by the pi-extension; the relay does not infer or
+    /// synthesize turn lifecycle from it.
+    ///
     /// Multiple conns at the same room collapse to a single entry (using
     /// the most recently registered meta for stability).
     pub fn rooms_of(&self, peer_id: &str) -> Vec<RoomMeta> {
@@ -278,7 +284,7 @@ impl PeerRegistry {
     /// `meta` wholesale instead of merging field-by-field. Nullable fields
     /// that are still `None` after the patch are omitted from `meta` (matching
     /// the `skip_serializing_if` convention used for `RoomMeta` itself); the
-    /// non-nullable `working` bool is always present in the broadcast.
+    /// non-nullable `working` projection bool is always present in the broadcast.
     ///
     /// An empty patch (no fields present) still returns `true` if the
     /// `(peer, room)` pair exists, but skips the broadcast — nothing changed.
@@ -724,5 +730,93 @@ mod tests {
             v["meta"]["working"], true,
             "absent `working` in a patch must not clear it"
         );
+    }
+
+    /// `rooms_of` is the authoritative live-room snapshot and carries the
+    /// latest projected `working` value after merge-patches.
+    #[tokio::test]
+    async fn rooms_of_returns_latest_working_projection() {
+        let reg = make_registry();
+        let pi = "pi".to_string();
+        let (tx_pi, _rx_pi) = mpsc::unbounded_channel::<Message>();
+        let _ = reg.register(pi.clone(), make_meta("main"), tx_pi).await;
+
+        let rooms_snapshot = reg.rooms_of(&pi);
+        assert_eq!(rooms_snapshot.len(), 1);
+        assert_eq!(rooms_snapshot[0].working, false);
+
+        assert!(
+            reg.update_room_meta(
+                &pi,
+                "main",
+                RoomMetaPatch {
+                    working: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await
+        );
+        let rooms_snapshot = reg.rooms_of(&pi);
+        assert_eq!(rooms_snapshot.len(), 1);
+        assert_eq!(rooms_snapshot[0].working, true);
+
+        assert!(
+            reg.update_room_meta(
+                &pi,
+                "main",
+                RoomMetaPatch {
+                    working: Some(false),
+                    ..Default::default()
+                },
+            )
+            .await
+        );
+        let rooms_snapshot = reg.rooms_of(&pi);
+        assert_eq!(rooms_snapshot.len(), 1);
+        assert_eq!(rooms_snapshot[0].working, false);
+    }
+
+    /// Disconnecting the last live conn ends the room: subscribers get one
+    /// `room_ended`, and the next rooms snapshot omits that room entirely.
+    /// App consumers gate their room projection on this live-room set, so any
+    /// cached `working:true` for the ended room must render not-working.
+    #[tokio::test]
+    async fn unregister_last_conn_ends_room_and_removes_it_from_rooms_of() {
+        let presence = Arc::new(PresenceManager::new());
+        let rooms = Arc::new(RoomManager::new());
+        let metrics = Arc::new(FirehoseMetrics::new());
+        let reg = PeerRegistry::new(presence, rooms.clone(), metrics);
+
+        let pi = "pi".to_string();
+        let app = "app".to_string();
+
+        let (tx_app, mut rx_app) = mpsc::unbounded_channel::<Message>();
+        let _ = reg.register(app.clone(), make_meta("main"), tx_app).await;
+        rooms.subscribe(app.clone(), vec![pi.clone()]).await;
+
+        let (tx_pi, _rx_pi) = mpsc::unbounded_channel::<Message>();
+        let mut meta = make_meta("main");
+        meta.working = true;
+        let conn = reg.register(pi.clone(), meta, tx_pi).await;
+        let rooms_snapshot = reg.rooms_of(&pi);
+        assert_eq!(rooms_snapshot.len(), 1);
+        assert_eq!(rooms_snapshot[0].working, true);
+
+        let announced = rx_app
+            .try_recv()
+            .expect("subscriber receives room_announced");
+        let announced: serde_json::Value =
+            serde_json::from_str(announced.to_text().unwrap()).unwrap();
+        assert_eq!(announced["type"], "room_announced");
+        assert_eq!(announced["working"], true);
+
+        reg.unregister(&pi, "main", conn).await;
+
+        let ended = rx_app.try_recv().expect("subscriber receives room_ended");
+        let ended: serde_json::Value = serde_json::from_str(ended.to_text().unwrap()).unwrap();
+        assert_eq!(ended["type"], "room_ended");
+        assert_eq!(ended["peer"], pi);
+        assert_eq!(ended["room_id"], "main");
+        assert!(reg.rooms_of(&pi).is_empty());
     }
 }
