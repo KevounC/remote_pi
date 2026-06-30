@@ -1,8 +1,7 @@
 use serde::Deserialize;
 
 pub use crate::protocol::generated::mesh::{
-    MeshEnvelopeWire, MeshGetQuery as GetQuery, MeshGetResponse as GetResponse,
-    MeshPostResponse as PostResponse,
+    MeshEnvelopeWire, MeshGetQuery, MeshGetResponse, MeshPostResponse,
 };
 
 /// Decoded envelope after base64-decoding the wire fields.

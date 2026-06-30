@@ -10,8 +10,11 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use tracing::warn;
 
+use crate::protocol::generated::mesh::{
+    MeshEnvelopeWire, MeshGetQuery, MeshGetResponse, MeshPostResponse,
+};
+
 use super::store::{MeshStore, StoreError};
-use super::types::{GetQuery, GetResponse, MeshEnvelopeWire, PostResponse};
 use super::verify::{VerifyError, decode_wire, owner_pk_hash, verify_envelope};
 
 /// 500 KB cap on `POST /mesh/:hash` bodies (decision Q4 of plan 24).
@@ -54,7 +57,7 @@ pub async fn post_mesh(
     State(store): State<Arc<MeshStore>>,
     Path(url_hash): Path<String>,
     body: axum::body::Bytes,
-) -> Result<(StatusCode, Json<PostResponse>), MeshHttpError> {
+) -> Result<(StatusCode, Json<MeshPostResponse>), MeshHttpError> {
     if body.len() > MAX_BODY_BYTES {
         return Err(MeshHttpError::PayloadTooLarge);
     }
@@ -95,7 +98,7 @@ pub async fn post_mesh(
     ) {
         Ok(()) => Ok((
             StatusCode::OK,
-            Json(PostResponse {
+            Json(MeshPostResponse {
                 version: header.version,
                 updated_at: now_ms,
             }),
@@ -110,7 +113,7 @@ pub async fn post_mesh(
 pub async fn get_mesh(
     State(store): State<Arc<MeshStore>>,
     Path(url_hash): Path<String>,
-    Query(q): Query<GetQuery>,
+    Query(q): Query<MeshGetQuery>,
 ) -> Result<Response, MeshHttpError> {
     let hash = url_hash.to_lowercase();
     let rec = match store.get(&hash) {
@@ -125,7 +128,7 @@ pub async fn get_mesh(
         return Ok(StatusCode::NOT_MODIFIED.into_response());
     }
 
-    let body = GetResponse {
+    let body = MeshGetResponse {
         blob: B64.encode(&rec.blob),
         sig: B64.encode(&rec.sig),
         version: rec.version,

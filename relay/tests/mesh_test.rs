@@ -11,9 +11,10 @@ use ed25519_dalek::{Signer, SigningKey};
 use relay::{
     AppState, FirehoseMetrics, MeshAuthCache, MeshStore, PeerRegistry, PresenceManager,
     RoomManager, build_router,
+    protocol::generated::mesh::{MeshEnvelopeWire, MeshGetResponse, MeshPostResponse},
 };
 use reqwest::StatusCode;
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::net::TcpListener;
 
 /// Spawns the unified relay on a random localhost port with a persistent
@@ -71,7 +72,7 @@ fn pk_hash(pk: &[u8]) -> String {
 /// Builds a signed mesh envelope (wire format) using the given signing key
 /// and version. The blob is canonical-ish JSON (we don't enforce canonical
 /// for tests since we sign the bytes we produce here).
-fn make_envelope(sk: &SigningKey, version: u64) -> (Value, String) {
+fn make_envelope(sk: &SigningKey, version: u64) -> (MeshEnvelopeWire, String) {
     let pk_b64 = B64.encode(sk.verifying_key().to_bytes());
     // Canonical-ish: keys sorted, no spaces. serde_json::to_vec preserves
     // the order in serde_json::json! — we use a Map and insert in sorted order.
@@ -83,10 +84,10 @@ fn make_envelope(sk: &SigningKey, version: u64) -> (Value, String) {
     });
     let blob_bytes = serde_json::to_vec(&blob_value).unwrap();
     let sig = sk.sign(&blob_bytes);
-    let envelope = json!({
-        "blob": B64.encode(&blob_bytes),
-        "sig": B64.encode(sig.to_bytes()),
-    });
+    let envelope = MeshEnvelopeWire {
+        blob: B64.encode(&blob_bytes),
+        sig: B64.encode(sig.to_bytes()),
+    };
     let hash = pk_hash(&sk.verifying_key().to_bytes());
     (envelope, hash)
 }
@@ -105,8 +106,8 @@ async fn post_v1_then_get_returns_v1() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let body: Value = resp.json().await.unwrap();
-    assert_eq!(body["version"], 1);
+    let body: MeshPostResponse = resp.json().await.unwrap();
+    assert_eq!(body.version, 1);
 
     let resp = client
         .get(format!("{base}/mesh/{hash}"))
@@ -114,10 +115,10 @@ async fn post_v1_then_get_returns_v1() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let body: Value = resp.json().await.unwrap();
-    assert_eq!(body["version"], 1);
-    assert!(body["blob"].is_string());
-    assert!(body["sig"].is_string());
+    let body: MeshGetResponse = resp.json().await.unwrap();
+    assert_eq!(body.version, 1);
+    assert!(!body.blob.is_empty());
+    assert!(!body.sig.is_empty());
 }
 
 #[tokio::test]
@@ -144,7 +145,7 @@ async fn post_v2_after_v1_advances_state() {
         .unwrap();
     assert_eq!(r.status(), StatusCode::OK);
 
-    let body: Value = client
+    let body: MeshGetResponse = client
         .get(format!("{base}/mesh/{hash}"))
         .send()
         .await
@@ -152,7 +153,7 @@ async fn post_v2_after_v1_advances_state() {
         .json()
         .await
         .unwrap();
-    assert_eq!(body["version"], 2);
+    assert_eq!(body.version, 2);
 }
 
 #[tokio::test]
@@ -230,8 +231,8 @@ async fn get_with_since_below_current_returns_blob() {
         .await
         .unwrap();
     assert_eq!(r.status(), StatusCode::OK);
-    let body: Value = r.json().await.unwrap();
-    assert_eq!(body["version"], 5);
+    let body: MeshGetResponse = r.json().await.unwrap();
+    assert_eq!(body.version, 5);
 }
 
 #[tokio::test]
@@ -278,7 +279,7 @@ async fn post_with_invalid_signature_returns_403() {
     let sk = SigningKey::generate(&mut rand::thread_rng());
     let (mut env, hash) = make_envelope(&sk, 1);
     // Replace sig with random bytes.
-    env["sig"] = json!(B64.encode([0u8; 64]));
+    env.sig = B64.encode([0u8; 64]);
 
     let client = reqwest::Client::new();
     let r = client
@@ -326,7 +327,10 @@ async fn post_body_over_500kb_returns_413() {
     let (base, _dir) = spawn_relay().await;
     // 600 KB body — exceeds the 500 KB cap.
     let huge = "a".repeat(600 * 1024);
-    let body = json!({"blob": huge, "sig": "AA"});
+    let body = MeshEnvelopeWire {
+        blob: huge,
+        sig: "AA".to_string(),
+    };
 
     let client = reqwest::Client::new();
     let r = client

@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-control-handlers-step-6
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-control-handlers
 depends_on: [epic-bold-relay-typed-actor-control-handlers-step-5]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 6: Consume generated mesh-membership DTOs at the HTTP handler boundary
@@ -67,11 +67,21 @@ pub async fn post_mesh(
 
 ## Acceptance Criteria
 
-- [ ] Mesh HTTP request/response DTOs are generated or re-exported from generated code.
-- [ ] `mesh/handler.rs` still owns HTTP status mapping and `MeshStore` persistence behavior.
-- [ ] Signature verification, owner hash matching, monotonic-version rejection, and `since`/304 behavior remain unchanged.
-- [ ] No logs include raw mesh blobs or signatures.
-- [ ] Relay fmt/clippy/tests pass.
+- [x] Mesh HTTP request/response DTOs are generated or re-exported from generated code.
+- [x] `mesh/handler.rs` still owns HTTP status mapping and `MeshStore` persistence behavior.
+- [x] Signature verification, owner hash matching, monotonic-version rejection, and `since`/304 behavior remain unchanged.
+- [x] No logs include raw mesh blobs or signatures.
+- [x] Relay fmt/clippy/tests pass.
+
+## Implementation
+
+- `relay/src/mesh/handler.rs` now imports `MeshEnvelopeWire`, `MeshPostResponse`, `MeshGetResponse`, and `MeshGetQuery` directly from `crate::protocol::generated::mesh` at the HTTP adapter boundary.
+- `relay/src/mesh/types.rs` keeps only decoded/internal mesh structs plus exact-name generated DTO re-exports; no Rust-only aliases were added.
+- Preserved body cap, Owner signature verification, URL hash matching, monotonic version rejection, `since`/304 behavior, and existing HTTP status strings/codes.
+- Mesh tests now post and decode generated DTO structs while keeping black-box compatibility coverage for signature verification, hash mismatch, stale/same versions, and `since`/304.
+- Logging remains unchanged and does not include raw blobs or signatures.
+- Generator was not changed; regen not applicable.
+- Verification: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build` from `relay/` passed (131 tests).
 
 ## Risk
 
