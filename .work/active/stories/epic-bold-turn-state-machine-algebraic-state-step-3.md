@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-algebraic-state-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-turn-state-machine-algebraic-state
 depends_on: [epic-bold-turn-state-machine-algebraic-state-step-2]
