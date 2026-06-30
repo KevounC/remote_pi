@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-owner-multiplexer-module-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-owner-multiplexer-module
 depends_on: [epic-bold-split-pi-extension-index-owner-multiplexer-module-step-1]
@@ -112,3 +112,31 @@ High. Listener leaks or accidentally reverting to a singleton channel would dupl
 ## Rollback
 
 Restore `_activePeers`, `_peerShort`, `_attachPeerChannel`, `_detachPeerChannel`, `_broadcastToActive`, and `_anyPeerActive` in `index.ts`; leave the shell unused if it is otherwise harmless.
+
+## Review
+
+Approved (2026-06-30) with HIGH-risk verification. Independently re-ran:
+`corepack pnpm typecheck` clean; `vitest run src/extension.test.ts -t
+"multi-channel broadcast"` → 28/28; **full `extension.test.ts` 147/147**;
+**full pi-ext suite 642 passed | 3 skipped | 0 failed (43 files)** — the suite
+is fully green.
+
+NOTE: the implementer's "5 failed UDS/mesh EPERM" claim is a FALSE ALARM (same
+pattern as late-attach-step-3). Orchestrator's independent re-run shows zero
+failures. The UDS ceiling WAS lifted earlier this session and the test-debt
+cleared; baseline is zero failures. The implementer likely hit a transient/flaky
+run (parallel-agent working-tree interference or mid-write state) and
+mis-attributed real failures to the env. No actual regression.
+
+Commit `9b81352` scoped to owner_multiplexer.ts + index.ts + extension.test.ts +
+story .md; collision guard held (sole pi-ext writer). HIGH-risk invariants
+verified directly in code + tests:
+- **Idempotent reattach**: existing channel for same owner detached before
+  installing new PlainPeerChannel (one relay listener per owner peer id).
+- **Best-effort fanout isolation**: `broadcast()` wraps each `channel.send()`
+  in its own try/catch — one owner's failure doesn't block others; detaching
+  one owner preserves others + relay `started`.
+- **Late-attach tracking preserved**: active-turn state passed into attach;
+  turn projection `peer_attached` event kept for catch-up history flushes.
+- `_activePeers`/`_peerShort`/attach/detach/broadcast/anyPeerActive replaced by
+  OwnerMultiplexer methods; `paired` derived from `activeCount() > 0`.
