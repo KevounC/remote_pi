@@ -150,6 +150,7 @@ const {
   _routeClientMessageFrom,
   _mapAgentMessagesToEvents,
   _setMessageBufferForTest,
+  _setTranscriptEventsForTest,
   _setSessionStartedAtForTest,
   _hasPendingReconnect,
   _getTranscriptEventsForTest,
@@ -4560,6 +4561,55 @@ describe("cumulative transcript event log", () => {
     expect(events[0]!.text).toBe("prompt 1");
     expect(events[2]!.text).toBe("prompt 2");
     expect(events[4]!.text).toBe("prompt 3");
+  });
+
+  test("event-log seam dedupes by eventId and session_sync scopes to active session", async () => {
+    await _pairForTest("peer-log-scope");
+    const sessionId = currentSessionIdFromSends();
+    const ts = 1_700_000_100_000;
+    _setSessionStartedAtForTest(ts);
+    _setTranscriptEventsForTest([
+      {
+        kind: "user_confirmed",
+        eventId: "dup-active",
+        sessionId,
+        ts: ts + 1,
+        clientMessageId: "active-1",
+        text: "kept once",
+      },
+      {
+        kind: "user_confirmed",
+        eventId: "dup-active",
+        sessionId,
+        ts: ts + 2,
+        clientMessageId: "active-dup",
+        text: "duplicate dropped",
+      },
+      {
+        kind: "user_confirmed",
+        eventId: "other-session",
+        sessionId: "old-session",
+        ts: ts + 3,
+        clientMessageId: "old-1",
+        text: "old session hidden",
+      },
+    ]);
+
+    expect(_getTranscriptEventsForTest()).toHaveLength(2);
+
+    const sendsBefore = relayRef.current!.send.mock.calls.length;
+    routeClientMessage(
+      { type: "session_sync", id: "scope-1", session_id: sessionId },
+      { abort: () => undefined },
+    );
+
+    const h = relayRef.current!.send.mock.calls.slice(sendsBefore)
+      .map((c) => c[0] as string)
+      .map(decodeSentCt)
+      .find((d) => d.inner.type === "session_history")!;
+    const events = h.inner["events"] as Array<{ id: string; text: string }>;
+    expect(events).toEqual([{ ts: ts + 1, type: "user_input", id: "active-1", text: "kept once" }]);
+    expect(h.inner["truncated"]).toBe(false);
   });
 
   test("mixed sources (extension + interactive) all land in transcript events ordered by ts", async () => {

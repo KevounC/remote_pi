@@ -1206,13 +1206,13 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     _owners.broadcast(msg);
   });
 
-  // Cumulative session buffer fed via `message_end`, which fires once per
-  // persisted message (user, assistant, toolResult) — same hook the SDK uses
-  // to persist to sessionManager (see agent-session.js:298-309). Pushing here
-  // accumulates the whole session over time, so session_sync can replay every
-  // turn — including turns initiated from the Pi terminal (source:"interactive")
-  // or RPC. Previous impl overwrote on `agent_end` and lost everything but the
-  // last turn (see diagnostics 14, 15).
+  // Cumulative transcript event log is fed via `message_end`, which fires once
+  // per persisted message (user, assistant, toolResult) — same hook the SDK uses
+  // to persist to sessionManager (see agent-session.js:298-309). Appending typed
+  // transcript events here accumulates the whole session over time, so
+  // session_sync can replay every turn — including turns initiated from the Pi
+  // terminal (source:"interactive") or RPC. Previous impl overwrote on
+  // `agent_end` and lost everything but the last turn (see diagnostics 14, 15).
   pi.on("message_end", (event) => {
     const m = event?.message as { role?: string; stopReason?: string; errorMessage?: string } | undefined;
     if (!m) return;
@@ -1225,12 +1225,24 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     // assistant message with stopReason "error" + an `errorMessage` (pi-ai).
     // `error` is an existing ServerMessage the app already renders — no
     // protocol/app change. `in_reply_to` ties it to the turn the app awaits.
-    if (m.role === "assistant" && m.stopReason === "error" && _owners.activeCount() > 0) {
+    if (m.role === "assistant" && m.stopReason === "error") {
       const message = typeof m.errorMessage === "string" && m.errorMessage
         ? m.errorMessage
         : "Provider error";
       const replyTo = _activeReplyTarget();
+      const sessionId = _currentRemoteSessionId();
+      const ts = Date.now();
+      _appendTranscriptEvent({
+        kind: "provider_error",
+        eventId: deterministicTranscriptEventId(sessionId, "provider_error", replyTo ?? String(ts)),
+        sessionId,
+        ts,
+        ...(replyTo ? { replyTo } : {}),
+        code: "provider_error",
+        message,
+      });
       _applyTurnAndPublish({ type: "provider_error", turnId: replyTo });
+      if (_owners.activeCount() === 0) return;
       const errMsg: ServerMessage = _withCurrentSession(replyTo
         ? { type: "error", in_reply_to: replyTo, code: "provider_error", message }
         : { type: "error", code: "provider_error", message });
@@ -1239,11 +1251,19 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   });
 
   pi.on("agent_end", () => {
-    // Buffer is fed by `message_end`; here we only finalize the outbound
-    // turn signal to every connected owner. No buffer mutation.
+    // Message content is fed by `message_end`; here we record the terminal
+    // assistant_done boundary and finalize the outbound turn signal.
     const before = _turnProjection();
     const finishedTurnId = before.replyTo ?? before.activeTurnId;
     if (finishedTurnId === null) return;
+    const sessionId = _currentRemoteSessionId();
+    _appendTranscriptEvent({
+      kind: "assistant_done",
+      eventId: deterministicTranscriptEventId(sessionId, "assistant_done", finishedTurnId),
+      sessionId,
+      ts: Date.now(),
+      replyTo: finishedTurnId,
+    });
     _applyTurnAndPublish({ type: "agent_done" });
     if (_owners.activeCount() > 0) {
       _owners.broadcast(_withCurrentSession({ type: "agent_done", in_reply_to: finishedTurnId }));

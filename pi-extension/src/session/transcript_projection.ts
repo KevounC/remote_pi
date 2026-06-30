@@ -122,6 +122,7 @@ export function transcriptEventsToSessionHistory(
       case "user_failed":
       case "assistant_delta":
       case "assistant_done":
+      case "provider_error":
         break;
     }
   }

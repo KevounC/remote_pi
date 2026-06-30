@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-store-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-transcript-event-log-store
 depends_on: [epic-bold-transcript-event-log-store-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Replace pi-extension `_messageBuffer` with `TranscriptEventLog`
@@ -71,10 +71,22 @@ pi.on("message_end", (event) => {
 
 ## Acceptance Criteria
 
-- [ ] `_messageBuffer` is removed or reduced to a temporary SDK-message adapter with no projection responsibility.
-- [ ] `session_sync` output, limit/truncation, image replay, compaction replay, tool result stringification, and late-attach sync are preserved.
-- [ ] Reconnect preserves the transcript event log for the same session; session replacement does not replay old events into the new session id.
-- [ ] `corepack pnpm test -- extension.test.ts` and `corepack pnpm typecheck` pass or blockers are recorded.
+- [x] `_messageBuffer` is removed or reduced to a temporary SDK-message adapter with no projection responsibility.
+- [x] `session_sync` output, limit/truncation, image replay, compaction replay, tool result stringification, and late-attach sync are preserved.
+- [x] Reconnect preserves the transcript event log for the same session; session replacement does not replay old events into the new session id.
+- [x] `corepack pnpm test -- extension.test.ts` and `corepack pnpm typecheck` pass or blockers are recorded.
+
+## Implementation
+
+- Replaced projection-owned transcript storage with `TranscriptEventLog`, a process-local typed append-only log with event-id dedupe and session-scoped reads; `_messageBuffer` remains only as a legacy SDK-message test/compatibility adapter that populates transcript events.
+- Preserved `session_sync` wire shape and projection behavior for limit/truncation, image replay, compaction replay, tool result stringification, late-attach sync, reconnect preservation, and session-replacement reset.
+- Captured provider-error and `agent_done` boundaries as transcript events without projecting new public `session_history` wire variants.
+- Added coverage for direct transcript-event seam dedupe plus active-session scoping so old-session events do not replay into the current session.
+- Verification:
+  - `corepack pnpm typecheck` passed.
+  - `corepack pnpm build` passed.
+  - Full `corepack pnpm exec vitest run src/extension.test.ts`: 156 passed, 4 failed, 0 skipped in this file. The failures match the known false-alarm discriminator: `after a clean reset, connect works again (flag is per-instance, not sticky)`, `join emits remote-pi:name-assigned with requested + assigned + changed`, `rename:<name> renames live (broker re-register + relay swap), process/session survive`, `a second same-name agent joins as <name>#2 instead of being refused`.
+  - Targeted transcript/session-sync run `corepack pnpm exec vitest run src/extension.test.ts -t "session_sync|cumulative transcript event log|successful reconnect preserves session_id"`: 12 passed, 148 skipped.
 
 ## Rollback
 

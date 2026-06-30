@@ -9,6 +9,7 @@ import type { SdkSessionProjectionPort, WakeAgentResult } from "../extension/por
 import type { ActionCtx, ActionPi, SdkModelLike } from "../actions/handlers.js";
 import { RemoteSessionIssuer, type RemoteSessionId } from "./remote_session.js";
 import type { TranscriptEvent } from "./transcript_event.js";
+import { TranscriptEventLog } from "./transcript_event_log.js";
 import {
   initialTurnSnapshot,
   projectTurn,
@@ -19,7 +20,6 @@ import {
   type TurnSource,
 } from "./turn_state.js";
 import {
-  appendTranscriptEvent,
   deterministicTranscriptEventId,
   imagesFromContent,
   mapLegacyAgentMessagesToTranscriptEvents,
@@ -118,7 +118,7 @@ function recordArgs(value: unknown): Record<string, unknown> {
 export class SdkSessionProjection implements SdkSessionProjectionPort {
   private readonly issuer = new RemoteSessionIssuer();
   private sessionStartedAt: number | null = null;
-  private transcriptEvents: TranscriptEvent[] = [];
+  private readonly transcriptLog = new TranscriptEventLog();
   private readonly deliveredUserEventIds = new Map<string, { clientMessageId: string; eventId: string }[]>();
   private lastTranscriptUserId: string | null = null;
   private epoch = 0;
@@ -205,7 +205,7 @@ export class SdkSessionProjection implements SdkSessionProjectionPort {
   }
 
   appendTranscriptEvent(event: TranscriptEvent): void {
-    this.transcriptEvents = appendTranscriptEvent(this.transcriptEvents, event);
+    this.transcriptLog.append(event);
   }
 
   appendUserConfirmedTranscriptEvent(input: {
@@ -327,21 +327,21 @@ export class SdkSessionProjection implements SdkSessionProjectionPort {
   setLegacyMessageBufferForTest(msgs: unknown[]): void {
     this.clearTranscriptOnly();
     const sessionId = this.currentRemoteSessionId();
-    this.transcriptEvents = mapLegacyAgentMessagesToTranscriptEvents({
+    this.transcriptLog.replace(mapLegacyAgentMessagesToTranscriptEvents({
       sessionId,
       messages: msgs as LegacyAgentMessage[],
-    });
+    }));
     this.recomputeLastTranscriptUserId();
   }
 
   setTranscriptEventsForTest(events: TranscriptEvent[]): void {
     this.deliveredUserEventIds.clear();
-    this.transcriptEvents = [...events];
+    this.transcriptLog.replace(events);
     this.recomputeLastTranscriptUserId();
   }
 
   getTranscriptEventsForTest(): TranscriptEvent[] {
-    return [...this.transcriptEvents];
+    return [...this.transcriptLog.entries()];
   }
 
   buildSessionHistoryMessage(
@@ -352,9 +352,10 @@ export class SdkSessionProjection implements SdkSessionProjectionPort {
     const requested = limit ?? serverLimit;
     const effectiveLimit = Math.min(requested, serverLimit);
 
+    const sessionId = this.currentRemoteSessionId();
     const projection = projectSessionHistory({
-      sessionId: this.currentRemoteSessionId(),
-      events: this.transcriptEvents,
+      sessionId,
+      events: this.transcriptLog.forSession(sessionId),
       limit: effectiveLimit,
     });
 
@@ -666,13 +667,13 @@ export class SdkSessionProjection implements SdkSessionProjectionPort {
   }
 
   private clearTranscriptOnly(): void {
-    this.transcriptEvents = [];
+    this.transcriptLog.clear();
     this.deliveredUserEventIds.clear();
     this.lastTranscriptUserId = null;
   }
 
   private recomputeLastTranscriptUserId(): void {
-    const lastUser = [...this.transcriptEvents].reverse().find((event) =>
+    const lastUser = [...this.transcriptLog.entries()].reverse().find((event) =>
       event.kind === "user_confirmed" || event.kind === "user_submitted"
     );
     this.lastTranscriptUserId = lastUser?.clientMessageId ?? null;

@@ -62,6 +62,16 @@ export type TranscriptEvent =
       usage?: Usage;
     }
   | {
+      kind: "provider_error";
+      eventId: string;
+      sessionId: string;
+      ts: number;
+      turnId?: string;
+      replyTo?: string;
+      code: string;
+      message: string;
+    }
+  | {
       kind: "tool_requested";
       eventId: string;
       sessionId: string;
