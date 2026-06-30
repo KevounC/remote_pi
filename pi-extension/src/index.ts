@@ -321,10 +321,9 @@ let _currentModel: string | undefined = undefined;  // last-known model name
 let _currentThinking: ThinkingLevel | undefined = undefined;  // last-known thinking level
 
 // ── Agent-network session (plano 19) ──────────────────────────────────────────
-// MeshNode owns both the local UDS mesh (SessionPeer) and the optional
-// cross-PC relay bridge (BrokerRemote + PiForwardClient). The bridge is
-// attached via `_meshNode.attachBridge()` once the relay WS is up and this
-// Pi is the leader; MeshNode re-attaches it across UDS failovers.
+// MeshNode owns the local UDS mesh plus BrokerRemote/PiForwardClient internals.
+// RelayTransport owns when the app relay is handed to MeshNode for cross-PC
+// bridge attach/detach during relay start, reconnect, close, and stop.
 let _meshNode: MeshNode | null = null;
 // Set true by the `session_shutdown` handler. The daemon auto-init defers the
 // connect (`setTimeout(_cmdRoot, 0)`) and connecting is async, so a shutdown can
@@ -395,21 +394,13 @@ function _publishRoomMetaPatch(
 
 // ── Cross-PC mesh wiring (plan/25 Wave B/C) ───────────────────────────────────
 
-/**
- * Hand the live relay to MeshNode so it can bring up the cross-PC bridge
- * (BrokerRemote + sibling discovery) — but only when this Pi is the leader
- * (broker host). MeshNode is idempotent + re-attaches across UDS failovers,
- * so this is safe to call from `_cmdStart`, relay reconnect, or SelfRevoke.
- * No-op until the relay WS + cached identity are both present.
- */
+/** Compatibility shim for command-surface call sites that discover the local
+ * mesh after relay start. RelayTransport owns the actual bridge lifecycle. */
 function _attachBridgeIfReady(): void {
-  const keypair = _pairingCoordinator.currentKeypair();
-  const relay = _relayTransport.currentRelayForOwnerChannels();
-  const relayUrl = _relayTransport.currentRelayUrl();
-  if (!_meshNode || !relay || !relayUrl || !keypair) return;
-  void _meshNode
-    .attachBridge({ relay, relayUrl, keypair })
-    .catch(() => { /* best-effort — UDS mesh works regardless */ });
+  void _relayTransport.attachCrossPcBridge({
+    meshNode: () => _meshNode,
+    keypair: () => _pairingCoordinator.currentKeypair() ?? null,
+  });
 }
 
 type RemotePiUi = {
@@ -1016,9 +1007,6 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
   // URL if the user changed it via /remote-pi relay url).
   _pairingCoordinator.stopSelfRevoke();
 
-  // Cross-PC routing relies on the relay being up; tear it down here too.
-  _meshNode?.detachBridge();
-
   // Preserve _sessionStartedAt + _transcriptEvents across stop/start cycles.
   // The Pi agent session outlives the relay connection — `message_end` keeps
   // firing for terminal turns even while idle, and the transcript event log
@@ -1051,10 +1039,6 @@ function _onRelayClose(): void {
   // session history or reconnect-owned state.
   _owners.detachAllForRelayDrop();
   if (!_turnProjection().working) _resetTurnSnapshot();
-
-  // Cross-PC routing relies on the relay; bring it down. The transport invokes
-  // the onConnected hook after reconnect, which re-installs the bridge.
-  _meshNode?.detachBridge();
 
   _state = "started";
   _refreshFooter();
@@ -1506,7 +1490,6 @@ function createIndexDeps(): LegacyIndexDeps {
         onUnexpectedClose: () => _onRelayClose(),
         onConnected: (relay) => {
           _pairingCoordinator.listenOn(relay);
-          _attachBridgeIfReady();
         },
       }),
       stop: (reason) => { _goIdle(reason); },
@@ -1519,8 +1502,8 @@ function createIndexDeps(): LegacyIndexDeps {
         });
       },
       onOuterMessage: (handler) => _relayTransport.onOuterMessage(handler),
-      attachCrossPcBridge: async () => { _attachBridgeIfReady(); },
-      detachCrossPcBridge: () => { _meshNode?.detachBridge(); },
+      attachCrossPcBridge: (input) => _relayTransport.attachCrossPcBridge(input),
+      detachCrossPcBridge: () => { _relayTransport.detachCrossPcBridge(); },
       relay: () => _relayTransport.currentRelayForOwnerChannels(),
       setRelay: () => { /* relay ownership lives in relay_transport.ts */ },
     },
@@ -1816,7 +1799,6 @@ async function _startRelayViaTransport(ctx: Pick<ExtensionContext, "ui" | "cwd">
       onUnexpectedClose: () => _onRelayClose(),
       onConnected: (relay) => {
         _pairingCoordinator.listenOn(relay);
-        _attachBridgeIfReady();
       },
     });
   } catch (err) {

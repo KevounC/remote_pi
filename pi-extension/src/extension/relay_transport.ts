@@ -131,6 +131,7 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
 
   function onRelayClose(): void {
     if (stopping || !relayUrl) return;
+    detachCrossPcBridge();
     if (relay) {
       unbindRelay(relay);
       relay = null;
@@ -205,6 +206,9 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
     reconnectAttempt = 0;
     bindRelay(nextRelay);
     if (onConnected) void onConnected(nextRelay);
+    if (crossPcBridgeInput) {
+      void attachCrossPcBridge(crossPcBridgeInput);
+    }
     emitRelayState();
     return { relay: nextRelay, roomId: input.roomId };
   }
@@ -213,13 +217,13 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
     stopping = true;
     clearReconnectTimer();
     reconnectAttempt = 0;
+    detachCrossPcBridge();
     const current = relay;
     relay = null;
     relayUrl = null;
     keypair = null;
     roomId = null;
     roomMeta = null;
-    crossPcBridgeInput = null;
     onUnexpectedClose = null;
     onConnected = null;
     if (current) {
@@ -248,10 +252,29 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
 
   async function attachCrossPcBridge(input: CrossPcBridgeInput): Promise<void> {
     crossPcBridgeInput = input;
+    const currentRelay = relay;
+    const currentRelayUrl = relayUrl;
+    const meshNode = input.meshNode();
+    const currentKeypair = input.keypair();
+    if (!meshNode || !currentRelay || !currentRelayUrl || !currentKeypair) return;
+    try {
+      await meshNode.attachBridge({
+        relay: currentRelay,
+        relayUrl: currentRelayUrl,
+        keypair: currentKeypair,
+      });
+    } catch {
+      // Best-effort: local UDS mesh and app pairing continue without the
+      // cross-PC relay bridge.
+      return;
+    }
+    if (relay !== currentRelay || relayUrl !== currentRelayUrl || stopping || isDisposed?.()) {
+      meshNode.detachBridge();
+    }
   }
 
   function detachCrossPcBridge(): void {
-    crossPcBridgeInput = null;
+    crossPcBridgeInput?.meshNode()?.detachBridge();
   }
 
   return {

@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-relay-transport-module-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-relay-transport-module
 depends_on: [epic-bold-split-pi-extension-index-relay-transport-module-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Move cross-PC relay bridge attach/detach ownership behind RelayTransportPort
@@ -83,3 +83,10 @@ cross-PC agent routing after relay reconnect.
 Restore `_attachBridgeIfReady()` in `index.ts` and direct `_meshNode?.detachBridge()`
 calls in `_goIdle` / `_onRelayClose`; leave the transport module's bridge methods
 unused.
+
+## Implementation
+- Moved cross-PC bridge lifecycle ownership into `pi-extension/src/extension/relay_transport.ts`: `attachCrossPcBridge()` now captures provider functions for the current mesh node/keypair, attaches only when relay + relay URL + keypair are current, preserves best-effort failure handling, and re-checks the relay instance after `await` before allowing the bridge state to stand.
+- `RelayTransportPort.start()` and reconnect success re-attach after the relay is current; unexpected relay close and `stop()` detach before relay state publication. `_attachBridgeIfReady()` in `index.ts` is now a compatibility shim into the relay transport port, and direct `_meshNode?.detachBridge()` calls were removed from relay close/idle paths.
+- `MeshNode`, `session/bridge.ts`, and `transport/pi_forward_client.ts` were not changed, preserving the injected-relay ownership contract.
+- Added extension tests covering relay-drop detach and reconnect re-attach using a fake mesh node through `RelayTransportPort`.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; targeted bridge tests passed (`src/extension.test.ts --testNamePattern "relay drop detaches|successful reconnect re-attaches"`: 2 passed, 150 skipped); requested targeted suite reported `180 passed, 4 failed` across `src/extension.test.ts` + `src/session/broker_remote.test.ts`, where the failures match the known false-alarm mesh/cwd-lock/name-assigned/rename group described in the task.

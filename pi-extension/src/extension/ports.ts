@@ -39,10 +39,14 @@ export interface RelayStartResult {
   roomId?: string;
 }
 
+export interface CrossPcBridgeMeshNode {
+  attachBridge(opts: { relay: RelayClient; relayUrl: string; keypair?: Ed25519Keypair }): Promise<void>;
+  detachBridge(): void;
+}
+
 export interface CrossPcBridgeInput {
-  relay: RelayClient;
-  roomId: string;
-  localPcLabel: string;
+  meshNode(): CrossPcBridgeMeshNode | null;
+  keypair(): Ed25519Keypair | null;
 }
 
 export interface RelayTransportPort {

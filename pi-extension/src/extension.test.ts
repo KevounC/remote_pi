@@ -172,6 +172,7 @@ const {
 } = await import("./index.js");
 const { runStandaloneRemotePiCli } = await import("./extension/command_surface/standalone_cli.js");
 const { acquireCwdLock } = await import("./session/cwd_lock.js");
+const { createRelayTransportPort } = await import("./extension/relay_transport.js");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -3819,6 +3820,7 @@ describe("relay reconnect", () => {
     _tokenStatus = "ok";
     relayRef.current = null;
     relayInstances.length = 0;
+    _setDisposedForTest(false);
     _defaultConnectImpl = async () => undefined;
     const qr = await import("./pairing/qr.js");
     (qr.qrSession.consumeToken as unknown as ReturnType<typeof vi.fn>).mockImplementation(
@@ -3851,6 +3853,75 @@ describe("relay reconnect", () => {
       expect(relayInstances).toHaveLength(2);
       expect(_hasPendingReconnect()).toBe(false);
       expect(_getState()).toBe("started");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("relay drop detaches the cross-PC bridge before reconnecting", async () => {
+    relayInstances.length = 0;
+    const keypair = { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) };
+    const meshNode = {
+      attachBridge: vi.fn().mockResolvedValue(undefined),
+      detachBridge: vi.fn(),
+    };
+    const transport = createRelayTransportPort({
+      createRelay: () => new MockRelay() as never,
+      toWebSocketUrl: (url) => url,
+      backoffMs: () => 1_000,
+      now: () => Date.now(),
+      setTimer: (cb, ms) => setTimeout(cb, ms),
+      clearTimer: (timer) => clearTimeout(timer),
+      emitRelayState: vi.fn(),
+    });
+
+    await transport.attachCrossPcBridge({ meshNode: () => meshNode, keypair: () => keypair });
+    await transport.start({ relayUrl: "https://relay.example.test", keypair, roomId: "room-a", roomMeta: { name: "n", cwd: "c" } });
+    await vi.waitFor(() => expect(meshNode.attachBridge).toHaveBeenCalled());
+
+    relayInstances[0]!.emit("close");
+
+    expect(meshNode.detachBridge).toHaveBeenCalledTimes(1);
+    expect(transport.hasPendingReconnect()).toBe(true);
+    expect(transport.status()).toBe("reconnecting");
+    transport.stop("peer_stop");
+  });
+
+  test("successful reconnect re-attaches the cross-PC bridge when mesh is joined", async () => {
+    vi.useFakeTimers();
+    try {
+      relayInstances.length = 0;
+      const keypair = { publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) };
+      const meshNode = {
+        attachBridge: vi.fn().mockResolvedValue(undefined),
+        detachBridge: vi.fn(),
+      };
+      const transport = createRelayTransportPort({
+        createRelay: () => new MockRelay() as never,
+        toWebSocketUrl: (url) => url,
+        backoffMs: () => 1_000,
+        now: () => Date.now(),
+        setTimer: (cb, ms) => setTimeout(cb, ms),
+        clearTimer: (timer) => clearTimeout(timer),
+        emitRelayState: vi.fn(),
+      });
+
+      await transport.attachCrossPcBridge({ meshNode: () => meshNode, keypair: () => keypair });
+      await transport.start({ relayUrl: "https://relay.example.test", keypair, roomId: "room-a", roomMeta: { name: "n", cwd: "c" } });
+      await vi.waitFor(() => expect(meshNode.attachBridge).toHaveBeenCalled());
+      const attachCountBeforeDrop = meshNode.attachBridge.mock.calls.length;
+
+      relayInstances[0]!.emit("close");
+      expect(meshNode.detachBridge).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(relayInstances).toHaveLength(2);
+      await vi.waitFor(() => expect(meshNode.attachBridge.mock.calls.length).toBeGreaterThan(attachCountBeforeDrop));
+      expect(meshNode.attachBridge.mock.calls.at(-1)?.[0]?.relay).toBe(relayInstances[1]);
+      expect(transport.hasPendingReconnect()).toBe(false);
+      expect(transport.status()).toBe("connected");
+      transport.stop("peer_stop");
     } finally {
       vi.useRealTimers();
     }
