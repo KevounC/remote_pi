@@ -10,6 +10,15 @@ import type { ActionCtx, ActionPi, SdkModelLike } from "../actions/handlers.js";
 import { RemoteSessionIssuer, type RemoteSessionId } from "./remote_session.js";
 import type { TranscriptEvent } from "./transcript_event.js";
 import {
+  initialTurnSnapshot,
+  projectTurn,
+  reduceTurn,
+  type TurnEvent,
+  type TurnProjection,
+  type TurnSnapshot,
+  type TurnSource,
+} from "./turn_state.js";
+import {
   appendTranscriptEvent,
   deterministicTranscriptEventId,
   imagesFromContent,
@@ -49,6 +58,11 @@ export interface SdkSessionProjectionOutputs {
   lateAttachTargets(): readonly { peerId: string; channel: PeerChannel }[];
   handleClientMessage(sender: PeerChannel, message: ClientMessage): void | Promise<void>;
   onStaleMessageApi?(api: AgentMessageApi): void;
+}
+
+export interface SeededUserTurn {
+  seeded: boolean;
+  rollback(): void;
 }
 
 export interface SdkSessionProjectionOptions {
@@ -112,6 +126,7 @@ export class SdkSessionProjection implements SdkSessionProjectionPort {
   private eventCtx: ExtensionContext | null = null;
   private messageApi: AgentMessageApi | null = null;
   private actionApi: FreshActionApi | null = null;
+  private turn: TurnSnapshot = initialTurnSnapshot();
 
   constructor(private readonly opts: SdkSessionProjectionOptions) {}
 
@@ -412,6 +427,96 @@ export class SdkSessionProjection implements SdkSessionProjectionPort {
     this.opts.outputs.publishRoomMeta({ working });
   }
 
+  turnProjection(): TurnProjection {
+    return projectTurn(this.turn);
+  }
+
+  currentTurnIdForTest(): string | null {
+    return this.turnProjection().activeTurnId;
+  }
+
+  applyTurn(event: TurnEvent): TurnProjection {
+    const before = this.turnProjection();
+    this.turn = reduceTurn(this.turn, event);
+    const after = this.turnProjection();
+    this.publishTurnProjection(before, after);
+    return after;
+  }
+
+  resetTurnSnapshot(): void {
+    const before = this.turnProjection();
+    this.turn = initialTurnSnapshot();
+    this.publishTurnProjection(before, this.turnProjection());
+  }
+
+  recordOwnerAttached(peerId: string): void {
+    this.applyTurn({ type: "peer_attached", target: { kind: "owner", id: peerId } });
+  }
+
+  queuedMessageState(): Extract<ServerMessage, { type: "queued_message_state" }> {
+    const queued = this.turnProjection().queuedMessage;
+    return queued
+      ? this.currentSessionMessage({ type: "queued_message_state", id: queued.id, text: queued.text })
+      : this.currentSessionMessage({ type: "queued_message_state" });
+  }
+
+  broadcastQueuedMessageState(): void {
+    this.opts.outputs.broadcast(this.queuedMessageState());
+  }
+
+  seedUserMessageTurn(input: {
+    turnId: string;
+    source: Exclude<TurnSource, "compaction">;
+    shouldSteer: boolean;
+  }): SeededUserTurn {
+    const previous = this.turn;
+    const seeded = !input.shouldSteer || this.turnProjection().activeTurnId === null;
+    if (seeded) {
+      this.applyTurn({
+        type: "user_message_accepted",
+        turnId: input.turnId,
+        replyTo: input.turnId,
+        source: input.source,
+      });
+    }
+    return {
+      seeded,
+      rollback: () => {
+        if (!seeded) return;
+        const before = this.turnProjection();
+        this.turn = previous;
+        this.publishTurnProjection(before, this.turnProjection());
+      },
+    };
+  }
+
+  maybeDrainQueuedMessage(
+    deliver: (message: Extract<ClientMessage, { type: "user_message" }>) => void | Promise<void>,
+  ): void {
+    const projection = this.turnProjection();
+    const queued = projection.queuedMessage;
+    if (!queued || !projection.canDrainQueuedMessage) return;
+    this.applyTurn({ type: "queued_message_clear" });
+    this.broadcastQueuedMessageState();
+    void deliver(this.currentSessionMessage({ type: "user_message", id: queued.id, text: queued.text }));
+  }
+
+  maybeSendLateAttachSessionSync(
+    buildHistory: (inReplyTo: string) => Extract<ServerMessage, { type: "session_history" }>,
+  ): void {
+    const projection = this.turnProjection();
+    if (!projection.canFlushLateAttachSync || projection.awaitingSyncTurnId === null) return;
+    const history = buildHistory(projection.awaitingSyncTurnId);
+    const activeTargets = new Map(this.opts.outputs.lateAttachTargets().map((entry) => [entry.peerId, entry.channel]));
+    for (const target of projection.lateAttachSyncTargets) {
+      if (target.kind !== "owner") continue;
+      const channel = activeTargets.get(target.id);
+      if (!channel) continue;
+      try { this.opts.outputs.sendTo(channel, history); } catch { /* best-effort per late attach */ }
+    }
+    this.applyTurn({ type: "flush_late_attach_sync" });
+  }
+
   handleClientMessage(sender: PeerChannel, message: ClientMessage): void | Promise<void> {
     return this.opts.outputs.handleClientMessage(sender, message);
   }
@@ -457,6 +562,11 @@ export class SdkSessionProjection implements SdkSessionProjectionPort {
       this.opts.outputs.onStaleMessageApi?.(value as AgentMessageApi);
     }
     if (value === this.actionApi) this.actionApi = null;
+  }
+
+  private publishTurnProjection(before: TurnProjection, after: TurnProjection): void {
+    if (before.working === after.working) return;
+    this.publishWorking(after.working);
   }
 
   private bindCapabilities(value: unknown): void {

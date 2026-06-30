@@ -99,14 +99,7 @@ import {
   type RelayStateSnapshot,
 } from "./extension/relay_transport.js";
 import { validateClientSession } from "./session/session_gate.js";
-import {
-  initialTurnSnapshot,
-  projectTurn,
-  reduceTurn,
-  type TurnEvent,
-  type TurnProjection,
-  type TurnSnapshot,
-} from "./session/turn_state.js";
+import type { TurnEvent, TurnProjection } from "./session/turn_state.js";
 import {
   handleSessionCompact,
   handleSessionNew,
@@ -214,7 +207,7 @@ const _owners: OwnerMultiplexer = new OwnerMultiplexer({
     message: "Peer not paired — re-scan QR",
   }),
   onOwnerAttached: ({ peerId, peerName, activeCount }) => {
-    _applyTurnAndPublish({ type: "peer_attached", target: { kind: "owner", id: peerId } });
+    _sdkSessionProjection.recordOwnerAttached(peerId);
     _notify(
       `[remote-pi] Owner attached: peer=${peerId.slice(0, 8)}, name=${peerName} ` +
       `(${activeCount} active)`,
@@ -331,7 +324,7 @@ const _pairingCoordinator = new PairingCoordinator({
   ownerActiveCount: () => _owners.activeCount(),
   refreshPairingsCache: () => { void _owners.refreshPairingsCache(); },
   onOwnerAttached: ({ peerId, peerName, activeCount }) => {
-    _applyTurnAndPublish({ type: "peer_attached", target: { kind: "owner", id: peerId } });
+    _sdkSessionProjection.recordOwnerAttached(peerId);
     _notify(
       `[remote-pi] Owner attached: peer=${peerId.slice(0, 8)}, name=${peerName} ` +
       `(${activeCount} active)`,
@@ -732,28 +725,16 @@ function _persistModelDefault(provider: string, modelId: string): void {
   } catch { /* best-effort — model change already applied live */ }
 }
 
-// Per-turn messaging state
-let _turn: TurnSnapshot = initialTurnSnapshot();
-
 function _turnProjection(): TurnProjection {
-  return projectTurn(_turn);
-}
-
-function _publishTurnProjection(before: TurnProjection, after: TurnProjection): void {
-  if (before.working === after.working) return;
-  _publishWorking(after.working);
+  return _sdkSessionProjection.turnProjection();
 }
 
 function _applyTurnAndPublish(event: TurnEvent): TurnProjection {
-  const before = _turnProjection();
-  _turn = reduceTurn(_turn, event);
-  const after = _turnProjection();
-  _publishTurnProjection(before, after);
-  return after;
+  return _sdkSessionProjection.applyTurn(event);
 }
 
 function _resetTurnSnapshot(): void {
-  _turn = initialTurnSnapshot();
+  _sdkSessionProjection.resetTurnSnapshot();
 }
 
 function _activeReplyTarget(): string | null {
@@ -803,15 +784,12 @@ export const _hasActivePeerForTest = (appPeerIdStd: string): boolean => ownerHar
 
 // ── Multi-channel helpers ─────────────────────────────────────────────────────
 
-function _queuedMessageState(): Extract<ServerMessage, { type: "queued_message_state" }> {
-  const queued = _turnProjection().queuedMessage;
-  return queued
-    ? _withCurrentSession({ type: "queued_message_state", id: queued.id, text: queued.text })
-    : _withCurrentSession({ type: "queued_message_state" });
+function _currentQueueStateMessage(): Extract<ServerMessage, { type: "queued_message_state" }> {
+  return _sdkSessionProjection.queuedMessageState();
 }
 
 function _broadcastQueuedMessageState(): void {
-  _owners.broadcast(_queuedMessageState());
+  _sdkSessionProjection.broadcastQueuedMessageState();
 }
 
 // ── Display-name helpers ──────────────────────────────────────────────────────
@@ -1382,7 +1360,7 @@ function createIndexDeps(): LegacyIndexDeps {
           roomId: input.roomId ?? _myRoomId ?? undefined,
           turnActive: _turnProjection().working,
         });
-        _applyTurnAndPublish({ type: "peer_attached", target: { kind: "owner", id: input.peerId } });
+        _sdkSessionProjection.recordOwnerAttached(input.peerId);
         return channel;
       },
       detach: (peerId, reason) => { _owners.detach(peerId, reason); },
@@ -1937,11 +1915,11 @@ async function _deliverUserMessage(
   // room is already working. Tell the SDK this is steering; otherwise it
   // rejects the message as a normal busy prompt. Seed the projection so
   // later chunks/done have a target instead of being dropped.
-  const previousTurn = _turn;
-  const seededTurnId = !shouldSteer || _turnProjection().activeTurnId === null;
-  if (seededTurnId) {
-    _applyTurnAndPublish({ type: "user_message_accepted", turnId: msg.id, replyTo: msg.id, source: mode === "normal" ? "queued" : "app" });
-  }
+  const turnSeed = _sdkSessionProjection.seedUserMessageTurn({
+    turnId: msg.id,
+    source: mode === "normal" ? "queued" : "app",
+    shouldSteer,
+  });
   const content: Parameters<ExtensionAPI["sendUserMessage"]>[0] =
     msg.images && msg.images.length > 0
       ? [
@@ -1957,12 +1935,8 @@ async function _deliverUserMessage(
     shouldSteer ? "steer" : undefined,
   );
   if (!wake.ok) {
-    if (seededTurnId) {
-      const before = _turnProjection();
-      _turn = previousTurn;
-      _publishTurnProjection(before, _turnProjection());
-    }
-    if (seededTurnId) {
+    turnSeed.rollback();
+    if (turnSeed.seeded) {
       _applyTurnAndPublish({ type: "delivery_error", turnId: msg.id });
     }
     _sendDeliveryError(sender, msg.id, wake.detail ?? "agent session not bound yet");
@@ -1991,25 +1965,11 @@ async function _deliverUserMessage(
 }
 
 function _maybeDrainQueuedMessage(): void {
-  const projection = _turnProjection();
-  const queued = projection.queuedMessage;
-  if (!queued || !projection.canDrainQueuedMessage) return;
-  _applyTurnAndPublish({ type: "queued_message_clear" });
-  _broadcastQueuedMessageState();
-  void _deliverUserMessage(_withCurrentSession({ type: "user_message", id: queued.id, text: queued.text }), null, "normal");
+  _sdkSessionProjection.maybeDrainQueuedMessage((queued) => _deliverUserMessage(queued, null, "normal"));
 }
 
 function _maybeSendLateAttachSessionSync(): void {
-  const projection = _turnProjection();
-  if (!projection.canFlushLateAttachSync || projection.awaitingSyncTurnId === null) return;
-  const history = _buildSessionHistoryMessage(projection.awaitingSyncTurnId, undefined);
-  for (const target of projection.lateAttachSyncTargets) {
-    if (target.kind !== "owner") continue;
-    const channel = _owners.get(target.id);
-    if (!channel) continue;
-    try { channel.send(history); } catch { /* best-effort per late attach */ }
-  }
-  _applyTurnAndPublish({ type: "flush_late_attach_sync" });
+  _sdkSessionProjection.maybeSendLateAttachSessionSync((turnId) => _buildSessionHistoryMessage(turnId, undefined));
 }
 
 export function _routeClientMessageFrom(
@@ -2207,7 +2167,7 @@ function _handleSessionSync(
   sender: PlainPeerChannel,
   msg: Extract<ClientMessage, { type: "session_sync" }>,
 ): void {
-  sender.send(_queuedMessageState());
+  sender.send(_currentQueueStateMessage());
 
   sender.send(_buildSessionHistoryMessage(msg.id, msg.limit));
 }
