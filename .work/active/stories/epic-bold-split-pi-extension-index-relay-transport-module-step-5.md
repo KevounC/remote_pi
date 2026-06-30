@@ -90,3 +90,18 @@ paired apps after reconnect.
 Restore direct `_installAutoListener(relay)` and `new PlainPeerChannel(relay, ...)`
 construction in `index.ts`. Because the wire format is unchanged, rollback is a
 wiring-only revert.
+
+
+## Review correction (2026-06-30, later)
+
+The orchestrator's test-fixture alignment in the original review commit `b95d828`
+(reverted in `ea94508`) was WRONG. It was based on a transient false observation
+during debugging (uncommitted working-tree state showed listener-count=2; the
+committed code consistently produces count=1 — the cross-PC bridge does NOT
+attach a PiForwardClient message-listener on connect in the committed state).
+The ORIGINAL test fixtures (`toBe(1)` post-connect, `toBe(2)` post-pair, etc.)
+were correct all along. Reverted the alignment; suite green at 655/658.
+
+Net: the agent's idempotent `attachCrossPcBridge` fix (commit `ebac18e`) stands
+correct — it eliminated the duplicate-listener bug. The orchestrator's fixture
+alignment was the error, now corrected. Story remains `done`.
