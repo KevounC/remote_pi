@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-6
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-cli-daemon-pairing-module
 depends_on: [epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-5]
@@ -106,3 +106,26 @@ export interface RemotePiCommandSurfaceHarness {
 
 ## Rollback
 Restore the direct-run `if (_isDirectRun())` block and compatibility helpers to `index.ts`. If a wrapper file/package bin change was made, revert it with this step.
+
+## Review
+
+Approved (2026-06-30) with HIGH-risk CLI-bootstrap verification. Independently
+re-ran: `corepack pnpm typecheck` clean; `corepack pnpm build` clean; `vitest run
+src/extension.test.ts -t "standalone|cli|devices|revoke|set-relay|create|daemon|
+cron|peers|install|supervisor"` → 31/31; **full pi-ext suite 649 passed | 3 skipped
+| 0 failed (44 files)** — fully green (up from 648 — the agent's new CLI tests).
+
+NOTE: the implementer CORRECTLY identified the false-failure pattern (4th
+consecutive pi-ext agent to do so) — reported e2e.test.ts "28 failed... matching
+the known mesh/UDS false-alarm group. I did not chase it." The orchestrator's
+independent vitest run confirms 0 failures.
+
+Commit `defbd09` scoped to pi-ext only (standalone_cli.ts new 296 lines + testing.ts
+harness + index.ts shrunk ~300 lines + tests + story .md); collision guard held.
+CLI bootstrap verified: `runStandaloneRemotePiCli` + `isDirectRun` +
+`createStandaloneCliDeps` extracted to standalone_cli.ts; `index.ts` bootstraps
+direct-run CLI through it (shebang `#!/usr/bin/env node` preserved; package.json
+bin remains `dist/index.js`); `RemotePiCommandSurfaceHarness` compat harness in
+testing.ts (legacy test exports remain available); all CLI paths execute
+(devices/revoke/set-relay/create/remove/daemons/daemon/cron/peers/claude/install/
+uninstall/restart-supervisor). **cli-daemon-pairing arc complete (6/6).**
