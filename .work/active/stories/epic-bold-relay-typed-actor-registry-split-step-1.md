@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-registry-split-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-relay-typed-actor-registry-split
 depends_on: [epic-bold-relay-typed-actor-frame-dispatch, epic-bold-relay-typed-actor-control-handlers]
@@ -81,3 +81,20 @@ Medium. The sender map is hot path connection state; mistakes can break routing 
 ## Rollback
 
 Inline `ConnectionRegistry` back into `PeerRegistry` and restore the tuple `ConnEntry` map. No wire behavior or persisted state changes are involved.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: relay `cargo fmt --check` clean;
+`cargo clippy -- -D warnings` clean; `cargo test` 148 passed / 0 failed (pure
+refactor — existing registry/presence/rooms/integration/cross-PC coverage is
+the proof). Commit `a75b0f6` scoped to peers/connections.rs (new) + peers/mod.rs
++ peers/registry.rs + story .md; relay-only, no generated files.
+
+`ConnectionRegistry` + `ConnectionEntry` extracted to connections.rs (next_conn
++ senders map); `PeerRegistry` remains the public facade — all APIs preserved
+(register/unregister/forward/forward_to_peer/forward_to_room/rooms_of/
+backfill_presence/update_room_meta delegate through ConnectionRegistry). The
+insert/remove mutation-facts design (was_offline_before/is_first_in_room/
+room_emptied/peer_offlined) lets the facade publish lifecycle events without
+rescanning — clean separation. room_meta stays on ConnectionEntry for now
+(room metadata store extraction deferred to next story, as noted).
