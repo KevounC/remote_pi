@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-6
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app, cockpit]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-5]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 6: Add cross-surface projection fixtures and convergence checks
@@ -68,3 +68,11 @@ Low. Fixture churn is the main risk; it can be controlled by keeping fixtures sm
 ## Rollback
 
 Remove the new fixtures/tests. Runtime projection code from earlier steps remains in place.
+
+## Implementation
+
+- Fixtures added: `.orchestration/contracts/transcript_projection_fixtures.json` with `optimistic-send-authoritative-replay` and `convergence-negative-cases`. The fixture notes identify `optimistic-send-authoritative-replay` as the first candidate for generated-protocol schema coverage because it spans shared event kinds, required `session_id`, client-message correlation, streaming, tool, completion, and replay idempotence shape.
+- Surfaces consuming fixtures this wave: app (`app/test/domain/transcript/transcript_projection_test.dart`) and cockpit (`cockpit/test/data/rpc_data_mapper_transcript_projection_test.dart`). Both read the shared fixture file and compare normalized projected messages/turn state against the fixture expectations.
+- Pi-extension deferral: `pi-extension/src/extension.test.ts` fixture consumption was intentionally not implemented in this wave because `turn-state-machine-late-attach-step-3` owns pi-extension tests, and this wave was instructed not to edit `pi-extension/src/extension.test.ts` or `pi-extension/src/session/mesh_node.test.ts`.
+- Convergence cases covered: app fixture tests cover foreign `session_id` filtering, duplicate replay idempotence, failed send clearing `working`, late confirm after timeout, assistant done clearing streaming after a cancellation-style failed send, compaction system row projection, reconnect-style replay, and idle turn convergence. Cockpit fixture tests cover the shared authoritative replay projection plus failed-send and assistant-done non-working convergence; cockpit currently has no projected system-row message type, so the compaction system-row expectation remains pinned by the app fixture and noted for generated-protocol/future cockpit schema coverage.
+- Tests run: `~/projects/remote_pi/.tools/flutter/bin/flutter pub get` and `~/projects/remote_pi/.tools/flutter/bin/flutter test test/domain/transcript/` from `app/`; `~/projects/remote_pi/.tools/flutter/bin/flutter pub get --offline` and `~/projects/remote_pi/.tools/flutter/bin/flutter test` from `cockpit/`.

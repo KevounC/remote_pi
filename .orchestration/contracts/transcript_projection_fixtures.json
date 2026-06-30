@@ -1,0 +1,219 @@
+{
+  "schema_version": 1,
+  "notes": [
+    "Content-only transcript projection fixtures for app, cockpit, and future pi-extension parity tests.",
+    "The optimistic-send-authoritative-replay fixture should become generated-protocol schema coverage first because it exercises the shared event kind names, required session_id, client message id correlation, streaming, tool, completion, and replay idempotence shape."
+  ],
+  "fixtures": [
+    {
+      "name": "optimistic-send-authoritative-replay",
+      "session_id": "sess-fixture",
+      "events": [
+        {
+          "kind": "user_submitted",
+          "event_id": "local:submit:cli_1",
+          "session_id": "sess-fixture",
+          "clientMessageId": "cli_1",
+          "text": "hello"
+        },
+        {
+          "kind": "user_confirmed",
+          "event_id": "server:user:cli_1",
+          "session_id": "sess-fixture",
+          "clientMessageId": "cli_1",
+          "text": "hello"
+        },
+        {
+          "kind": "tool_requested",
+          "event_id": "server:tool:request:tool_1",
+          "session_id": "sess-fixture",
+          "toolCallId": "tool_1",
+          "tool": "read_file",
+          "args": {
+            "path": "README.md"
+          }
+        },
+        {
+          "kind": "tool_finished",
+          "event_id": "server:tool:finish:tool_1",
+          "session_id": "sess-fixture",
+          "toolCallId": "tool_1",
+          "result": "ok"
+        },
+        {
+          "kind": "assistant_delta",
+          "event_id": "server:delta:cli_1:1",
+          "session_id": "sess-fixture",
+          "replyTo": "cli_1",
+          "delta": "don"
+        },
+        {
+          "kind": "assistant_delta",
+          "event_id": "server:delta:cli_1:2",
+          "session_id": "sess-fixture",
+          "replyTo": "cli_1",
+          "delta": "e"
+        },
+        {
+          "kind": "assistant_committed",
+          "event_id": "server:assistant:cli_1",
+          "session_id": "sess-fixture",
+          "messageId": "asst_1",
+          "replyTo": "cli_1",
+          "text": "done"
+        },
+        {
+          "kind": "assistant_done",
+          "event_id": "server:done:cli_1",
+          "session_id": "sess-fixture",
+          "replyTo": "cli_1"
+        },
+        {
+          "kind": "user_confirmed",
+          "event_id": "server:user:foreign_session",
+          "session_id": "sess-foreign",
+          "clientMessageId": "foreign_1",
+          "text": "ignore me"
+        },
+        {
+          "kind": "assistant_done",
+          "event_id": "server:done:foreign_session",
+          "session_id": "sess-foreign",
+          "replyTo": "foreign_1"
+        },
+        {
+          "kind": "assistant_done",
+          "event_id": "server:done:cli_1",
+          "session_id": "sess-fixture",
+          "replyTo": "cli_1"
+        }
+      ],
+      "projection": {
+        "messages": [
+          {
+            "role": "user",
+            "id": "cli_1",
+            "status": "confirmed",
+            "text": "hello"
+          },
+          {
+            "role": "tool",
+            "id": "tool_1",
+            "toolCallId": "tool_1",
+            "tool": "read_file",
+            "status": "completed",
+            "result": "ok"
+          },
+          {
+            "role": "assistant",
+            "id": "asst_1",
+            "replyTo": "cli_1",
+            "text": "done"
+          }
+        ],
+        "turn": {
+          "status": "idle",
+          "working": false
+        },
+        "streaming": null
+      }
+    },
+    {
+      "name": "convergence-negative-cases",
+      "session_id": "sess-fixture",
+      "events": [
+        {
+          "kind": "user_submitted",
+          "event_id": "local:submit:late",
+          "session_id": "sess-fixture",
+          "clientMessageId": "late_1",
+          "text": "late confirm"
+        },
+        {
+          "kind": "user_failed",
+          "event_id": "local:failed:late",
+          "session_id": "sess-fixture",
+          "clientMessageId": "late_1",
+          "code": "send_timeout",
+          "message": "send timed out"
+        },
+        {
+          "kind": "user_confirmed",
+          "event_id": "server:user:late",
+          "session_id": "sess-fixture",
+          "clientMessageId": "late_1",
+          "text": "late confirm"
+        },
+        {
+          "kind": "user_submitted",
+          "event_id": "local:submit:failed",
+          "session_id": "sess-fixture",
+          "clientMessageId": "failed_1",
+          "text": "will fail"
+        },
+        {
+          "kind": "user_failed",
+          "event_id": "local:failed:failed",
+          "session_id": "sess-fixture",
+          "clientMessageId": "failed_1",
+          "code": "cancelled",
+          "message": "cancelled by user"
+        },
+        {
+          "kind": "assistant_delta",
+          "event_id": "server:delta:cancelled:1",
+          "session_id": "sess-fixture",
+          "replyTo": "failed_1",
+          "delta": "partial"
+        },
+        {
+          "kind": "assistant_done",
+          "event_id": "server:done:failed_1",
+          "session_id": "sess-fixture",
+          "replyTo": "failed_1"
+        },
+        {
+          "kind": "compaction_recorded",
+          "event_id": "server:compaction:1",
+          "session_id": "sess-fixture",
+          "summary": "Compacted summary",
+          "tokensBefore": 321
+        },
+        {
+          "kind": "user_confirmed",
+          "event_id": "server:user:foreign_negative",
+          "session_id": "sess-foreign",
+          "clientMessageId": "foreign_negative",
+          "text": "ignore me too"
+        }
+      ],
+      "projection": {
+        "messages": [
+          {
+            "role": "user",
+            "id": "late_1",
+            "status": "confirmed",
+            "text": "late confirm"
+          },
+          {
+            "role": "system",
+            "id": "server:compaction:1",
+            "summary": "Compacted summary",
+            "tokensBefore": 321
+          },
+          {
+            "role": "user",
+            "id": "failed_1",
+            "status": "failed",
+            "text": "will fail"
+          }
+        ],
+        "turn": {
+          "status": "idle",
+          "working": false
+        },
+        "streaming": null
+      }
+    }
+  ]
+}
