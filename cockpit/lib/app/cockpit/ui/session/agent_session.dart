@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:cockpit/app/cockpit/domain/contracts/rpc_gateway_factory.dart';
 import 'package:cockpit/app/cockpit/domain/contracts/rpc_process_gateway.dart';
+import 'package:cockpit/app/cockpit/domain/entities/agent_session_projection.dart';
 import 'package:cockpit/app/cockpit/domain/entities/agent_turn_projection.dart';
 import 'package:cockpit/app/cockpit/domain/entities/context_usage.dart';
 import 'package:cockpit/app/cockpit/domain/entities/pi_command.dart';
@@ -96,6 +97,8 @@ class AgentSession extends PaneItem {
   final List<String> _awaitingUserEcho = <String>[];
 
   AgentTurnProjection _turn = AgentTurnProjection.idle;
+  CockpitTranscriptProjection _transcriptProjection =
+      _emptyTranscriptProjection;
   final List<AgentEntry> _entries = <AgentEntry>[];
   final List<CockpitTranscriptEvent> _transcriptEvents =
       <CockpitTranscriptEvent>[];
@@ -134,21 +137,51 @@ class AgentSession extends PaneItem {
   // ---- getters (UI) ---------------------------------------------------------
   @override
   String get title => _title;
-  AgentStatus get status => _status;
 
-  AgentTurnProjection get turn => _turn;
+  AgentSessionProjection get projection => AgentSessionProjection(
+    tabId: id,
+    projectId: projectId,
+    title: _title,
+    lifecycle: _lifecycle,
+    turn: _turn,
+    transcript: _transcriptProjection,
+    controls: AgentControlsProjection(
+      models: _models,
+      commands: _commands,
+      model: _model,
+      thinkingLevel: _thinking,
+      contextUsage: _ctx,
+      preferredModelId: preferredModelId,
+      preferredThinking: preferredThinking,
+    ),
+    relayStatus: relayStatus,
+    sessionId: _transcriptSessionId,
+    sessionPath: sessionPath,
+    pendingLocalSend: _pendingSend,
+  );
+
+  AgentStatus get status => projection.lifecycle.toLegacyStatus();
+
+  AgentTurnProjection get turn => projection.turn;
 
   /// Início do turno em andamento (`null` se ocioso).
-  DateTime? get turnStartedAt => _turn.startedAt;
-  bool get isStreaming => _turn.status == AgentTurnStatus.streaming;
-  bool get isBusy => _turn.working || _pendingSend;
-  bool get isAlive => _status == AgentStatus.idle;
+  DateTime? get turnStartedAt => projection.turn.startedAt;
+  bool get isStreaming => projection.turn.status == AgentTurnStatus.streaming;
+  bool get isBusy => projection.isBusy;
+  bool get isAlive => projection.isAlive;
   List<AgentEntry> get entries => List<AgentEntry>.unmodifiable(_entries);
-  List<PiModel> get models => _models;
-  List<PiCommand> get commands => _commands;
-  PiModel? get model => _model;
-  ThinkingLevel get thinking => _thinking;
-  ContextUsage? get contextUsage => _ctx;
+  List<PiModel> get models => projection.controls.models;
+  List<PiCommand> get commands => projection.controls.commands;
+  PiModel? get model => projection.controls.model;
+  ThinkingLevel get thinking => projection.controls.thinkingLevel;
+  ContextUsage? get contextUsage => projection.controls.contextUsage;
+
+  AgentProcessLifecycle get _lifecycle => switch (_status) {
+    AgentStatus.empty => AgentProcessLifecycle.empty,
+    AgentStatus.booting => AgentProcessLifecycle.booting,
+    AgentStatus.idle => AgentProcessLifecycle.idle,
+    AgentStatus.crashed => AgentProcessLifecycle.crashed,
+  };
 
   // ---- lifecycle ------------------------------------------------------------
 
@@ -173,6 +206,7 @@ class AgentSession extends PaneItem {
     _entries.clear();
     _awaitingUserEcho.clear();
     _transcriptEvents.clear();
+    _transcriptProjection = _emptyTranscriptProjection;
     notifyListeners();
 
     final gateway = _factory.create();
@@ -271,6 +305,7 @@ class AgentSession extends PaneItem {
         _reduceTurn(AgentTurnTransition.idle);
         _entries.clear();
         _transcriptEvents.clear();
+        _transcriptProjection = _emptyTranscriptProjection;
         _ctx = null;
         sessionPath = null;
         _addInfo('new session');
@@ -689,8 +724,9 @@ class AgentSession extends PaneItem {
 
   void _closeTranscriptTurn() {
     if (_transcriptEvents.isEmpty) return;
-    final projection = deriveCockpitTranscript(_transcriptEvents);
-    if (projection.turn.status == CockpitTranscriptTurnStatus.idle) return;
+    if (_transcriptProjection.turn.status == CockpitTranscriptTurnStatus.idle) {
+      return;
+    }
     _appendTranscriptEvent(
       CockpitAssistantDoneReceived(
         eventId: _nextTranscriptEventId(),
@@ -766,7 +802,8 @@ class AgentSession extends PaneItem {
       _isProjectedTranscriptEntry,
     );
     _entries.removeWhere(_isProjectedTranscriptEntry);
-    final projected = deriveCockpitTranscript(_transcriptEvents).entries;
+    _transcriptProjection = deriveCockpitTranscript(_transcriptEvents);
+    final projected = _transcriptProjection.entries;
     final newEntries = projected.map(_toAgentEntry).toList(growable: false);
     final insertionIndex = firstProjectedIndex < 0
         ? _entries.length
@@ -813,4 +850,19 @@ class AgentSession extends PaneItem {
     }
     _add(InfoEntry(text, isError: isError));
   }
+}
+
+const _emptyTranscriptProjection = CockpitTranscriptProjection(
+  entries: <ProjectedTranscriptMessage>[],
+  turn: CockpitTranscriptTurnView(status: CockpitTranscriptTurnStatus.idle),
+);
+
+extension on AgentProcessLifecycle {
+  AgentStatus toLegacyStatus() => switch (this) {
+    AgentProcessLifecycle.empty => AgentStatus.empty,
+    AgentProcessLifecycle.booting => AgentStatus.booting,
+    AgentProcessLifecycle.idle => AgentStatus.idle,
+    AgentProcessLifecycle.running => AgentStatus.idle,
+    AgentProcessLifecycle.crashed => AgentStatus.crashed,
+  };
 }

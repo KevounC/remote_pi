@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cockpit/app/cockpit/domain/contracts/rpc_gateway_factory.dart';
 import 'package:cockpit/app/cockpit/domain/contracts/rpc_process_gateway.dart';
+import 'package:cockpit/app/cockpit/domain/entities/agent_session_projection.dart';
 import 'package:cockpit/app/cockpit/domain/entities/agent_snapshot.dart';
 import 'package:cockpit/app/cockpit/domain/entities/agent_turn_projection.dart';
 import 'package:cockpit/app/cockpit/domain/entities/context_usage.dart';
@@ -159,6 +160,42 @@ void main() {
     expect(session.isBusy, isFalse);
     expect(session.turnStartedAt, isNull);
   });
+
+  test(
+    'projection-backed compatibility getters preserve busy and alive semantics',
+    () async {
+      final (session, gateway) = await _bootSession();
+
+      expect(session.status, AgentStatus.idle);
+      expect(session.projection.lifecycle, AgentProcessLifecycle.idle);
+      expect(session.isAlive, session.projection.isAlive);
+      expect(session.isBusy, session.projection.isBusy);
+
+      await session.send('hello');
+      expect(session.projection.pendingLocalSend, isTrue);
+      expect(session.projection.turn.working, isFalse);
+      expect(session.isAlive, isTrue);
+      expect(session.isBusy, isTrue);
+      expect(session.isBusy, session.projection.isBusy);
+
+      gateway.emit(const RpcAgentStart());
+      expect(session.projection.pendingLocalSend, isFalse);
+      expect(session.turn.status, AgentTurnStatus.working);
+      expect(session.isAlive, isTrue);
+      expect(session.isBusy, isTrue);
+      expect(session.isBusy, session.projection.isBusy);
+
+      gateway.emit(const RpcProcessExit(1));
+      expect(session.status, AgentStatus.crashed);
+      expect(session.projection.lifecycle, AgentProcessLifecycle.crashed);
+      expect(session.isAlive, isFalse);
+      expect(session.isBusy, isFalse);
+      expect(session.isAlive, session.projection.isAlive);
+      expect(session.isBusy, session.projection.isBusy);
+
+      await session.dispose();
+    },
+  );
 }
 
 Future<(AgentSession, _RpcGateway)> _bootSession({

@@ -1,14 +1,14 @@
 ---
 id: epic-bold-cockpit-workspace-projection-agent-session-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-agent-session
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document, epic-bold-transcript-event-log-projection-derive]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 1: Define the Cockpit agent-session projection contract
@@ -120,3 +120,12 @@ Medium. The projection type is new and side-by-side, but it names state that man
 ## Rollback
 
 Delete `agent_session_projection.dart` and revert `AgentSession` / `RpcDataMapper` to direct `AgentStatus` and `AgentSnapshot.isStreaming` fields. Since this step is side-by-side, rollback should not affect persisted layouts or process behavior.
+
+## Implementation
+
+- Added `cockpit/lib/app/cockpit/domain/entities/agent_session_projection.dart` as the side-by-side domain projection contract. It owns tab/project identity, title, process lifecycle, reused `AgentTurnProjection`, reused `CockpitTranscriptProjection`, controls, relay status, opaque/session path fields, and pending-local-send state without importing UI, Hive, filesystem, process, or Flutter widget APIs.
+- Reused the landed turn and transcript projection contracts: `AgentSessionProjection.turn` is `AgentTurnProjection`, and `AgentSessionProjection.transcript` is the existing Cockpit transcript projection from `transcript_message.dart`; no second turn or transcript algebra was introduced.
+- `AgentSession` now exposes `projection` and routes the temporary compatibility getters (`status`, `turn`, `isStreaming`, `turnStartedAt`, `isBusy`, `isAlive`, controls) through that projection while keeping the legacy `entries` list as the UI-compatible AgentEntry adapter. Current repo reality already had `AgentStatus` as `empty/booting/idle/crashed`; `AgentProcessLifecycle.running` maps back to legacy `idle` so visible UI behavior remains unchanged.
+- `RpcDataMapper.state()` already maps legacy `isStreaming` into `AgentTurnProjection.streaming` from the landed dependency; targeted mapper tests remain in `rpc_data_mapper_transcript_projection_test.dart` and were run with this story.
+- Added tests for empty, booting, idle, streaming, pending-send, and crashed projection snapshots plus an `AgentSession` compatibility test proving `isBusy`/`isAlive` match the new projection through pending-send, working, and crashed states.
+- Verification: `flutter pub get --offline`; targeted `flutter test test/domain/agent_session_projection_test.dart test/ui/agent_session_turn_projection_test.dart test/data/rpc_data_mapper_transcript_projection_test.dart` (21/21); `flutter analyze` (0 issues); full `flutter test` (210/210).
