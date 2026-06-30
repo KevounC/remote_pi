@@ -1,14 +1,14 @@
 ---
 id: epic-bold-cockpit-workspace-projection-workspace-document-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-workspace-document
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Make `CockpitViewModel` load, save, and expose workspace documents
@@ -76,3 +76,9 @@ Future<void> _restoreProject(String id, Map<String, dynamic> doc) async {
 
 ## Rollback
 Reintroduce `_trees` and `_focused`, restore `_restoreProject`, `_restoreSession`, `_serializeLayout`, and `_sessionToJson` to their pre-document implementations, and keep the domain document files unused until a later retry.
+
+## Implementation notes
+- Replaced the ViewModel's separate `_trees` and `_focused` maps with `_documents`, while preserving `tree(projectId)` and `focusedPaneId(projectId)` accessors for widgets.
+- Restored persisted layouts through `WorkspaceDocument.fromPersistedJson`, realized typed `WorkspaceTab` descriptors into live sessions, and sanitized unrestorable tabs with `WorkspaceDocument.filterTabs` plus live empty placeholders.
+- Saved layouts by refreshing document tab descriptors from live `PaneItem` projection before delegating to `WorkspaceDocument.toPersistedJson()`.
+- Added ViewModel tests for document round-trip load/save/expose, focus clamping/accessors, and unrestorable viewer filtering.

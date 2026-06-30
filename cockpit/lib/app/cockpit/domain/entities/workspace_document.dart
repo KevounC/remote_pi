@@ -56,6 +56,58 @@ final class WorkspaceDocument {
     return copyWith(focusedPaneId: currentLeaves.first.id);
   }
 
+  /// Returns a document that only references tabs in [restorableTabIds].
+  ///
+  /// Pane geometry is preserved. If filtering would leave a leaf empty, a new
+  /// empty tab descriptor from [emptyTabFactory] is inserted in that leaf.
+  WorkspaceDocument filterTabs(
+    Iterable<String> restorableTabIds, {
+    required WorkspaceTab Function() emptyTabFactory,
+  }) {
+    final allowed = restorableTabIds.toSet();
+    final nextTabs = <String, WorkspaceTab>{};
+
+    PaneNode filterNode(PaneNode node) {
+      return switch (node) {
+        LeafPane() => _filterLeaf(node, allowed, nextTabs, emptyTabFactory),
+        SplitPane() => node.copyWith(
+          a: filterNode(node.a),
+          b: filterNode(node.b),
+        ),
+      };
+    }
+
+    return copyWith(root: filterNode(root), tabs: nextTabs).ensureFocusValid();
+  }
+
+  LeafPane _filterLeaf(
+    LeafPane leaf,
+    Set<String> allowed,
+    Map<String, WorkspaceTab> nextTabs,
+    WorkspaceTab Function() emptyTabFactory,
+  ) {
+    final keptIds = <String>[];
+    for (final id in leaf.tabs) {
+      if (!allowed.contains(id)) continue;
+      final tab = tabs[id];
+      if (tab == null) continue;
+      nextTabs[id] = tab;
+      keptIds.add(id);
+    }
+
+    if (keptIds.isEmpty) {
+      final empty = emptyTabFactory();
+      nextTabs[empty.id] = empty;
+      return LeafPane(id: leaf.id, tabs: <String>[empty.id], active: empty.id);
+    }
+
+    return LeafPane(
+      id: leaf.id,
+      tabs: keptIds,
+      active: keptIds.contains(leaf.active) ? leaf.active : keptIds.first,
+    );
+  }
+
   Map<String, dynamic> toPersistedJson() => WorkspaceLayoutCodec.encode(this);
 
   static WorkspaceDocument fromPersistedJson({
