@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-registry-split-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-relay-typed-actor-registry-split
 depends_on: [epic-bold-relay-typed-actor-registry-split-step-1]
@@ -77,3 +77,22 @@ Restore `RoomMeta` to connection entries and move `rooms_of`/`update_room_meta` 
 - `PeerRegistry::rooms_of` and `PeerRegistry::update_room_meta` read/write the room-state store. Duplicate connections refresh the canonical rooms snapshot while suppressing duplicate `room_announced`; `room_ended` still emits only when the last connection leaves.
 - Preserved `RoomMetaPatch` merge semantics: nullable string fields set/clear, absent fields preserve prior state, and `working: true` / `working: false` both publish explicit convergence state while omitted `working` preserves the current value. `session_id` remains opaque metadata only.
 - Added focused tests for room store canonicalization plus registry-level duplicate metadata compatibility / first-last event behavior. Full relay verification passed: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build` (97 lib tests, 3 integration tests, 13 mesh tests, 8 pi-forward tests, 10 presence tests, 2 protocol parity tests, 19 rooms tests, doc-tests 0).
+
+## Review
+
+Approved (2026-06-30) with HIGH-risk convergence verification. Independently
+re-ran: relay `cargo fmt --check` clean; `cargo clippy -- -D warnings` clean;
+`cargo test` 152 passed / 0 failed (97 lib + 3 integ + 13 mesh + 8 pi_forward +
+10 presence + 2 parity + 19 rooms; +4 new room-state tests). Commit `4c1abd1`
+scoped to peers/rooms.rs (new RoomStateStore) + connections.rs + registry.rs +
+mod.rs + story .md; relay-only, no generated files.
+
+Canonical room metadata verified: `RoomStateStore` (mutex-protected map keyed
+by `(peer_id, room_id)`) is the single source of truth; `ConnectionEntry` now
+stores only `conn_id` + sender (no duplicated `RoomMeta`); `rooms_of`/
+`update_room_meta` read/write the store. Convergence invariants verified directly
+in tests: duplicate-connection-refreshes-snapshot-without-duplicate-`room_announced`;
+`room_ended` only on last disconnect; `working` tri-state (true publishes true,
+false publishes false, absent preserves prior — `patch_preserves_working_absence
+_and_applies_false`); nullable string clears; `session_id` opaque metadata only.
+The subtle `v.last()` behavior is correctly reproduced by the canonical store.
