@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-identity-model-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-canonical-session-identity-model
 depends_on: [epic-bold-canonical-session-identity-model-step-4]
@@ -75,3 +75,28 @@ Keep old boxes untouched; restore app reads/writes to `(epk, roomId)` keys and r
 - Tests added/updated: `read_repository_test` now proves two different `session_id`s on the same `(peer, room)` read from different boxes; the existing `sync_service_test` same-room session-rotation test still proves writer/index isolation and old-box preservation; action tests now seed canonical `session_id` before action dispatch.
 - Verification: `flutter test` full app suite passes. `flutter analyze` reports only the known unrelated `axisAlignment` deprecation at `app/lib/ui/chat/widgets/input_bar.dart:802`.
 - Deviations: cockpit terminology alignment was not changed because the caller explicitly scoped this wave to app-only work and forbade cockpit edits due concurrent ownership. `SyncService`/transcript reducer files were not rewritten; this work only aligns call sites and persistence keys with their existing `RemoteSessionRef` concept.
+
+## Review
+
+Approved (2026-06-30) with deeper verification — HIGH-risk persistence re-key.
+Independently re-ran: full app `flutter test` → 596/596; `flutter analyze` clean
+in owned files (only known `axisAlignment` info). Commit `fcb4baf` scoped to the
+re-key layer (boxes.dart, remote_session_ref.dart, SessionSelection/routing,
+UI consumers, tests); collision guard held — did NOT rewrite sync_service
+reducer / connection_manager / reachability_adapter (aligned with existing
+_activeRef instead of forking).
+
+Load-bearing invariants verified directly in code + tests:
+- **Re-key**: `msgsBoxName` = `msgs_<epk>__<roomId>__<sessionId>`; `sessionKey`
+  = `RemoteSessionRef.storageKey` = `peerId:roomId:sessionId`. Transcript-event
+  boxes similarly keyed.
+- **Two-session-id isolation** (acceptance criterion): `read_repository_test`
+  puts `from session a` / `from session b` in same-(peer,room) different-
+  sessionId boxes; `watchMessages(first)` returns ONLY `from session a`,
+  `watchMessages(second)` ONLY `from session b`. Real isolation, not a mock.
+- **Rollback safety**: old peer+room boxes deliberately never opened/deleted;
+  clean-room re-sync repopulates the new canonical box; old cache files intact.
+- **Reachability boundary preserved**: room liveness/working stays keyed by
+  `(peer, room)` via ConnectionManager; `session_id` gates transcript mutation
+  only (per the story's explicit split).
+Cockpit terminology alignment deferred (scoped app-only this wave) — legitimate.
