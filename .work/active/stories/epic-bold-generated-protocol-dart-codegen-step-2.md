@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen-step-2
 kind: story
-stage: implementing
+stage: review
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: [epic-bold-generated-protocol-dart-codegen-step-1]
 tags: [refactor]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 2: Generate Dart client messages and shared value types beside the hand mirror
@@ -130,3 +130,13 @@ Remove the generated client output and tests. The handwritten protocol remains t
 - `cd /home/agent/forks/remote_pi && node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema tools/protocol-codegen/fixtures/app_pi_client_dart_ir.json --out /tmp/<temp>/protocol.g.dart && cmp -s /tmp/<temp>/protocol.g.dart app/lib/protocol/generated/protocol.g.dart` — fail; regenerated output differs from committed `protocol.g.dart`.
 - `cd /home/agent/forks/remote_pi/app && HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter analyze` — exit 1 with the known unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802` only.
 - `cd /home/agent/forks/remote_pi/app && HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter test test/protocol_codegen/client_messages_codegen_test.dart` — exit 1; `generated Dart client protocol generator output is deterministic for the app client IR` fails because regenerated output differs from `lib/protocol/generated/protocol.g.dart`.
+
+## Implementation notes (rework 2026-06-30)
+- Files changed: `app/lib/protocol/generated/protocol.g.dart` and this story file.
+- Root cause: stale generated file. `tools/protocol-codegen/bin/protocol-codegen.mjs` was deterministic; the checked-in `protocol.g.dart` had been Dart-formatted/otherwise stale relative to raw generator output.
+- Generator changes: none.
+- Verification:
+  - `cd /home/agent/projects/remote_pi && node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema tools/protocol-codegen/fixtures/app_pi_client_dart_ir.json --out /tmp/_check.g.dart && diff /tmp/_check.g.dart app/lib/protocol/generated/protocol.g.dart && echo 'regeneration diff: empty'` — passed; regeneration diff was empty.
+  - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && FLUTTER=/home/agent/projects/remote_pi/.tools/flutter/bin/flutter && "$FLUTTER" pub get` — passed.
+  - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && FLUTTER=/home/agent/projects/remote_pi/.tools/flutter/bin/flutter && "$FLUTTER" analyze` — exited 1 with only the known unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802`.
+  - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && FLUTTER=/home/agent/projects/remote_pi/.tools/flutter/bin/flutter && "$FLUTTER" test test/protocol_codegen/client_messages_codegen_test.dart` — passed; 5 tests passed.

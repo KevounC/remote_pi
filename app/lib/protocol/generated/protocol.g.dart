@@ -8,8 +8,10 @@ final class WireImage {
   final String data;
   final String mime;
 
-  factory WireImage.fromJson(Map<String, dynamic> json) =>
-      WireImage(data: json['data'] as String, mime: json['mime'] as String);
+  factory WireImage.fromJson(Map<String, dynamic> json) => WireImage(
+        data: json['data'] as String,
+        mime: json['mime'] as String,
+      );
 
   Map<String, dynamic> toJson() => {'data': data, 'mime': mime};
 
@@ -25,13 +27,13 @@ enum UserMessageStreamingBehavior {
   steer;
 
   static UserMessageStreamingBehavior? fromWire(String? raw) => switch (raw) {
-    'steer' => UserMessageStreamingBehavior.steer,
-    _ => null,
-  };
+        'steer' => UserMessageStreamingBehavior.steer,
+        _ => null,
+      };
 
   String get wireValue => switch (this) {
-    UserMessageStreamingBehavior.steer => 'steer',
-  };
+        UserMessageStreamingBehavior.steer => 'steer',
+      };
 }
 
 enum ApproveDecision { allow, deny }
@@ -90,22 +92,22 @@ final class WireModel {
   final bool vision;
 
   factory WireModel.fromJson(Map<String, dynamic> json) => WireModel(
-    id: json['id'] as String,
-    name: json['name'] as String,
-    provider: json['provider'] as String,
-    reasoning: (json['reasoning'] as bool?) ?? false,
-    contextWindow: (json['context_window'] as num?)?.toInt() ?? 0,
-    vision: (json['vision'] as bool?) ?? false,
-  );
+        id: json['id'] as String,
+        name: json['name'] as String,
+        provider: json['provider'] as String,
+        reasoning: (json['reasoning'] as bool?) ?? false,
+        contextWindow: (json['context_window'] as num?)?.toInt() ?? 0,
+        vision: (json['vision'] as bool?) ?? false,
+      );
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'provider': provider,
-    'reasoning': reasoning,
-    'context_window': contextWindow,
-    'vision': vision,
-  };
+        'id': id,
+        'name': name,
+        'provider': provider,
+        'reasoning': reasoning,
+        'context_window': contextWindow,
+        'vision': vision,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -175,11 +177,7 @@ sealed class ClientMessage {
 }
 
 final class PairRequest extends ClientMessage {
-  const PairRequest({
-    required this.id,
-    required this.token,
-    required this.deviceName,
-  });
+  const PairRequest({required this.id, required this.token, required this.deviceName});
 
   @override
   String get type => 'pair_request';
@@ -189,28 +187,22 @@ final class PairRequest extends ClientMessage {
   final String deviceName;
 
   factory PairRequest.fromJson(Map<String, dynamic> json) => PairRequest(
-    id: json['id'] as String,
-    token: json['token'] as String,
-    deviceName: json['device_name'] as String,
-  );
+        id: json['id'] as String,
+        token: json['token'] as String,
+        deviceName: json['device_name'] as String,
+      );
 
   @override
   Map<String, dynamic> toJson() => {
-    'type': type,
-    'id': id,
-    'token': token,
-    'device_name': deviceName,
-  };
+        'type': type,
+        'id': id,
+        'token': token,
+        'device_name': deviceName,
+      };
 }
 
 final class UserMessage extends ClientMessage {
-  const UserMessage({
-    required this.id,
-    required this.sessionId,
-    required this.text,
-    this.streamingBehavior,
-    this.images,
-  });
+  const UserMessage({required this.id, required this.sessionId, required this.text, this.streamingBehavior, this.images});
 
   @override
   String get type => 'user_message';
@@ -222,38 +214,28 @@ final class UserMessage extends ClientMessage {
   final List<WireImage>? images;
 
   factory UserMessage.fromJson(Map<String, dynamic> json) => UserMessage(
-    id: json['id'] as String,
-    sessionId: json['session_id'] as String,
-    text: json['text'] as String,
-    streamingBehavior: UserMessageStreamingBehavior.fromWire(
-      json['streaming_behavior'] as String?,
-    ),
-    images: (json['images'] as List?)
-        ?.map(
-          (item) => WireImage.fromJson((item as Map).cast<String, dynamic>()),
-        )
-        .toList(),
-  );
+        id: json['id'] as String,
+        sessionId: json['session_id'] as String,
+        text: json['text'] as String,
+        streamingBehavior: UserMessageStreamingBehavior.fromWire(json['streaming_behavior'] as String?),
+        images: (json['images'] as List?)?.map((item) => WireImage.fromJson((item as Map).cast<String, dynamic>())).toList(),
+      );
 
   @override
   Map<String, dynamic> toJson() => {
-    'type': type,
-    'id': id,
-    'session_id': sessionId,
-    'text': text,
-    if (streamingBehavior case final streamingBehavior?)
-      'streaming_behavior': streamingBehavior.wireValue,
-    if (images case final images? when images.isNotEmpty)
-      'images': images.map((image) => image.toJson()).toList(),
-  };
+        'type': type,
+        'id': id,
+        'session_id': sessionId,
+        'text': text,
+        if (streamingBehavior case final streamingBehavior?)
+          'streaming_behavior': streamingBehavior.wireValue,
+        if (images case final images? when images.isNotEmpty)
+          'images': images.map((image) => image.toJson()).toList(),
+      };
 }
 
 final class QueuedMessageSet extends ClientMessage {
-  const QueuedMessageSet({
-    required this.id,
-    required this.sessionId,
-    required this.text,
-  });
+  const QueuedMessageSet({required this.id, required this.sessionId, required this.text});
 
   @override
   String get type => 'queued_message_set';
@@ -262,8 +244,7 @@ final class QueuedMessageSet extends ClientMessage {
   final String sessionId;
   final String text;
 
-  factory QueuedMessageSet.fromJson(Map<String, dynamic> json) =>
-      QueuedMessageSet(
+  factory QueuedMessageSet.fromJson(Map<String, dynamic> json) => QueuedMessageSet(
         id: json['id'] as String,
         sessionId: json['session_id'] as String,
         text: json['text'] as String,
@@ -271,11 +252,11 @@ final class QueuedMessageSet extends ClientMessage {
 
   @override
   Map<String, dynamic> toJson() => {
-    'type': type,
-    'id': id,
-    'session_id': sessionId,
-    'text': text,
-  };
+        'type': type,
+        'id': id,
+        'session_id': sessionId,
+        'text': text,
+      };
 }
 
 final class QueuedMessageClear extends ClientMessage {
@@ -287,27 +268,21 @@ final class QueuedMessageClear extends ClientMessage {
   final String id;
   final String sessionId;
 
-  factory QueuedMessageClear.fromJson(Map<String, dynamic> json) =>
-      QueuedMessageClear(
+  factory QueuedMessageClear.fromJson(Map<String, dynamic> json) => QueuedMessageClear(
         id: json['id'] as String,
         sessionId: json['session_id'] as String,
       );
 
   @override
   Map<String, dynamic> toJson() => {
-    'type': type,
-    'id': id,
-    'session_id': sessionId,
-  };
+        'type': type,
+        'id': id,
+        'session_id': sessionId,
+      };
 }
 
 final class ApproveTool extends ClientMessage {
-  const ApproveTool({
-    required this.id,
-    required this.sessionId,
-    required this.toolCallId,
-    required this.decision,
-  });
+  const ApproveTool({required this.id, required this.sessionId, required this.toolCallId, required this.decision});
 
   @override
   String get type => 'approve_tool';
@@ -318,28 +293,24 @@ final class ApproveTool extends ClientMessage {
   final ApproveDecision decision;
 
   factory ApproveTool.fromJson(Map<String, dynamic> json) => ApproveTool(
-    id: json['id'] as String,
-    sessionId: json['session_id'] as String,
-    toolCallId: json['tool_call_id'] as String,
-    decision: ApproveDecision.values.byName(json['decision'] as String),
-  );
+        id: json['id'] as String,
+        sessionId: json['session_id'] as String,
+        toolCallId: json['tool_call_id'] as String,
+        decision: ApproveDecision.values.byName(json['decision'] as String),
+      );
 
   @override
   Map<String, dynamic> toJson() => {
-    'type': type,
-    'id': id,
-    'session_id': sessionId,
-    'tool_call_id': toolCallId,
-    'decision': decision.name,
-  };
+        'type': type,
+        'id': id,
+        'session_id': sessionId,
+        'tool_call_id': toolCallId,
+        'decision': decision.name,
+      };
 }
 
 final class Cancel extends ClientMessage {
-  const Cancel({
-    required this.id,
-    required this.sessionId,
-    required this.targetId,
-  });
+  const Cancel({required this.id, required this.sessionId, required this.targetId});
 
   @override
   String get type => 'cancel';
@@ -349,18 +320,18 @@ final class Cancel extends ClientMessage {
   final String targetId;
 
   factory Cancel.fromJson(Map<String, dynamic> json) => Cancel(
-    id: json['id'] as String,
-    sessionId: json['session_id'] as String,
-    targetId: json['target_id'] as String,
-  );
+        id: json['id'] as String,
+        sessionId: json['session_id'] as String,
+        targetId: json['target_id'] as String,
+      );
 
   @override
   Map<String, dynamic> toJson() => {
-    'type': type,
-    'id': id,
-    'session_id': sessionId,
-    'target_id': targetId,
-  };
+        'type': type,
+        'id': id,
+        'session_id': sessionId,
+        'target_id': targetId,
+      };
 }
 
 final class Ping extends ClientMessage {
@@ -371,11 +342,15 @@ final class Ping extends ClientMessage {
 
   final String id;
 
-  factory Ping.fromJson(Map<String, dynamic> json) =>
-      Ping(id: json['id'] as String);
+  factory Ping.fromJson(Map<String, dynamic> json) => Ping(
+        id: json['id'] as String,
+      );
 
   @override
-  Map<String, dynamic> toJson() => {'type': type, 'id': id};
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'id': id,
+      };
 }
 
 final class SessionSync extends ClientMessage {
@@ -389,18 +364,19 @@ final class SessionSync extends ClientMessage {
   final int? limit;
 
   factory SessionSync.fromJson(Map<String, dynamic> json) => SessionSync(
-    id: json['id'] as String,
-    sessionId: json['session_id'] as String,
-    limit: (json['limit'] as num?)?.toInt(),
-  );
+        id: json['id'] as String,
+        sessionId: json['session_id'] as String,
+        limit: (json['limit'] as num?)?.toInt(),
+      );
 
   @override
   Map<String, dynamic> toJson() => {
-    'type': type,
-    'id': id,
-    'session_id': sessionId,
-    if (limit case final limit?) 'limit': limit,
-  };
+        'type': type,
+        'id': id,
+        'session_id': sessionId,
+        if (limit case final limit?)
+          'limit': limit,
+      };
 }
 
 final class SessionNew extends ClientMessage {
@@ -413,16 +389,16 @@ final class SessionNew extends ClientMessage {
   final String sessionId;
 
   factory SessionNew.fromJson(Map<String, dynamic> json) => SessionNew(
-    id: json['id'] as String,
-    sessionId: json['session_id'] as String,
-  );
+        id: json['id'] as String,
+        sessionId: json['session_id'] as String,
+      );
 
   @override
   Map<String, dynamic> toJson() => {
-    'type': type,
-    'id': id,
-    'session_id': sessionId,
-  };
+        'type': type,
+        'id': id,
+        'session_id': sessionId,
+      };
 }
 
 final class SessionCompact extends ClientMessage {
@@ -435,25 +411,20 @@ final class SessionCompact extends ClientMessage {
   final String sessionId;
 
   factory SessionCompact.fromJson(Map<String, dynamic> json) => SessionCompact(
-    id: json['id'] as String,
-    sessionId: json['session_id'] as String,
-  );
+        id: json['id'] as String,
+        sessionId: json['session_id'] as String,
+      );
 
   @override
   Map<String, dynamic> toJson() => {
-    'type': type,
-    'id': id,
-    'session_id': sessionId,
-  };
+        'type': type,
+        'id': id,
+        'session_id': sessionId,
+      };
 }
 
 final class ModelSet extends ClientMessage {
-  const ModelSet({
-    required this.id,
-    required this.sessionId,
-    required this.provider,
-    required this.modelId,
-  });
+  const ModelSet({required this.id, required this.sessionId, required this.provider, required this.modelId});
 
   @override
   String get type => 'model_set';
@@ -464,28 +435,24 @@ final class ModelSet extends ClientMessage {
   final String modelId;
 
   factory ModelSet.fromJson(Map<String, dynamic> json) => ModelSet(
-    id: json['id'] as String,
-    sessionId: json['session_id'] as String,
-    provider: json['provider'] as String,
-    modelId: json['model_id'] as String,
-  );
+        id: json['id'] as String,
+        sessionId: json['session_id'] as String,
+        provider: json['provider'] as String,
+        modelId: json['model_id'] as String,
+      );
 
   @override
   Map<String, dynamic> toJson() => {
-    'type': type,
-    'id': id,
-    'session_id': sessionId,
-    'provider': provider,
-    'model_id': modelId,
-  };
+        'type': type,
+        'id': id,
+        'session_id': sessionId,
+        'provider': provider,
+        'model_id': modelId,
+      };
 }
 
 final class ThinkingSet extends ClientMessage {
-  const ThinkingSet({
-    required this.id,
-    required this.sessionId,
-    required this.level,
-  });
+  const ThinkingSet({required this.id, required this.sessionId, required this.level});
 
   @override
   String get type => 'thinking_set';
@@ -495,18 +462,18 @@ final class ThinkingSet extends ClientMessage {
   final ThinkingLevel level;
 
   factory ThinkingSet.fromJson(Map<String, dynamic> json) => ThinkingSet(
-    id: json['id'] as String,
-    sessionId: json['session_id'] as String,
-    level: ThinkingLevel.fromWire(json['level'] as String)!,
-  );
+        id: json['id'] as String,
+        sessionId: json['session_id'] as String,
+        level: ThinkingLevel.fromWire(json['level'] as String)!,
+      );
 
   @override
   Map<String, dynamic> toJson() => {
-    'type': type,
-    'id': id,
-    'session_id': sessionId,
-    'level': level.wire,
-  };
+        'type': type,
+        'id': id,
+        'session_id': sessionId,
+        'level': level.wire,
+      };
 }
 
 final class ListModels extends ClientMessage {
@@ -519,14 +486,14 @@ final class ListModels extends ClientMessage {
   final String sessionId;
 
   factory ListModels.fromJson(Map<String, dynamic> json) => ListModels(
-    id: json['id'] as String,
-    sessionId: json['session_id'] as String,
-  );
+        id: json['id'] as String,
+        sessionId: json['session_id'] as String,
+      );
 
   @override
   Map<String, dynamic> toJson() => {
-    'type': type,
-    'id': id,
-    'session_id': sessionId,
-  };
+        'type': type,
+        'id': id,
+        'session_id': sessionId,
+      };
 }
