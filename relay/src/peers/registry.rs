@@ -5,6 +5,7 @@ use axum::extract::ws::Message;
 use tokio::sync::mpsc;
 
 use super::connections::ConnectionRegistry;
+use super::presence_state::{PresenceState, PresenceTransition};
 use super::rooms::RoomStateStore;
 use crate::metrics::FirehoseMetrics;
 use crate::presence::PresenceManager;
@@ -107,17 +108,26 @@ impl PeerRegistry {
         // peer_online fires only on a real offline → online transition.
         // Re-registers from a peer that already had a live conn produce no
         // new push to subscribers — they already think it's online.
+        let presence_transition = PresenceState::on_connection_inserted(&insert);
         let pres_subs = self.presence.subscribers_of(&peer_id).await;
         let sub_count = pres_subs.len() as u64;
         if sub_count > 0 {
-            if insert.was_offline_before {
-                let msg = serde_json::json!({"type": "peer_online", "peer": peer_id}).to_string();
-                for sub in pres_subs {
-                    self.forward_to_all_rooms_of(&sub, Message::Text(msg.clone()));
+            match presence_transition {
+                PresenceTransition::BecameOnline { peer_id } => {
+                    let msg =
+                        serde_json::json!({"type": "peer_online", "peer": peer_id}).to_string();
+                    for sub in pres_subs {
+                        self.forward_to_all_rooms_of(&sub, Message::Text(msg.clone()));
+                    }
+                    self.metrics.inc_peer_online_emitted(sub_count);
                 }
-                self.metrics.inc_peer_online_emitted(sub_count);
-            } else {
-                self.metrics.inc_peer_online_suppressed(sub_count);
+                PresenceTransition::StayedOnline { .. } => {
+                    self.metrics.inc_peer_online_suppressed(sub_count);
+                }
+                PresenceTransition::BecameOffline { .. }
+                | PresenceTransition::StayedOnlineAfterDisconnect { .. } => {
+                    unreachable!("insert transitions cannot be disconnect transitions")
+                }
             }
         }
 
@@ -170,21 +180,22 @@ impl PeerRegistry {
             }
         }
 
-        if remove.peer_offlined {
-            let pres_subs = self.presence.subscribers_of(peer_id).await;
+        let presence_transition = PresenceState::on_connection_removed(&remove, now_ms);
+        if let Some(PresenceTransition::BecameOffline { peer_id, since_ts }) = presence_transition {
+            let pres_subs = self.presence.subscribers_of(&peer_id).await;
             if !pres_subs.is_empty() {
                 let msg = serde_json::json!({
                     "type": "peer_offline",
-                    "peer": peer_id,
-                    "since_ts": now_ms,
+                    "peer": peer_id.as_str(),
+                    "since_ts": since_ts,
                 })
                 .to_string();
                 for sub in pres_subs {
                     self.forward_to_all_rooms_of(&sub, Message::Text(msg.clone()));
                 }
             }
-            self.presence.record_offline(peer_id, now_ms).await;
-            self.presence.unsubscribe_all(peer_id).await;
+            self.presence.record_offline(&peer_id, since_ts).await;
+            self.presence.unsubscribe_all(&peer_id).await;
         }
     }
 
@@ -607,6 +618,57 @@ mod tests {
         let [emitted, suppressed, ..] = metrics.snapshot();
         assert_eq!(emitted, 1, "snapshot: {:?}", metrics.snapshot());
         assert_eq!(suppressed, 1, "snapshot: {:?}", metrics.snapshot());
+    }
+
+    /// Disconnecting one room while the same peer still has another live room
+    /// must not emit `peer_offline`; the offline edge belongs to the final
+    /// connection removal for the peer.
+    #[tokio::test]
+    async fn peer_offline_waits_until_all_rooms_disconnect() {
+        let presence = Arc::new(PresenceManager::new());
+        let rooms = Arc::new(RoomManager::new());
+        let metrics = Arc::new(FirehoseMetrics::new());
+        let reg = PeerRegistry::new(presence.clone(), rooms, metrics);
+
+        let pi = "pi".to_string();
+        let app = "app".to_string();
+
+        let (tx_app, mut rx_app) = mpsc::unbounded_channel::<Message>();
+        let _ = reg.register(app.clone(), make_meta("main"), tx_app).await;
+        presence.subscribe(app.clone(), vec![pi.clone()]).await;
+
+        let (tx_pi_main, _) = mpsc::unbounded_channel::<Message>();
+        let conn_main = reg
+            .register(pi.clone(), make_meta("main"), tx_pi_main)
+            .await;
+        let first_online = rx_app.try_recv().expect("first pi room emits online");
+        let first_online: serde_json::Value =
+            serde_json::from_str(first_online.to_text().unwrap()).unwrap();
+        assert_eq!(first_online["type"], "peer_online");
+
+        let (tx_pi_work, _) = mpsc::unbounded_channel::<Message>();
+        let conn_work = reg
+            .register(pi.clone(), make_meta("work"), tx_pi_work)
+            .await;
+        assert!(
+            rx_app.try_recv().is_err(),
+            "second live room must not duplicate peer_online"
+        );
+
+        reg.unregister(&pi, "main", conn_main).await;
+        assert!(
+            rx_app.try_recv().is_err(),
+            "disconnecting one room while another remains live must not emit peer_offline"
+        );
+
+        reg.unregister(&pi, "work", conn_work).await;
+        let offline = rx_app
+            .try_recv()
+            .expect("last live room emits peer_offline");
+        let offline: serde_json::Value = serde_json::from_str(offline.to_text().unwrap()).unwrap();
+        assert_eq!(offline["type"], "peer_offline");
+        assert_eq!(offline["peer"], pi);
+        assert!(offline["since_ts"].as_i64().is_some());
     }
 
     /// Helper: a Pi with one `main` room plus an `app` subscribed to that

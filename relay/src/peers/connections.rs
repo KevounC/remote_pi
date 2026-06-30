@@ -17,6 +17,7 @@ pub(crate) struct ConnectionEntry {
 
 #[derive(Debug)]
 pub(crate) struct ConnectionInsert {
+    pub peer_id: String,
     pub conn_id: u64,
     pub was_offline_before: bool,
     pub is_first_in_room: bool,
@@ -24,6 +25,8 @@ pub(crate) struct ConnectionInsert {
 
 #[derive(Debug)]
 pub(crate) struct ConnectionRemove {
+    pub peer_id: String,
+    pub removed_connection: bool,
     pub room_emptied: bool,
     pub peer_offlined: bool,
 }
@@ -65,6 +68,7 @@ impl ConnectionRegistry {
             .push(ConnectionEntry { conn_id, tx });
 
         ConnectionInsert {
+            peer_id: peer_id.to_string(),
             conn_id,
             was_offline_before,
             is_first_in_room,
@@ -74,20 +78,23 @@ impl ConnectionRegistry {
     pub(crate) fn remove(&self, peer_id: &str, room_id: &str, conn_id: u64) -> ConnectionRemove {
         let mut lock = self.senders.lock().unwrap();
         let key = (peer_id.to_string(), room_id.to_string());
+        let mut removed_connection = false;
         let mut room_emptied = false;
 
         if let Some(entries) = lock.get_mut(&key) {
             let before = entries.len();
             entries.retain(|entry| entry.conn_id != conn_id);
-            let removed_something = entries.len() != before;
+            removed_connection = entries.len() != before;
             if entries.is_empty() {
                 lock.remove(&key);
-                room_emptied = removed_something;
+                room_emptied = removed_connection;
             }
         }
 
         let peer_offlined = room_emptied && !lock.keys().any(|(p, _)| p == peer_id);
         ConnectionRemove {
+            peer_id: peer_id.to_string(),
+            removed_connection,
             room_emptied,
             peer_offlined,
         }

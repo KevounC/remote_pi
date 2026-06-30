@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-registry-split-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-relay-typed-actor-registry-split
 depends_on: [epic-bold-relay-typed-actor-registry-split-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Make presence transitions an explicit actor-owned state boundary
@@ -58,10 +58,10 @@ Presence transition calculation is named, testable, and separate from subscripti
 
 ## Acceptance Criteria
 
-- [ ] Presence transition calculation is outside the registry facade and has targeted tests.
-- [ ] `is_online` still uses the connection-state source of truth.
-- [ ] `peer_online` emitted/suppressed metrics remain unchanged for duplicate connection cases.
-- [ ] From `relay/`: `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` pass.
+- [x] Presence transition calculation is outside the registry facade and has targeted tests.
+- [x] `is_online` still uses the connection-state source of truth.
+- [x] `peer_online` emitted/suppressed metrics remain unchanged for duplicate connection cases.
+- [x] From `relay/`: `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` pass.
 
 ## Risk
 
@@ -70,3 +70,12 @@ Medium. Presence events are deduped by edge transitions; a bad split can create 
 ## Rollback
 
 Move transition booleans back into `PeerRegistry::register` and `PeerRegistry::unregister`, keeping earlier connection/room modules if they are stable.
+
+## Implementation
+
+- Added `relay/src/peers/presence_state.rs` with `PresenceState` and explicit `PresenceTransition` variants for `BecameOnline`, `StayedOnline`, `BecameOffline`, and `StayedOnlineAfterDisconnect`.
+- `PeerRegistry::register` and `PeerRegistry::unregister` now call `PresenceState` using `ConnectionRegistry` mutation facts instead of reading implicit presence booleans inline. `is_online` remains delegated to `ConnectionRegistry`, keeping the live connection table as the source of truth.
+- Extended `ConnectionInsert` / `ConnectionRemove` facts with the affected `peer_id` and a `removed_connection` no-op guard so the target transition functions can be pure and testable without maintaining a second online table.
+- Preserved duplicate-online behavior and metrics: duplicate connection cases still suppress extra `peer_online` and increment the suppressed counter; first online transition increments emitted. Added registry coverage for multi-room disconnects so `peer_offline` waits until the final live room/connection is gone.
+- `PresenceManager` remains responsible for subscriptions and `last_offline_ts`; `PresenceManager::snapshot` behavior is unchanged.
+- Verification passed from `relay/`: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build`. Test counts: 103 lib tests (including 5 new `PresenceState` unit tests and 1 new registry multi-room offline test), 3 integration tests, 13 mesh tests, 8 pi-forward tests, 10 presence tests, 2 protocol parity tests, 19 rooms tests, and 0 doc-tests.

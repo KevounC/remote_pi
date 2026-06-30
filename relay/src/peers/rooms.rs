@@ -118,6 +118,7 @@ mod tests {
 
     fn insert(conn_id: u64, is_first_in_room: bool) -> ConnectionInsert {
         ConnectionInsert {
+            peer_id: "peer".to_string(),
             conn_id,
             was_offline_before: is_first_in_room,
             is_first_in_room,
@@ -194,6 +195,8 @@ mod tests {
         store.on_connection_inserted(peer, make_meta("main"), &insert(1, true));
 
         let remove = ConnectionRemove {
+            peer_id: peer.to_string(),
+            removed_connection: true,
             room_emptied: false,
             peer_offlined: false,
         };
@@ -201,6 +204,8 @@ mod tests {
         assert_eq!(store.rooms_of(peer).len(), 1);
 
         let remove = ConnectionRemove {
+            peer_id: peer.to_string(),
+            removed_connection: true,
             room_emptied: true,
             peer_offlined: true,
         };
