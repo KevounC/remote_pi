@@ -93,6 +93,9 @@ export interface RemotePiRuntime {
 
 export interface CommandSurfacePort {
   register(pi: ExtensionAPI, runtime: RemotePiRuntime): void;
+  ensureStarted?(ctx: ExtensionContext): void | Promise<void>;
+  prepareSessionShutdown?(): void;
+  closeMesh?(): Promise<void>;
 }
 
 export interface RemotePiRuntimePorts {

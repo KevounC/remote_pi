@@ -79,7 +79,7 @@ import { probeListPeers } from "./extension/probe_list_peers.js";
 export { probeListPeers } from "./extension/probe_list_peers.js";
 export { restartSupervisorCommand as _restartSupervisorCommand } from "./extension/command_surface/supervisor_restart.js";
 export type { RestartStep } from "./extension/command_surface/supervisor_restart.js";
-import { createRemotePiExtensionRuntime } from "./extension/composition_root.js";
+import { createRemotePiExtensionRuntime, registerLifecycleHooks } from "./extension/composition_root.js";
 import { createLegacyIndexPorts, type LegacyIndexDeps } from "./extension/legacy_ports.js";
 import type { CommandSurfacePort } from "./extension/ports.js";
 import { SdkSessionProjection } from "./session/sdk_session_projection.js";
@@ -275,7 +275,7 @@ const _pairingCoordinator = new PairingCoordinator({
     }, undefined, "paired");
   },
   onPeerDisconnect: (peerId) => _onPeerDisconnect(peerId),
-  handleClientMessage: (sender, message) => _routeClientMessageFrom(sender as PlainPeerChannel, message, _lastEventCtx ?? _lastCtx ?? _noopCtx),
+  handleClientMessage: (sender, message) => _sdkSessionProjection.handleClientMessage(sender, message),
   joinLocalMesh: async (ctx) => { if (!_meshNode) await _cmdJoin(ctx); },
   refreshFooter: (ctx) => _refreshFooter(ctx),
   notify: (message, type, ctx) => _notify(message, type, ctx),
@@ -1549,86 +1549,11 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     _maybeSendLateAttachSessionSync();
   });
 
-  // Re-capture the freshest base ctx on every session replacement so compact
-  // never operates on a stale captured ctx — this is the fix for the
-  // "stale after session replacement" crash when the app taps Compact after a
-  // New session. Fires on startup/new/fork/reload/resume; the ctx is always
-  // bound to the current session.
-  //
-  // Important: the documented session_start ctx is a base ExtensionContext; it
-  // does NOT provide sendMessage/sendUserMessage. Message delivery after a
-  // replacement is only safe through a fresh extension instance (new factory
-  // call with fresh `pi`) or through a ReplacedSessionContext passed to a
-  // withSession callback when Remote Pi itself initiated the replacement.
-  pi.on("session_start", (_event, ctx) => {
-    _lastEventCtx = ctx;
-    _sdkSessionProjection.bindSessionContext(ctx);
-    _captureRemoteSession(ctx);
-    // Rearm a reused-but-disposed instance. The session_shutdown teardown (below)
-    // sets _disposed=true assuming the host re-evaluates THIS module fresh for the
-    // replacement session, yielding a new instance with _disposed=false. Some hosts
-    // instead REUSE the same module instance across ctx.newSession() — then the
-    // _disposed latch is never cleared (nothing else resets it), so the relay never
-    // reconnects and /remote-pi (via _cmdRoot) silently early-returns until a full
-    // Pi restart. Clearing the latch + re-running the idempotent connect path
-    // restores the relay automatically. No-op when a fresh instance IS created
-    // (_disposed=false there → never fires) and at first boot.
-    if (_disposed) {
-      _disposed = false;
-      void _cmdRoot(ctx);
-    }
-  });
-
-  // Tear down THIS instance's live handles when the SDK replaces the session
-  // (switch_session / new / fork / reload / quit). This is the fix for the
-  // "double mesh connection" the Cockpit hits when it restores a saved
-  // conversation via switch_session on boot.
-  //
-  // Why it happens: the Pi SDK loads extensions through jiti with
-  // `moduleCache: false`, so every session replacement re-evaluates THIS module
-  // FRESH — a brand-new instance whose `_meshNode`, `_relay`, and command-surface
-  // cwd lock start back at null. The OUTGOING instance's broker socket, relay WS,
-  // and cwd-lock UDS keep running regardless (module state is gone, but the OS
-  // handles aren't). In daemon mode (REMOTE_PI_DAEMON=1, set by the Cockpit) the
-  // fresh instance re-runs `_cmdRoot` on load, so without releasing the old
-  // handles first we end up with TWO mesh peers under the same name on the
-  // broker + two rooms on the relay. The per-cwd lock is meant to stop the
-  // second connect, but its 500 ms connect-probe can miss the still-bound old
-  // socket while the event loop is saturated at boot, fall through to the
-  // stale-socket unlink path, and let the fresh instance bind a second lock.
-  //
-  // `session_shutdown` fires on the OUTGOING extension runner and is AWAITED by
-  // the SDK (`teardownCurrent`) BEFORE the replacement runtime — and thus the
-  // fresh extension instance — is created. Closing the mesh node, relay, and
-  // lock here guarantees the next instance starts from a clean slate and stands
-  // up exactly ONE connection bound to the restored session. Idempotent +
-  // best-effort: every step is guarded so a partially-initialised instance
-  // (e.g. shutdown lands mid-`_cmdRoot`) tears down without throwing.
-  pi.on("session_shutdown", async () => {
-    // Mark disposed FIRST so an in-flight `_cmdRoot`/`_cmdJoin` (the deferred
-    // daemon connect) aborts instead of finishing as a ghost after we've torn
-    // down — the race that left a mute `Backoffice` behind when the Cockpit
-    // fired switch_session right after boot.
-    _disposed = true;
-    // Captured contexts from the outgoing runtime are invalid after this point.
-    // Relay timers / reconnect callbacks can still fire briefly, so make them
-    // fall through to no-op helpers instead of touching stale ctx.ui/abort.
-    _lastCtx = null;
-    _lastEventCtx = null;
-    _messageApi = null;
-    _pi = null;
-    _sdkSessionProjection.clearStaleContexts();
-    if (_meshNode) {
-      try { await _meshNode.close(); } catch { /* best-effort */ }
-      _meshNode = null;
-      _owners.setMeshSession(null);
-      _owners.setSessionPeerCount(0);
-    }
-    // No bye reason: the process keeps running and the fresh instance re-joins
-    // the SAME relay room, so an explicit offline→online flap would be wrong.
-    if (_state !== "idle") _goIdle();
-    _localMeshCommands.releaseCwdLock();
-  });
+  // Re-capture the freshest base ctx on every session replacement and tear down
+  // outgoing session resources through the composition-root ports. The bound
+  // legacy port methods preserve the stale-context and in-flight connect guards
+  // that previously lived inline here.
+  registerLifecycleHooks(pi, legacyRuntime.ports, legacyRuntime.epoch);
 
   // ── Commands ──────────────────────────────────────────────────────────────
   legacyRuntime.ports.commands.register(pi, legacyRuntime);
@@ -1709,10 +1634,27 @@ function createIndexDeps(): LegacyIndexDeps {
       sendPiMessage: (...args) => _sendPiMessage(...args),
       wakeAgent: (...args) => _sdkSessionProjection.wakeAgent(...args),
       publishWorking: _publishWorking,
-      handleClientMessage: (sender, message) => _routeClientMessageFrom(sender as PlainPeerChannel, message, _lastEventCtx ?? _lastCtx ?? _noopCtx),
+      handleClientMessage: (sender, message) => _sdkSessionProjection.handleClientMessage(sender, message),
     },
     commands: {
       register: (boundPi, runtime) => { createLegacyCommandSurface().register(boundPi, runtime); },
+      ensureStarted: (ctx) => {
+        if (!_disposed) return;
+        _disposed = false;
+        void _cmdRoot(ctx);
+      },
+      prepareSessionShutdown: () => {
+        _disposed = true;
+      },
+      closeMesh: async () => {
+        if (_meshNode) {
+          try { await _meshNode.close(); } catch { /* best-effort */ }
+          _meshNode = null;
+          _owners.setMeshSession(null);
+          _owners.setSessionPeerCount(0);
+        }
+        _localMeshCommands.releaseCwdLock();
+      },
     },
   };
 }

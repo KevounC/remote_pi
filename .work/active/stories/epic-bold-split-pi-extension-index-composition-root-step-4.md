@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-composition-root-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-composition-root
 depends_on: [epic-bold-split-pi-extension-index-composition-root-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Route hooks, commands, and app ingress through the ports
@@ -85,3 +85,12 @@ High: this is the main wiring change and can break lifecycle ordering.
 
 ## Rollback
 Restore direct hook/command registration and direct channel callbacks in `index.ts`; keep earlier type definitions if harmless.
+
+## Implementation
+- Files changed: `pi-extension/src/extension/composition_root.ts`, `pi-extension/src/extension/ports.ts`, `pi-extension/src/extension/legacy_ports.ts`, `pi-extension/src/index.ts`, `pi-extension/src/extension/composition_root.test.ts`, `pi-extension/src/extension.test.ts`.
+- Hook and command routing: `composition_root.ts` now exports `registerLifecycleHooks`; `session_start` binds fresh session context via `SdkSessionProjectionPort` and asks `CommandSurfacePort.ensureStarted` to rearm reused runtimes, while `session_shutdown` disposes the epoch before delegating stale-context clearing, bridge/relay teardown, mesh close, and cwd-lock release through ports. `index.ts` no longer registers `session_start` / `session_shutdown` inline; command registration remains through `CommandSurfacePort.register`.
+- Owner/app ingress routing: pairing/known-owner ingress now enters `OwnerMultiplexerPort.routeFrom` and then `SdkSessionProjectionPort.handleClientMessage`; the only remaining direct `_routeClientMessageFrom` call is the legacy session-projection adapter boundary and test/backward-compat shims.
+- Stale-context and late-attach preservation: the legacy command port preserves the existing `_disposed` latch before awaits; session start clears the latch only through `ensureStarted`, session shutdown clears stale Pi APIs before relay/mesh callbacks can touch them, and existing relay/known-peer/pair-request late continuation guards remain intact.
+- Tests: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; `corepack pnpm exec vitest run src/extension/composition_root.test.ts` passed (1 file, 4 tests); targeted lifecycle command `corepack pnpm exec vitest run src/extension.test.ts -t "session_start|session_shutdown|session_new|stale|late|relay|bridge|teardown"` reported 49 passed, 98 skipped, 2 failed matching the known false-alarm group (`after a clean reset...`, `rename:<name>...` / cwd-lock+UDS mesh). Full `corepack pnpm exec vitest run src/extension.test.ts` reported 145 passed, 4 failed, also matching the known false-alarm group (`after a clean reset`, `name-assigned`, `rename:<name>`, same-name `#N` / cwd-lock+UDS). Accidental `corepack pnpm test -- src/extension.test.ts` ran the broader suite and reported 585 passed, 3 skipped, 66 failed, all in the known sandbox UDS/cwd-lock/leader-election/supervisor.sock false-failure family.
+- Discrepancies from design: added `CommandSurfacePort.prepareSessionShutdown` as a legacy compatibility hook so the existing `_disposed` guard is set before relay/mesh awaits; public behavior and wire semantics are unchanged.
+- Adjacent issues parked: none.

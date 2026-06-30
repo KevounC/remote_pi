@@ -3360,7 +3360,7 @@ describe("session_shutdown teardown", () => {
     expect(() => captureEventHandler("session_shutdown")).not.toThrow();
   });
 
-  test("firing session_shutdown while started tears down mesh + relay → idle", async () => {
+  test("firing session_shutdown while started tears down mesh bridge + relay → idle", async () => {
     captureHandler("remote-pi");
     await _connectForTest(makeMockCtx());
     expect(_getState()).toBe("started");
@@ -3369,9 +3369,10 @@ describe("session_shutdown teardown", () => {
     const shutdown = captureEventHandler("session_shutdown");
     await shutdown({ type: "session_shutdown", reason: "resume" });
 
-    // Relay WS closed + state back to idle: the outgoing instance is gone, so
-    // the re-evaluated instance starts from a clean slate (one connection).
+    // Relay WS closed + mesh/bridge state back to idle: the outgoing instance is gone,
+    // so the re-evaluated instance starts from a clean slate (one connection).
     expect(relay.close).toHaveBeenCalled();
+    expect(_hasMeshNodeForTest()).toBe(false);
     expect(_getState()).toBe("idle");
   });
 

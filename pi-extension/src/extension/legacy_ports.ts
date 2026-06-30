@@ -51,6 +51,9 @@ export interface LegacySdkSessionProjectionDeps {
 
 export interface LegacyCommandSurfaceDeps {
   register(pi: ExtensionAPI, runtime: RemotePiRuntime): void;
+  ensureStarted?(ctx: ExtensionContext): void | Promise<void>;
+  prepareSessionShutdown?(): void;
+  closeMesh?(): Promise<void>;
 }
 
 export interface LegacyIndexDeps {
@@ -106,7 +109,11 @@ function createLegacySdkSessionProjection(deps: LegacySdkSessionProjectionDeps):
 }
 
 function createLegacyCommandSurface(deps: LegacyCommandSurfaceDeps): CommandSurfacePort {
-  return {
+  const port: CommandSurfacePort = {
     register: (pi, runtime) => deps.register(pi, runtime),
   };
+  if (deps.ensureStarted) port.ensureStarted = (ctx) => deps.ensureStarted?.(ctx);
+  if (deps.prepareSessionShutdown) port.prepareSessionShutdown = () => deps.prepareSessionShutdown?.();
+  if (deps.closeMesh) port.closeMesh = () => deps.closeMesh?.() ?? Promise.resolve();
+  return port;
 }
