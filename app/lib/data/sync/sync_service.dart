@@ -446,6 +446,12 @@ class SyncService extends Service {
       _nextSeq = 0;
       _indexLoaded = true;
       _clearTranscriptEventBuffer();
+      // Session-clear is a `session_new` wipe boundary: a clear during an
+      // active turn would otherwise leave `_working` / `_workingReplyTo` /
+      // streaming cursor stuck on a stale cancel target. Reset the whole-turn
+      // working flag + streaming buffer so working state converges false.
+      // (`_cancelAllSendTimers()` already ran above; no need to repeat.)
+      _resetTurnState();
     });
   }
 

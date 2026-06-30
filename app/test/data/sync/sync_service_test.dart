@@ -1154,6 +1154,55 @@ void main() {
   );
 
   test(
+    'clearActiveSession resets the in-memory turn state — working/streaming '
+    'converge false on a mid-turn session wipe (plan/32)',
+    () async {
+      final s = await setup();
+
+      // Mid-turn: working flag up, streaming buffer populated, reply target set.
+      s.ch.push(AgentChunk(inReplyTo: 'r1', delta: 'thinking...'));
+      await _settle();
+      expect(s.sync.isWorking, isTrue);
+      expect(s.sync.streaming, isNotNull);
+      expect(s.sync.workingReplyTo, 'r1');
+
+      final flags = <bool>[];
+      final sub = s.sync.workingStream.listen(flags.add);
+
+      // `session_new` wipe boundary: clear must converge working state false,
+      // not leave a stale cancel target / streaming cursor.
+      await s.sync.clearActiveSession();
+      await _settle();
+
+      expect(
+        s.sync.isWorking,
+        isFalse,
+        reason: 'session clear must idle the in-memory working flag',
+      );
+      expect(
+        s.sync.streaming,
+        isNull,
+        reason: 'session clear must drop the streaming cursor',
+      );
+      expect(
+        s.sync.workingReplyTo,
+        isNull,
+        reason: 'session clear must clear the stale cancel target',
+      );
+      expect(
+        flags,
+        contains(false),
+        reason: 'listeners are notified the flag cleared',
+      );
+      expect(messages(s.epk), isEmpty);
+
+      await sub.cancel();
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
     'clearActiveSession with no-index session accepts replay after clear',
     () async {
       final s = await setup();

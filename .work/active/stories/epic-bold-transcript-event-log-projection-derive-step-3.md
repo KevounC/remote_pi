@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-2]
@@ -137,4 +137,36 @@ Revert `SyncService` to direct `_upsert` / `_applyHistory` mutation. Projection 
 - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && /home/agent/projects/remote_pi/.tools/flutter/bin/flutter pub get` completed successfully.
 - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && /home/agent/projects/remote_pi/.tools/flutter/bin/flutter analyze` exited 1 with only the known-unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802`.
 - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && /home/agent/projects/remote_pi/.tools/flutter/bin/flutter test test/data/sync/sync_service_test.dart` passed: 40 tests passed.
+
+## Implementation notes (rework 2026-06-30, second bounce)
+
+Resolved the bounce's new blocker: `clearActiveSession()` cleared Hive rows +
+the in-memory transcript event buffer but left the active turn state
+(`_working`, `_workingReplyTo`, `_streaming`) stale. A session clear is the
+`session_new` wipe boundary, so a clear mid-turn could leave chat/Home stuck
+working with a stale cancel target until some later replay/status edge
+happened to correct it — a working-state convergence violation.
+
+- Fix: `clearActiveSession()` now calls the existing `_resetTurnState()`
+  (after `_clearTranscriptEventBuffer()` inside the enqueue, where the session
+  is confirmed still-active) to converge `_working`→false, `_workingReplyTo`→null,
+  and `_streaming`→null + emit the cleared state to listeners.
+  `_cancelAllSendTimers()` already ran above the enqueue, so the call uses the
+  default `clearPendingSendTimers: false` variant (no double-cancel).
+- Test added: `clearActiveSession resets the in-memory turn state — working/streaming
+  converge false on a mid-turn session wipe (plan/32)` — drives the service
+  mid-turn (`isWorking` true, `streaming` not null, `workingReplyTo` set),
+  clears, and asserts `isWorking == false`, `streaming == null`,
+  `workingReplyTo == null`, listeners notified, rows empty.
+- Files changed: `app/lib/data/sync/sync_service.dart`,
+  `app/test/data/sync/sync_service_test.dart`.
+- Discrepancies from design: none — reuses the same turn-reset path already
+  used by `activate()` (session switch), so the wipe boundary and switch
+  boundary converge identically.
+- Adjacent issues parked: none.
+- Verification: `export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache &&
+  /home/agent/projects/remote_pi/.tools/flutter/bin/flutter analyze` → 1 issue
+  (known-unrelated `axisAlignment` info at `lib/ui/chat/widgets/input_bar.dart:802`).
+  `flutter test test/data/sync/sync_service_test.dart` → All tests passed! (41 tests:
+  40 prior + the new convergence regression).
 
