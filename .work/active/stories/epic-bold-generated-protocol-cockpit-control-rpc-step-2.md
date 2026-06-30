@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-cockpit-control-rpc-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-generated-protocol-cockpit-control-rpc
 depends_on: [epic-bold-generated-protocol-cockpit-control-rpc-step-1]
@@ -76,3 +76,21 @@ Drop parser and compatibility branch additions in `pi-extension/src/index.ts` an
 - Discrepancies from design: used the checked-in schema discriminator `type: "remote_pi_control"` from `protocol/schema/cockpit-control.schema.json` rather than the example `"remote-pi-control"` spelling in the notes.
 - Verification: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; `corepack pnpm exec vitest run src/extension.test.ts` reported 161 passed / 4 failed out of 165 before the harness timeout.
 - False-alarm observation: the 4 failing tests were `after a clean reset, connect works again (flag is per-instance, not sticky)`, `join emits remote-pi:name-assigned with requested + assigned + changed`, `rename:<name> renames live (broker re-register + relay swap), process/session survive`, and `a second same-name agent joins as <name>#2 instead of being refused`; these match the known environment/cwd-lock/name-assigned/rename false-failure pattern. A focused `-t "relay control channel"` run showed all new control tests passing, with only the known `rename:<name>...` false-alarm failing.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran (clean state): `corepack pnpm typecheck`
+clean; **full pi-ext suite 670 passed | 3 skipped | 0 failed (44 files)** — fully green
+(up from 666 — the agent's new structured `remote_pi_control` parser tests). The "4
+failed + harness close timeout" the agent reported were the false-alarm pattern + a
+transient harness teardown issue — confirmed by clean orchestrator re-run (0 failures).
+The agent CORRECTLY classified them by reading the actual test names.
+
+Implementation verified: added a schema-shaped `remote_pi_control` parser normalizing
+`relay_on`/`relay_off`/`relay_toggle`/`relay_status`/`rename` into the existing legacy
+command strings before dispatch; `CTRL_PREFIX` kept as explicit compat decoder; both
+structured + legacy frames route through the same `_dispatchControlFrame`/`_handleControl`
+path. Tests prove legacy + structured control input dispatches relay-state, structured
+rename parses to the same command path, unknown/malformed JSON falls through as normal
+input. Invariant listener-count tests untouched and passing. Commit `7a94ca1` scoped to
+pi-ext only (extension.test.ts +46); collision guard held.
