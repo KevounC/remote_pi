@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-frame-dispatch-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-frame-dispatch
 depends_on: [epic-bold-relay-typed-actor-frame-dispatch-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Route cross-PC `pi_envelope` through typed dispatch
@@ -105,3 +105,14 @@ Medium. Cross-PC delivery errors are user-visible through ACK/transport-error ha
 ## Rollback
 
 Restore the `serde_json::Value` signature on `handle_pi_envelope` and the raw `frame.get(...)` extraction. Because this story keeps peer-wide fanout unchanged, rollback is isolated.
+
+## Implementation
+
+- Routed `DecodedRelayFrame::PiEnvelope` through `ConnectionActor::dispatch_pi_envelope` directly into `handle_pi_envelope` with the generated `PiEnvelopeFrame`; the previous typed-frame-to-raw-JSON reserialization shim was removed.
+- Changed `handle_pi_envelope` to consume generated `PiEnvelopeFrame` and `AgentEnvelope`/`PiEnvelopeInFrame` types. Malformed `pi_envelope` compatibility stays isolated in `handle_malformed_pi_envelope` so `bad_envelope` can still recover only generic correlation fields (`id`, `from`) from the boundary raw value.
+- Preserved relay opacity: the relay never parses generic envelope `body` or endpoint-owned `session_id`; tests keep `session_id` inside opaque bodies and verify it is carried unchanged.
+- Preserved transport-error compatibility: `_relay` `pi_envelope_in` wrappers still carry `body.type: "transport_error"`, `reason` values `bad_envelope`/`not_authorized`/`offline`, and `re` correlation from the original generic envelope id when available.
+- Preserved mesh authorization via authenticated `sender_peer_id`; added a test proving authorization and outgoing `from_pc` use the authenticated sender even when human-readable `envelope.from` is spoofed.
+- Preserved peer-wide `forward_to_peer`; no `to_room` targeting or registry behavior changed.
+- Regen verdict: not applicable; generator and generated protocol files were untouched.
+- Verification: targeted `cargo test pi_forward --lib` passed (13/13); targeted `cargo test dispatch_malformed_pi_envelope --lib` passed (1/1); full relay `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build` passed. Full `cargo test` reported 89 lib tests, 0 main tests, and integration suites 3 + 13 + 8 + 10 + 2 + 19 all passing.

@@ -4,13 +4,14 @@ use std::sync::Arc;
 use tokio::time::{self, Duration};
 use tracing::warn;
 
-use crate::handlers::pi_forward::{MeshAuthCache, PiForwardResult, handle_pi_envelope};
+use crate::handlers::pi_forward::{
+    MeshAuthCache, PiForwardResult, handle_malformed_pi_envelope, handle_pi_envelope,
+};
 use crate::mesh::MeshStore;
 use crate::metrics::FirehoseMetrics;
 use crate::peers::registry::PeerRegistry;
 use crate::presence::{PeerPresence, PresenceManager};
 use crate::protocol::frame::{DecodedRelayFrame, PiEnvelopeFrame};
-use crate::protocol::generated::cross_pc::CrossPcFrame;
 use crate::protocol::outer::OuterEnvelope;
 use crate::rooms::RoomManager;
 
@@ -160,25 +161,24 @@ impl ConnectionActor {
     }
 
     async fn dispatch_pi_envelope(&mut self, frame: PiEnvelopeFrame) -> ActorDispatch {
-        let frame = serde_json::to_value(CrossPcFrame::PiEnvelope(frame))
-            .expect("generated pi_envelope serialisation is infallible");
-        self.dispatch_pi_envelope_value(&frame).await
+        self.pi_forward_result_to_dispatch(
+            handle_pi_envelope(
+                &self.peer_id,
+                frame,
+                &self.registry,
+                &self.mesh,
+                &self.mesh_auth,
+            )
+            .await,
+        )
     }
 
     async fn dispatch_malformed_pi_envelope(&mut self, frame: serde_json::Value) -> ActorDispatch {
-        self.dispatch_pi_envelope_value(&frame).await
+        self.pi_forward_result_to_dispatch(handle_malformed_pi_envelope(&frame))
     }
 
-    async fn dispatch_pi_envelope_value(&mut self, frame: &serde_json::Value) -> ActorDispatch {
-        match handle_pi_envelope(
-            &self.peer_id,
-            frame,
-            &self.registry,
-            &self.mesh,
-            &self.mesh_auth,
-        )
-        .await
-        {
+    fn pi_forward_result_to_dispatch(&self, result: PiForwardResult) -> ActorDispatch {
+        match result {
             PiForwardResult::Forwarded => ActorDispatch::Continue,
             PiForwardResult::TransportError(message) => match message {
                 axum::extract::ws::Message::Text(text) => ActorDispatch::Send(text),
@@ -300,6 +300,46 @@ mod tests {
             .to_text()
             .expect("forwarded envelope must be text")
             .to_string()
+    }
+
+    #[tokio::test]
+    async fn dispatch_malformed_pi_envelope_returns_bad_envelope_transport_error() {
+        let services = actor_services();
+        let mut actor = ConnectionActor::new(
+            "sender-peer".to_string(),
+            "der-peer".to_string(),
+            "sender-room".to_string(),
+            42,
+            services,
+        );
+
+        let dispatch = actor
+            .dispatch(DecodedRelayFrame::MalformedPiEnvelope(serde_json::json!({
+                "type": "pi_envelope",
+                "envelope": {
+                    "from": "a:sess",
+                    "to": "b:agent",
+                    "id": "018f4444-4444-7444-8444-444444444444",
+                    "re": null,
+                    "body": { "type": "ping", "session_id": "opaque-session" }
+                }
+            })))
+            .await;
+
+        let ActorDispatch::Send(text) = dispatch else {
+            panic!("malformed pi_envelope must send a transport_error");
+        };
+        let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(frame["type"], "pi_envelope_in");
+        assert_eq!(frame["from_pc"], "_relay");
+        assert_eq!(frame["envelope"]["from"], "_relay");
+        assert_eq!(frame["envelope"]["to"], "a:sess");
+        assert_eq!(
+            frame["envelope"]["re"],
+            "018f4444-4444-7444-8444-444444444444"
+        );
+        assert_eq!(frame["envelope"]["body"]["type"], "transport_error");
+        assert_eq!(frame["envelope"]["body"]["reason"], "bad_envelope");
     }
 
     #[test]
