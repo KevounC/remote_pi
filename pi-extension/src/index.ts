@@ -57,8 +57,18 @@ import type {
   ServerMessage,
   SessionHistoryEvent,
   ThinkingLevel,
-  WireImage,
 } from "./protocol/types.js";
+import type { TranscriptEvent } from "./session/transcript_event.js";
+import {
+  appendTranscriptEvent,
+  deterministicTranscriptEventId,
+  imagesFromContent,
+  mapLegacyAgentMessagesToTranscriptEvents,
+  projectSessionHistory,
+  stringifyContent,
+  stringifyToolResult,
+  type LegacyAgentMessage,
+} from "./session/transcript_projection.js";
 import { RelayClient, RoomAlreadyOpenError } from "./transport/relay_client.js";
 import { PlainPeerChannel } from "./transport/peer_channel.js";
 import { createCommandSurface } from "./extension/command_surface.js";
@@ -431,23 +441,17 @@ function _refreshFooter(ctx?: RemotePiUiContext): void {
 let _sessionStartedAt: number | null = null;
 const _remoteSessionIssuer = new RemoteSessionIssuer();
 
-// Snapshot of agent messages, captured on every agent_end event. Used to
-// answer session_sync. Cleared on _goIdle.
-type BufferMsg = {
-  role: "user" | "assistant" | "toolResult" | string;
-  content?: unknown;
-  timestamp?: number;
-  toolCallId?: string;
-  toolName?: string;
-  isError?: boolean;
-  usage?: { input?: number; output?: number };
-  /** Plan/32: pre-compaction token count, set on the synthetic
-   *  `role:"compaction"` marker pushed in `session_compact`. */
-  tokensBefore?: number;
-};
-let _messageBuffer: BufferMsg[] = [];
+// Append-only transcript event log for session_sync history projection.
+// Preserved across relay stop/reconnect because the Pi agent session outlives
+// the relay connection. Cleared only when a new Pi session is created.
+let _transcriptEvents: TranscriptEvent[] = [];
 
-/** Test-only override of the message buffer. */
+// App-origin user messages are echoed immediately after SDK acceptance, before
+// the SDK's later message_end persistence callback. Keep a small deterministic
+// signature map so that callback appends the same event id and the event log
+// deduper treats it as replay rather than a duplicate user bubble.
+const _deliveredUserEventIds = new Map<string, { clientMessageId: string; eventId: string }[]>();
+
 /**
  * Test-only: emulate what `/remote-pi` does on the returning-user path
  * (join the local mesh, then start the relay) without touching the FS for
@@ -498,13 +502,32 @@ export async function _startRelayForTest(ctx: unknown): Promise<void> {
   await _cmdStart(ctx as Parameters<typeof _cmdStart>[0]);
 }
 
+// Legacy test adapter: accepts old SDK-message fixtures but stores transcript events.
 export function _setMessageBufferForTest(msgs: unknown[]): void {
-  _messageBuffer = msgs as BufferMsg[];
+  _deliveredUserEventIds.clear();
+  _lastTranscriptUserId = null;
+  _transcriptEvents = mapLegacyAgentMessagesToTranscriptEvents({
+    sessionId: _currentRemoteSessionId(),
+    messages: msgs as LegacyAgentMessage[],
+  });
+  const lastUser = [..._transcriptEvents].reverse().find((event) =>
+    event.kind === "user_confirmed" || event.kind === "user_submitted"
+  );
+  _lastTranscriptUserId = lastUser?.clientMessageId ?? null;
 }
 
-/** Test-only accessor: returns a defensive copy of the buffer. */
-export function _getMessageBufferForTest(): unknown[] {
-  return [..._messageBuffer];
+export function _setTranscriptEventsForTest(events: TranscriptEvent[]): void {
+  _deliveredUserEventIds.clear();
+  _transcriptEvents = [...events];
+  const lastUser = [..._transcriptEvents].reverse().find((event) =>
+    event.kind === "user_confirmed" || event.kind === "user_submitted"
+  );
+  _lastTranscriptUserId = lastUser?.clientMessageId ?? null;
+}
+
+/** Test-only accessor: returns a defensive copy of the transcript event log. */
+export function _getTranscriptEventsForTest(): TranscriptEvent[] {
+  return [..._transcriptEvents];
 }
 
 /** Test-only override of session started timestamp. */
@@ -527,6 +550,153 @@ function _currentRemoteSessionId(ctx?: unknown): string {
 
 function _withCurrentSession<T extends object>(msg: T): T & { session_id: string } {
   return { ...msg, session_id: _currentRemoteSessionId() };
+}
+
+let _lastTranscriptUserId: string | null = null;
+
+function _appendTranscriptEvent(event: TranscriptEvent): void {
+  _transcriptEvents = appendTranscriptEvent(_transcriptEvents, event);
+}
+
+function _rememberDeliveredUserEvent(
+  text: string,
+  images: readonly { data: string; mime: string }[] | undefined,
+  clientMessageId: string,
+  eventId: string,
+): void {
+  const key = _userContentSignature(text, images);
+  const existing = _deliveredUserEventIds.get(key) ?? [];
+  existing.push({ clientMessageId, eventId });
+  _deliveredUserEventIds.set(key, existing);
+}
+
+function _consumeDeliveredUserEvent(
+  text: string,
+  images: readonly { data: string; mime: string }[] | undefined,
+): { clientMessageId: string; eventId: string } | undefined {
+  const key = _userContentSignature(text, images);
+  const existing = _deliveredUserEventIds.get(key);
+  if (!existing || existing.length === 0) return undefined;
+  const match = existing.shift();
+  if (existing.length === 0) _deliveredUserEventIds.delete(key);
+  return match;
+}
+
+function _userContentSignature(
+  text: string,
+  images: readonly { data: string; mime: string }[] | undefined,
+): string {
+  return JSON.stringify({ text, images: images ?? [] });
+}
+
+function _appendUserConfirmedTranscriptEvent(input: {
+  sessionId: string;
+  ts: number;
+  clientMessageId: string;
+  text: string;
+  images?: Extract<TranscriptEvent, { kind: "user_confirmed" }>["images"];
+  streamingBehavior?: Extract<TranscriptEvent, { kind: "user_confirmed" }>["streamingBehavior"];
+  eventId?: string;
+}): void {
+  const eventId = input.eventId
+    ?? deterministicTranscriptEventId(input.sessionId, "user_confirmed", input.clientMessageId);
+  _appendTranscriptEvent({
+    kind: "user_confirmed",
+    eventId,
+    sessionId: input.sessionId,
+    ts: input.ts,
+    clientMessageId: input.clientMessageId,
+    text: input.text,
+    ...(input.images && input.images.length > 0 ? { images: [...input.images] } : {}),
+    ...(input.streamingBehavior ? { streamingBehavior: input.streamingBehavior } : {}),
+  });
+  _lastTranscriptUserId = input.clientMessageId;
+}
+
+function _appendLegacySdkMessageToTranscript(message: LegacyAgentMessage): void {
+  const sessionId = _currentRemoteSessionId();
+  const ts = typeof message.timestamp === "number" ? message.timestamp : Date.now();
+  if (message.role === "user") {
+    const text = stringifyContent(message.content);
+    const images = imagesFromContent(message.content);
+    const matched = _consumeDeliveredUserEvent(text, images);
+    const clientMessageId = matched?.clientMessageId ?? `sync_${ts}`;
+    _appendUserConfirmedTranscriptEvent({
+      sessionId,
+      ts,
+      clientMessageId,
+      text,
+      ...(images.length > 0 ? { images } : {}),
+      ...(matched ? { eventId: matched.eventId } : {}),
+    });
+    return;
+  }
+
+  if (message.role === "assistant") {
+    const content = Array.isArray(message.content) ? message.content : [];
+    const usage = message.usage
+      ? { input_tokens: message.usage.input ?? 0, output_tokens: message.usage.output ?? 0 }
+      : undefined;
+    for (const [blockIndex, raw] of content.entries()) {
+      if (!raw || typeof raw !== "object") continue;
+      const block = raw as { type?: string; text?: unknown; id?: unknown; name?: unknown; arguments?: unknown };
+      if (block.type === "text") {
+        const text = String(block.text ?? "");
+        if (!text) continue;
+        const messageId = `sync_${ts}:assistant:${blockIndex}`;
+        _appendTranscriptEvent({
+          kind: "assistant_committed",
+          eventId: deterministicTranscriptEventId(sessionId, "assistant_committed", messageId),
+          sessionId,
+          ts,
+          messageId,
+          replyTo: _lastTranscriptUserId ?? `sync_${ts}`,
+          text,
+          ...(usage ? { usage } : {}),
+        });
+      } else if (block.type === "toolCall") {
+        const toolCallId = String(block.id ?? `sync_${ts}:tool:${blockIndex}`);
+        _appendTranscriptEvent({
+          kind: "tool_requested",
+          eventId: deterministicTranscriptEventId(sessionId, "tool_requested", toolCallId),
+          sessionId,
+          ts,
+          toolCallId,
+          tool: String(block.name ?? ""),
+          args: _recordArgs(block.arguments),
+        });
+      }
+    }
+    return;
+  }
+
+  if (message.role === "toolResult") {
+    const toolCallId = String(message.toolCallId ?? `sync_${ts}:tool-result`);
+    const text = stringifyToolResult(message.content);
+    _appendTranscriptEvent(message.isError
+      ? {
+          kind: "tool_finished",
+          eventId: deterministicTranscriptEventId(sessionId, "tool_finished", toolCallId),
+          sessionId,
+          ts,
+          toolCallId,
+          error: text,
+        }
+      : {
+          kind: "tool_finished",
+          eventId: deterministicTranscriptEventId(sessionId, "tool_finished", toolCallId),
+          sessionId,
+          ts,
+          toolCallId,
+          result: text,
+        });
+  }
+}
+
+function _recordArgs(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 function _captureRemoteSession(ctx: unknown): string {
@@ -836,11 +1006,11 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
   // Cross-PC routing relies on _relay being up; tear it down here too.
   _meshNode?.detachBridge();
 
-  // Preserve _sessionStartedAt + _messageBuffer across stop/start cycles.
+  // Preserve _sessionStartedAt + _transcriptEvents across stop/start cycles.
   // The Pi agent session outlives the relay connection — `message_end` keeps
-  // firing for terminal turns even while idle, and the buffer must survive
-  // so those turns appear in the next session_sync. Only a Pi process
-  // restart resets these (init-time values).
+  // firing for terminal turns even while idle, and the transcript event log
+  // must survive so those turns appear in the next session_sync. Only a Pi
+  // process restart resets these (init-time values).
 
   _state = "idle";
   _refreshFooter();
@@ -849,7 +1019,7 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
 
 /**
  * Called when the relay WS closes unexpectedly (network drop, relay restart,
- * etc.). Does a **partial** teardown — keeps `_sessionStartedAt`, `_messageBuffer`,
+ * etc.). Does a **partial** teardown — keeps `_sessionStartedAt`, `_transcriptEvents`,
  * `_relayUrl`, `_cachedEd25519`, `_peerShort` so the session can resume on
  * reconnect — and schedules an `_attemptReconnect`.
  *
@@ -1496,22 +1666,48 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   // executes; tool_execution_end closes the loop with the result. Together
   // they render a "Tool running… done" timeline in each paired app.
   pi.on("tool_execution_start", (event) => {
+    const sessionId = _currentRemoteSessionId();
+    const args = _enrichToolArgs(event.toolName, event.args);
+    _appendTranscriptEvent({
+      kind: "tool_requested",
+      eventId: deterministicTranscriptEventId(sessionId, "tool_requested", event.toolCallId),
+      sessionId,
+      ts: Date.now(),
+      toolCallId: event.toolCallId,
+      tool: event.toolName,
+      args,
+    });
     if (!_anyPeerActive()) return;
     _broadcastToActive(_withCurrentSession({
       type: "tool_request",
       tool_call_id: event.toolCallId,
       tool: event.toolName,
-      args: _enrichToolArgs(event.toolName, event.args),
+      args,
     }));
   });
 
   pi.on("tool_execution_end", (event) => {
+    // Stringify through the transcript projection helper so live == re-sync.
+    const text = stringifyToolResult(event.result);
+    const sessionId = _currentRemoteSessionId();
+    _appendTranscriptEvent(event.isError
+      ? {
+          kind: "tool_finished",
+          eventId: deterministicTranscriptEventId(sessionId, "tool_finished", event.toolCallId),
+          sessionId,
+          ts: Date.now(),
+          toolCallId: event.toolCallId,
+          error: text,
+        }
+      : {
+          kind: "tool_finished",
+          eventId: deterministicTranscriptEventId(sessionId, "tool_finished", event.toolCallId),
+          sessionId,
+          ts: Date.now(),
+          toolCallId: event.toolCallId,
+          result: text,
+        });
     if (!_anyPeerActive()) return;
-    // Stringify like the history mapper (same helper) so the live text == what
-    // a session_sync replays for this tool. Raw `String(event.result)` turned
-    // a content-array/object into "[object Object]" and the success branch sent
-    // the object unstringified — both diverging from re-sync.
-    const text = _stringifyToolResult(event.result);
     const msg: ServerMessage = event.isError
       ? _withCurrentSession({ type: "tool_result", tool_call_id: event.toolCallId, error: text })
       : _withCurrentSession({ type: "tool_result", tool_call_id: event.toolCallId, result: text });
@@ -1529,7 +1725,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     const m = event?.message as { role?: string; stopReason?: string; errorMessage?: string } | undefined;
     if (!m) return;
     if (m.role === "user" || m.role === "assistant" || m.role === "toolResult") {
-      _messageBuffer.push(m as unknown as BufferMsg);
+      _appendLegacySdkMessageToTranscript(m as unknown as LegacyAgentMessage);
     }
     // Forward a failed turn to connected owners. Without this the app just
     // hangs with no response when the provider errors (e.g. the TUI's
@@ -1602,10 +1798,18 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     const summary = typeof entry?.summary === "string" ? entry.summary : "";
     const tokensBefore = typeof entry?.tokensBefore === "number" ? entry.tokensBefore : 0;
     const ts = Date.now();
-    // (2) Persist in history: the CompactionEntry never reaches _messageBuffer
-    // via message_end (only user/assistant/toolResult), so push a synthetic
-    // marker the mapper turns into a `compaction` event — survives session_sync.
-    _messageBuffer.push({ role: "compaction", content: summary, timestamp: ts, tokensBefore });
+    // (2) Persist in history: the CompactionEntry never reaches message_end
+    // (only user/assistant/toolResult), so append a transcript event that the
+    // session_history projection turns into a `compaction` event.
+    const sessionId = _currentRemoteSessionId();
+    _appendTranscriptEvent({
+      kind: "compaction_recorded",
+      eventId: deterministicTranscriptEventId(sessionId, "compaction_recorded", String(ts)),
+      sessionId,
+      ts,
+      summary,
+      tokensBefore,
+    });
     // (1) Live result to every connected owner.
     _broadcastToActive(_withCurrentSession({ type: "compaction", summary, tokens_before: tokensBefore, ts }));
     // (3) Working ends.
@@ -2192,7 +2396,7 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
   // the terminal turns that happened during the idle window). Pi process
   // restart is the only thing that produces a fresh session_started_at.
   if (_sessionStartedAt === null) _sessionStartedAt = Date.now();
-  // _messageBuffer intentionally preserved across stop/start — it accumulates
+  // _transcriptEvents intentionally preserved across stop/start — it accumulates
   // message_end events for the lifetime of the Pi process, including turns
   // initiated from the terminal while the relay was disconnected.
 
@@ -3433,6 +3637,18 @@ async function _deliverUserMessage(
     _sendDeliveryError(sender, msg.id, wake.detail);
     return;
   }
+  const sessionId = _currentRemoteSessionId();
+  const eventId = deterministicTranscriptEventId(sessionId, "user_confirmed", msg.id);
+  _appendUserConfirmedTranscriptEvent({
+    sessionId,
+    ts: Date.now(),
+    clientMessageId: msg.id,
+    text: msg.text,
+    ...(msg.images && msg.images.length > 0 ? { images: msg.images } : {}),
+    ...(shouldSteer ? { streamingBehavior: "steer" as const } : {}),
+    eventId,
+  });
+  _rememberDeliveredUserEvent(msg.text, msg.images, msg.id, eventId);
   const echo: ServerMessage = _withCurrentSession({
     type: "user_message",
     id: msg.id,
@@ -3521,8 +3737,8 @@ export function _routeClientMessageFrom(
       // Source-of-truth rebroadcast (plan/24 W2D fix). Echo the message
       // back to every attached owner (sender included) after the SDK accepts
       // the handoff, so optimistic app bubbles only confirm on real delivery.
-      // The user_message is also recorded in _messageBuffer indirectly via
-      // `pi.on("message_end")`, so a later `session_sync` returns it in history.
+      // The user_message is also recorded in _transcriptEvents after SDK
+      // acceptance, so a later `session_sync` returns it in history.
       void _deliverUserMessage(msg, sender).catch((err: unknown) => {
         const detail = err instanceof Error ? err.message : String(err);
         _sendDeliveryError(sender, msg.id, detail);
@@ -3597,7 +3813,7 @@ export function _routeClientMessageFrom(
         },
       ).then((created) => {
         // Pi-side reset is durable only here: handleSessionNew swaps the SDK
-        // session, but the app's session_sync log (_messageBuffer) and the
+        // session, but the app's session_sync log (_transcriptEvents) and the
         // session clock (_sessionStartedAt) live in this module. Reset them +
         // fan out an empty history so every owner drops the stale conversation
         // — not just the sender, who also clears locally on action_ok.
@@ -3685,26 +3901,28 @@ function _buildSessionHistoryMessage(
   const requested = limit ?? serverLimit;
   const effectiveLimit = Math.min(requested, serverLimit);  // server clamps
 
-  const allEvents = _mapAgentMessagesToEvents(_messageBuffer);
-  const slice = effectiveLimit > 0 ? allEvents.slice(-effectiveLimit) : [];
-  const truncated = allEvents.length > effectiveLimit;
+  const projection = projectSessionHistory({
+    sessionId: _currentRemoteSessionId(),
+    events: _transcriptEvents,
+    limit: effectiveLimit,
+  });
 
   return _withCurrentSession({
     type: "session_history",
     in_reply_to: inReplyTo,
     session_started_at: _sessionStartedAt ?? 0,
-    events: slice,
+    events: projection.events,
     eos: true,
-    truncated,
+    truncated: projection.truncated,
   });
 }
 
 /**
  * Resets the Pi-side session view after a SUCCESSFUL `session_new`. The app's
  * New Session clears its local store on `action_ok`, but that alone isn't
- * durable: `_messageBuffer` (which answers `session_sync`) is append-only and
+ * durable: `_transcriptEvents` (which answers `session_sync`) is append-only and
  * `_sessionStartedAt` is stamped once, so a later reconnect/restart would
- * replay the OLD history. We clear the buffer, restamp the clock, and
+ * replay the OLD history. We clear the transcript event log, restamp the clock, and
  * broadcast an EMPTY `session_history` — the exact shape `_handleSessionSync`
  * sends, just with `events: []` — so every attached owner drops the stale
  * conversation. The app's `_applyHistory` substitutes its cache wholesale, so
@@ -3715,7 +3933,9 @@ function _buildSessionHistoryMessage(
  * a new session is global state, so every owner must see the reset.
  */
 function _resetSessionForNew(inReplyTo: string): void {
-  _messageBuffer = [];
+  _transcriptEvents = [];
+  _deliveredUserEventIds.clear();
+  _lastTranscriptUserId = null;
   _applyTurnAndPublish({ type: "session_shutdown" });
   _resetTurnSnapshot();
   _publishWorking(false);
@@ -3877,145 +4097,19 @@ function _stringArg(args: ToolArgs, keys: string[]): string {
   return "";
 }
 
-function _stringifyContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((c) => {
-      if (!c || typeof c !== "object") return "";
-      const block = c as { type?: string; text?: unknown };
-      return block.type === "text" ? String(block.text ?? "") : "";
-    })
-    .join("");
-}
-
-/**
- * Stringify a tool result consistently for BOTH the live `tool_execution_end`
- * broadcast AND the history mapper, so the app shows the same text live and on
- * re-sync. The SDK's `ToolExecutionEndEvent.result` is `any` — usually a
- * content-array of `{type:"text"}` blocks; `String()` on that yields the
- * "[object Object]" bug. Rules: string → as-is; content-array → join its text
- * (same as `_stringifyContent`); any other object → readable JSON; other
- * primitives → `String()`; null/undefined → "". Never "[object Object]".
- */
-function _stringifyToolResult(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return _stringifyContent(value);
-  if (value !== null && typeof value === "object") {
-    // The LIVE `tool_execution_end` result is a WRAPPER object
-    // `{ content: [{type:"text",...}], details:{} }` — not the bare
-    // content-array the history path (`m.content`) carries. Unwrap `content`
-    // (or a plain `text`) so live == re-sync; JSON is only the last fallback.
-    const obj = value as { content?: unknown; text?: unknown };
-    if (Array.isArray(obj.content)) return _stringifyContent(obj.content);
-    if (typeof obj.text === "string") return obj.text;
-    try { return JSON.stringify(value); } catch { return ""; }
-  }
-  return value === null || value === undefined ? "" : String(value);
-}
-
-/**
- * Plan/30: extract `ImageContent` blocks ({type:"image", data, mimeType}) from
- * an SDK message's content and map them to the wire shape (`mimeType` → `mime`).
- * Used by the history mapper so a re-synced image bubble keeps its bytes —
- * `_stringifyContent` only pulls text and would otherwise drop the image.
- */
-function _imagesFromContent(content: unknown): WireImage[] {
-  if (!Array.isArray(content)) return [];
-  const out: WireImage[] = [];
-  for (const c of content) {
-    if (!c || typeof c !== "object") continue;
-    const block = c as { type?: string; data?: unknown; mimeType?: unknown };
-    if (block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string") {
-      out.push({ data: block.data, mime: block.mimeType });
-    }
-  }
-  return out;
-}
-
-/**
- * Maps SDK AgentMessage[] (UserMessage / AssistantMessage / ToolResultMessage)
- * into the flat SessionHistoryEvent[] shape consumed by the app.
- *
- * Caveats (see report): in_reply_to of agent_message is the *last* user_input
- * id seen in a linear scan — fine for typical conversational flow but not
- * a perfect reconstruction of multi-turn ordering when tools interleave.
- * Stable id for user_input is `sync_<timestamp>`.
- */
+/** Legacy adapter retained for tests and compatibility probes. The history
+ * projection itself is now `mapLegacyAgentMessagesToTranscriptEvents` followed
+ * by `projectSessionHistory`, so SDK-message mapping rules live in
+ * `session/transcript_projection.ts` instead of this runtime module. */
 export function _mapAgentMessagesToEvents(
-  messages: BufferMsg[],
+  messages: LegacyAgentMessage[],
 ): SessionHistoryEvent[] {
-  const events: SessionHistoryEvent[] = [];
-  let lastUserId: string | null = null;
-
-  for (const m of messages) {
-    const ts = typeof m.timestamp === "number" ? m.timestamp : 0;
-
-    if (m.role === "compaction") {
-      // Plan/32: re-render the compaction notice on history re-sync.
-      events.push({
-        ts,
-        type: "compaction",
-        summary: typeof m.content === "string" ? m.content : "",
-        tokens_before: typeof m.tokensBefore === "number" ? m.tokensBefore : 0,
-      });
-    } else if (m.role === "user") {
-      const id = `sync_${ts}`;
-      lastUserId = id;
-      // Plan/30: keep any image blocks so a re-sync rebuilds the bubble. The
-      // bytes are already in _messageBuffer; only attach `images` when present
-      // so the text-only path stays byte-identical (no `images` key).
-      const images = _imagesFromContent(m.content);
-      const ev: SessionHistoryEvent = {
-        ts,
-        type: "user_input",
-        id,
-        text: _stringifyContent(m.content),
-      };
-      if (images.length > 0) ev.images = images;
-      events.push(ev);
-    } else if (m.role === "assistant") {
-      const content = Array.isArray(m.content) ? m.content : [];
-      const usage = m.usage
-        ? { input_tokens: m.usage.input ?? 0, output_tokens: m.usage.output ?? 0 }
-        : undefined;
-      for (const raw of content) {
-        if (!raw || typeof raw !== "object") continue;
-        const block = raw as { type?: string; text?: unknown; id?: unknown; name?: unknown; arguments?: unknown };
-        if (block.type === "text") {
-          const text = String(block.text ?? "");
-          if (!text) continue;
-          const ev: SessionHistoryEvent = {
-            ts,
-            type: "agent_message",
-            in_reply_to: lastUserId ?? `sync_${ts}`,
-            text,
-            ...(usage ? { usage } : {}),
-          };
-          events.push(ev);
-        } else if (block.type === "toolCall") {
-          events.push({
-            ts,
-            type: "tool_request",
-            tool_call_id: String(block.id ?? ""),
-            tool: String(block.name ?? ""),
-            args: (block.arguments as Record<string, unknown>) ?? {},
-          });
-        }
-      }
-    } else if (m.role === "toolResult") {
-      // Same helper as the live `tool_execution_end` broadcast → live == re-sync.
-      const text = _stringifyToolResult(m.content);
-      const tcid = String(m.toolCallId ?? "");
-      events.push(
-        m.isError
-          ? { ts, type: "tool_result", tool_call_id: tcid, error: text }
-          : { ts, type: "tool_result", tool_call_id: tcid, result: text },
-      );
-    }
-  }
-
-  return events;
+  const sessionId = _currentRemoteSessionId();
+  return projectSessionHistory({
+    sessionId,
+    events: mapLegacyAgentMessagesToTranscriptEvents({ sessionId, messages }),
+    limit: Number.MAX_SAFE_INTEGER,
+  }).events;
 }
 
 // ── Standalone CLI ────────────────────────────────────────────────────────────

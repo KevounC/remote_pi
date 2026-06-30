@@ -151,7 +151,7 @@ const {
   _setMessageBufferForTest,
   _setSessionStartedAtForTest,
   _hasPendingReconnect,
-  _getMessageBufferForTest,
+  _getTranscriptEventsForTest,
   _setCurrentModelForTest,
   _setPiForTest,
   _getCurrentTurnIdForTest,
@@ -1304,11 +1304,12 @@ describe("multi-channel broadcast (W2D)", () => {
       sendMessage: () => undefined,
     });
     const sendsBefore = relayRef.current!.send.mock.calls.length;
+    const sessionId = currentSessionIdFromSends();
 
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
-        type: "user_message", id: "msg-img", text: "what is this?",
+        type: "user_message", id: "msg-img", session_id: sessionId, text: "what is this?",
         images: [{ data: "QUJD", mime: "image/jpeg" }],
       })).toString("base64"),
     }));
@@ -1656,7 +1657,7 @@ describe("multi-channel broadcast (W2D)", () => {
     expect(_getCurrentTurnIdForTest()).toBe(priorTurn);
   });
 
-  test("plan/32: session_compact → broadcasts compaction, working=false, buffers a marker", async () => {
+  test("plan/32: session_compact → broadcasts compaction, working=false, appends transcript event", async () => {
     await _pairForTest("ownerA__1234567890");
     _setMessageBufferForTest([]);
     const onCompact = captureEventHandler("session_compact");
@@ -1687,10 +1688,10 @@ describe("multi-channel broadcast (W2D)", () => {
     expect(ctrls.some((f) => f.meta?.working === false)).toBe(true);
     expectTurnProjectionConvergedIdle();
 
-    // (2) a compaction marker landed in _messageBuffer (survives session_sync)
-    const buf = _getMessageBufferForTest() as Array<{ role?: string; content?: unknown; tokensBefore?: number }>;
-    expect(buf.some((m) =>
-      m.role === "compaction" && m.content === "compacted 10 turns" && m.tokensBefore === 12345,
+    // (2) a compaction transcript event landed (survives session_sync)
+    const events = _getTranscriptEventsForTest();
+    expect(events.some((event) =>
+      event.kind === "compaction_recorded" && event.summary === "compacted 10 turns" && event.tokensBefore === 12345,
     )).toBe(true);
   });
 
@@ -1756,11 +1757,11 @@ describe("multi-channel broadcast (W2D)", () => {
     });
   });
 
-  test("user_message lands in _messageBuffer → session_sync returns it as user_input", async () => {
-    // The SDK side normally pushes role="user" entries to the buffer on
-    // its `message_end` event. We simulate that effect with the test
-    // helper so we can verify session_sync replays correctly.
+  test("SDK user message lands in transcript events → session_sync returns it as user_input", async () => {
+    // The legacy test helper adapts SDK role="user" entries into transcript
+    // events so we can verify session_sync projection replays correctly.
     await _pairForTest("ownerA__1234567890");
+    const sessionId = currentSessionIdFromSends();
 
     // Simulate the SDK persisting the user turn.
     _setMessageBufferForTest([
@@ -1772,7 +1773,7 @@ describe("multi-channel broadcast (W2D)", () => {
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
-        type: "session_sync", id: "sync-buffer-1", limit: 50,
+        type: "session_sync", id: "sync-buffer-1", session_id: sessionId, limit: 50,
       })).toString("base64"),
     }));
     await new Promise<void>((r) => setImmediate(r));
@@ -2787,7 +2788,7 @@ describe("session sync", () => {
 
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     routeClientMessage(
-      { type: "session_sync", id: "req-1" },
+      { type: "session_sync", id: "req-1", session_id: currentSessionIdFromSends() },
       { abort: () => undefined },
     );
 
@@ -2820,7 +2821,7 @@ describe("session sync", () => {
 
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     routeClientMessage(
-      { type: "session_sync", id: "req-2" },
+      { type: "session_sync", id: "req-2", session_id: currentSessionIdFromSends() },
       { abort: () => undefined },
     );
 
@@ -2848,7 +2849,7 @@ describe("session sync", () => {
 
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     routeClientMessage(
-      { type: "session_sync", id: "req-3", limit: 3 },
+      { type: "session_sync", id: "req-3", session_id: currentSessionIdFromSends(), limit: 3 },
       { abort: () => undefined },
     );
 
@@ -2878,7 +2879,7 @@ describe("session sync", () => {
 
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     routeClientMessage(
-      { type: "session_sync", id: "req-4", limit: 100 },
+      { type: "session_sync", id: "req-4", session_id: currentSessionIdFromSends(), limit: 100 },
       { abort: () => undefined },
     );
 
@@ -2893,7 +2894,7 @@ describe("session sync", () => {
     delete process.env["REMOTE_PI_SYNC_LIMIT"];
   });
 
-  test("buffer with 5 events → returns 5, truncated:false", async () => {
+  test("transcript log with 5 events → returns 5, truncated:false", async () => {
     delete process.env["REMOTE_PI_SYNC_LIMIT"];
     await _pairForTest("peer-ss-mirror-4");
 
@@ -2909,7 +2910,7 @@ describe("session sync", () => {
 
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     routeClientMessage(
-      { type: "session_sync", id: "req-5" },
+      { type: "session_sync", id: "req-5", session_id: currentSessionIdFromSends() },
       { abort: () => undefined },
     );
 
@@ -2920,7 +2921,7 @@ describe("session sync", () => {
     expect(h.inner["truncated"]).toBe(false);
   });
 
-  test("buffer with 50 events + env=30 → returns 30, truncated:true", async () => {
+  test("transcript log with 50 events + env=30 → returns 30, truncated:true", async () => {
     delete process.env["REMOTE_PI_SYNC_LIMIT"];  // default 30
     await _pairForTest("peer-ss-mirror-5");
 
@@ -2936,7 +2937,7 @@ describe("session sync", () => {
 
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     routeClientMessage(
-      { type: "session_sync", id: "req-6" },
+      { type: "session_sync", id: "req-6", session_id: currentSessionIdFromSends() },
       { abort: () => undefined },
     );
 
@@ -2966,7 +2967,7 @@ describe("session sync", () => {
 
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     routeClientMessage(
-      { type: "session_sync", id: "req-7" },
+      { type: "session_sync", id: "req-7", session_id: currentSessionIdFromSends() },
       { abort: () => undefined },
     );
 
@@ -3727,7 +3728,7 @@ describe("relay reconnect", () => {
     }
   });
 
-  test("successful reconnect preserves _sessionStartedAt and _messageBuffer", async () => {
+  test("successful reconnect preserves _sessionStartedAt and _transcriptEvents", async () => {
     vi.useFakeTimers();
     try {
       captureHandler("remote-pi");
@@ -3754,7 +3755,7 @@ describe("relay reconnect", () => {
       // After reconnect we're 'started' without peer — sanity: state stays started
       expect(_getState()).toBe("started");
       void sendsBefore;
-      // The internal _sessionStartedAt / _messageBuffer were preserved if we
+      // The internal _sessionStartedAt / _transcriptEvents were preserved if we
       // can still answer session_sync once the peer reconnects. That path is
       // covered indirectly: we check the values weren't reset by the close.
     } finally {
@@ -3788,9 +3789,9 @@ describe("relay reconnect", () => {
   });
 });
 
-// ── cumulative message buffer (post-fix 15) ───────────────────────────────────
+// ── cumulative transcript event log (post-fix 15) ─────────────────────────────
 
-describe("cumulative buffer", () => {
+describe("cumulative transcript event log", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     _knownPeers.length = 0;
@@ -3842,13 +3843,13 @@ describe("cumulative buffer", () => {
       });
     }
 
-    expect(_getMessageBufferForTest()).toHaveLength(6);
+    expect(_getTranscriptEventsForTest()).toHaveLength(6);
 
     const sessionTs = baseTs;
     _setSessionStartedAtForTest(sessionTs);
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     routeClientMessage(
-      { type: "session_sync", id: "mt-1" },
+      { type: "session_sync", id: "mt-1", session_id: currentSessionIdFromSends() },
       { abort: () => undefined },
     );
 
@@ -3867,7 +3868,7 @@ describe("cumulative buffer", () => {
     expect(events[4]!.text).toBe("prompt 3");
   });
 
-  test("mixed sources (extension + interactive) all land in buffer ordered by ts", async () => {
+  test("mixed sources (extension + interactive) all land in transcript events ordered by ts", async () => {
     await _pairForTest("peer-mix");
     const onInput = captureEventHandler("input");
     const onMsgEnd = captureEventHandler("message_end");
@@ -3888,12 +3889,12 @@ describe("cumulative buffer", () => {
     onMsgEnd({ type: "message_end", message: { role: "user", content: "from term 2", timestamp: baseTs + 5000 } });
     onMsgEnd({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "reply C" }], timestamp: baseTs + 6000 } });
 
-    expect(_getMessageBufferForTest()).toHaveLength(6);
+    expect(_getTranscriptEventsForTest()).toHaveLength(6);
 
     _setSessionStartedAtForTest(baseTs);
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     routeClientMessage(
-      { type: "session_sync", id: "mix-1" },
+      { type: "session_sync", id: "mix-1", session_id: currentSessionIdFromSends() },
       { abort: () => undefined },
     );
 
@@ -3941,12 +3942,12 @@ describe("cumulative buffer", () => {
       },
     });
 
-    expect(_getMessageBufferForTest()).toHaveLength(3);
+    expect(_getTranscriptEventsForTest()).toHaveLength(4);
 
     _setSessionStartedAtForTest(ts);
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     routeClientMessage(
-      { type: "session_sync", id: "t-1" },
+      { type: "session_sync", id: "t-1", session_id: currentSessionIdFromSends() },
       { abort: () => undefined },
     );
 
@@ -3960,7 +3961,7 @@ describe("cumulative buffer", () => {
     expect(events[3]!.tool_call_id).toBe("tc_1");
   });
 
-  test("_cmdStart preserves buffer across stop/start cycle (Pi session outlives relay)", async () => {
+  test("_cmdStart preserves transcript events across stop/start cycle (Pi session outlives relay)", async () => {
     // Simulates: user runs /remote-pi start, exchanges messages, /remote-pi
     // stop, types in terminal (message_end fires while idle), /remote-pi
     // start again. The terminal turns must NOT be wiped by the second start.
@@ -3968,39 +3969,39 @@ describe("cumulative buffer", () => {
       { role: "user", content: "old", timestamp: 1 },
       { role: "assistant", content: [{ type: "text", text: "old" }], timestamp: 2 },
     ]);
-    expect(_getMessageBufferForTest()).toHaveLength(2);
+    expect(_getTranscriptEventsForTest()).toHaveLength(2);
 
     captureHandler("remote-pi");
     await _connectForTest(makeMockCtx());
 
-    expect(_getMessageBufferForTest()).toHaveLength(2);  // PRESERVED
+    expect(_getTranscriptEventsForTest()).toHaveLength(2);  // PRESERVED
   });
 
-  test("_goIdle preserves buffer + sessionStartedAt across /remote-pi stop", async () => {
+  test("_goIdle preserves transcript events + sessionStartedAt across /remote-pi stop", async () => {
     captureHandler("remote-pi");
     await _connectForTest(makeMockCtx());
 
     const onMsgEnd = captureEventHandler("message_end");
     onMsgEnd({ type: "message_end", message: { role: "user", content: "x", timestamp: 100 } });
     onMsgEnd({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "y" }], timestamp: 200 } });
-    expect(_getMessageBufferForTest()).toHaveLength(2);
+    expect(_getTranscriptEventsForTest()).toHaveLength(2);
 
     const stop = captureHandler("remote-pi stop");
     await stop("", makeMockCtx());
     expect(_getState()).toBe("idle");
-    expect(_getMessageBufferForTest()).toHaveLength(2);  // PRESERVED across stop
+    expect(_getTranscriptEventsForTest()).toHaveLength(2);  // PRESERVED across stop
 
     // Simulate terminal turn during idle window
     onMsgEnd({ type: "message_end", message: { role: "user", content: "terminal", timestamp: 300 } });
     onMsgEnd({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "terminal reply" }], timestamp: 400 } });
-    expect(_getMessageBufferForTest()).toHaveLength(4);
+    expect(_getTranscriptEventsForTest()).toHaveLength(4);
 
-    // Start again → buffer still has all 4
+    // Start again → transcript event log still has all 4
     await _connectForTest(makeMockCtx());
-    expect(_getMessageBufferForTest()).toHaveLength(4);
+    expect(_getTranscriptEventsForTest()).toHaveLength(4);
   });
 
-  test("_onRelayClose preserves buffer (regression — buffer must survive reconnect)", async () => {
+  test("_onRelayClose preserves transcript events (regression — log must survive reconnect)", async () => {
     vi.useFakeTimers();
     try {
       captureHandler("remote-pi");
@@ -4009,16 +4010,16 @@ describe("cumulative buffer", () => {
       const onMsgEnd = captureEventHandler("message_end");
       onMsgEnd({ type: "message_end", message: { role: "user", content: "x", timestamp: 100 } });
       onMsgEnd({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "y" }], timestamp: 200 } });
-      expect(_getMessageBufferForTest()).toHaveLength(2);
+      expect(_getTranscriptEventsForTest()).toHaveLength(2);
 
       // Force relay close → _onRelayClose path
       relayInstances[0]!.emit("close");
-      // Don't even wait for reconnect — just verify buffer survives the close
-      expect(_getMessageBufferForTest()).toHaveLength(2);
+      // Don't even wait for reconnect — just verify transcript events survive the close
+      expect(_getTranscriptEventsForTest()).toHaveLength(2);
 
       // After reconnect, still preserved
       await vi.advanceTimersByTimeAsync(1_000);
-      expect(_getMessageBufferForTest()).toHaveLength(2);
+      expect(_getTranscriptEventsForTest()).toHaveLength(2);
     } finally {
       vi.useRealTimers();
     }

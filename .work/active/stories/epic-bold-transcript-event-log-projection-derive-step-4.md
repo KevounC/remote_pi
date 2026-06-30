@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Make pi-extension session history a projection from transcript events
@@ -76,3 +76,17 @@ Medium. Bad mapping can make live output diverge from re-sync history or change 
 ## Rollback
 
 Restore `_messageBuffer` as the direct `session_history` input and leave app/cockpit projection work intact.
+
+## Implementation notes
+
+- Files changed: `pi-extension/src/index.ts`, `pi-extension/src/session/transcript_projection.ts`, `pi-extension/src/session/transcript_projection.test.ts`, `pi-extension/src/extension.test.ts`.
+- Tests added: `pi-extension/src/session/transcript_projection.test.ts` covers `projectSessionHistory` limit/truncated, image replay, compaction replay, event-id dedupe, session filtering, legacy SDK-message-to-`TranscriptEvent` adaptation, and shared tool-result stringification.
+- Behavior notes: `_messageBuffer` was removed from production state and replaced by `_transcriptEvents`; `_setMessageBufferForTest` remains only as a legacy test adapter that converts SDK-message fixtures into transcript events. `_mapAgentMessagesToEvents` is now a compatibility shim implemented as `mapLegacyAgentMessagesToTranscriptEvents(...)` + `projectSessionHistory(...)`.
+- Verification:
+  - `corepack pnpm typecheck` — passed.
+  - `corepack pnpm exec vitest run src/session/transcript_projection.test.ts` — passed (6 tests).
+  - `corepack pnpm exec vitest run src/extension.test.ts -t "session sync|cumulative transcript event log|session_compact|SDK user message lands|user_message with an image|late owner attach"` — passed (23 selected tests).
+  - `corepack pnpm exec vitest run src/extension.test.ts` — ran once; failed with 25 failures. The selected transcript-history tests passed; remaining failures are outside this story's touched assertions and include pre-existing fixture-count/session-id test drift plus the documented UDS/cwd-lock `bind()` EPERM ceiling (for example `acquireCwdLock`/mesh-join dependent cases). This run did not reveal a transcript-history regression.
+- Environment ceiling: full `extension.test.ts` is not a green signal in this sandbox because Unix domain socket `bind()` is blocked with `EPERM`, causing cwd-lock/mesh setup failures; this matches the UDS-EPERM triage in the task prompt.
+- Discrepancies from design: none for runtime shape; test fixtures that route session-scoped `session_sync`/`user_message` through the router now include the current `session_id` so they exercise the canonical session gate instead of receiving `session_mismatch`.
+- Adjacent issues parked: none.
