@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-composition-root-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-composition-root
 depends_on: [epic-bold-split-pi-extension-index-composition-root-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Lock compatibility seams and test-harness exports
@@ -63,3 +63,10 @@ Medium: changing exports can break tests or downstream private users if aliases 
 
 ## Rollback
 Remove the harness wrapper and restore direct `_fooForTest` function exports in `index.ts`.
+
+## Implementation
+- Added `RemotePiTestHarness` and `createRemotePiTestHarness` in `pi-extension/src/extension/testing.ts`.
+- Added exported `remotePiTestHarness` in `pi-extension/src/index.ts` and aliased `_connectForTest`, `_stopForTest`, `_getState`, and `routeClientMessage` through that harness while preserving their legacy names.
+- Kept `probeListPeers` exported from `extension/probe_list_peers.ts`; it had already been moved as a pure helper and this step preserved that seam.
+- Updated `pi-extension/src/extension.test.ts` so the start/state smoke test uses the named harness while checking legacy `_getState` still matches the harness state.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; focused harness test `corepack pnpm exec vitest run src/extension.test.ts -t "start: idle"` passed (1 passed, 148 skipped). Full `src/extension.test.ts` run reported 145 passed / 4 failed out of 149; the failures match the confirmed known false-alarm group (`after a clean reset`, `name-assigned`, `rename:<name>`, same-name cwd-lock), so they were not chased.

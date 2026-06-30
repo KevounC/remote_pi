@@ -31,6 +31,19 @@ export function createOwnerMultiplexerTestHarness(
   };
 }
 
+export interface RemotePiTestHarness {
+  connect(ctx: unknown): Promise<void>;
+  stop(ctx: unknown): Promise<void>;
+  state(): "idle" | "started" | "paired";
+  routeClientMessage(message: ClientMessage, ctx: Pick<ExtensionContext, "abort">): void;
+}
+
+export function createRemotePiTestHarness(
+  deps: RemotePiTestHarness,
+): RemotePiTestHarness {
+  return deps;
+}
+
 export interface RemotePiCommandSurfaceHarness {
   connect(ctx: unknown): Promise<void>;
   stop(ctx: unknown): Promise<void>;

@@ -61,8 +61,10 @@ import { PlainPeerChannel } from "./transport/peer_channel.js";
 import { OwnerMultiplexer } from "./extension/owner_multiplexer.js";
 import {
   createRemotePiCommandSurfaceHarness,
+  createRemotePiTestHarness,
   type OwnerMultiplexerTestHarness,
   type RemotePiCommandSurfaceHarness,
+  type RemotePiTestHarness,
 } from "./extension/testing.js";
 import { createCommandSurface } from "./extension/command_surface.js";
 import { registerRemotePiCommands, type RemotePiCommandSpec } from "./extension/command_surface/commands.js";
@@ -548,14 +550,14 @@ const _deliveredUserEventIds = new Map<string, { clientMessageId: string; eventI
  * unit tests use minimal mocks that don't satisfy the full
  * `ExtensionContext` interface.
  */
-export async function _connectForTest(ctx: unknown): Promise<void> {
+async function connectForTest(ctx: unknown): Promise<void> {
   const real = ctx as Parameters<typeof _cmdJoin>[0];
   await _cmdJoin(real);
   await _cmdStart(real);
 }
 
 /** Test-only: tear everything down (mirrors `/remote-pi stop`). */
-export async function _stopForTest(ctx: unknown): Promise<void> {
+async function stopForTest(ctx: unknown): Promise<void> {
   await _cmdStop(ctx as Parameters<typeof _cmdStop>[0]);
 }
 
@@ -906,15 +908,15 @@ export function _hasPendingReconnect(): boolean {
  * (`ownerMultiplexer.activeCount() > 0`). Tests and the footer keep the
  * three-state mental model via this getter.
  */
-export function _getState(): "idle" | "started" | "paired" {
+function getStateForTest(): "idle" | "started" | "paired" {
   if (_state === "idle") return "idle";
   return _owners.activeCount() > 0 ? "paired" : "started";
 }
 
 export const commandSurfaceHarness: RemotePiCommandSurfaceHarness = createRemotePiCommandSurfaceHarness({
-  connect: (ctx) => _connectForTest(ctx),
-  stop: (ctx) => _stopForTest(ctx),
-  state: () => _getState(),
+  connect: (ctx) => connectForTest(ctx),
+  stop: (ctx) => stopForTest(ctx),
+  state: () => getStateForTest(),
   handleControl: (cmd) => _handleControl(cmd),
   resetCwdLock: () => _resetCwdLockForTest(),
   restartSupervisorCommand: (platform, uid) => restartSupervisorCommand(platform, uid),
@@ -1063,7 +1065,7 @@ function _onRelayClose(): void {
 function _scheduleReconnect(): void {
   if (_reconnectTimer !== null) return;  // already scheduled
   if (!_pairingCoordinator.currentKeypair() || !_relayUrl) return;  // can't reconnect without these
-  if (_getState() === "idle") return;  // stopped while we were here
+  if (getStateForTest() === "idle") return;  // stopped while we were here
 
   const delay = reachabilityBackoffMs(_reconnectAttempt);
   _reconnectAttempt += 1;
@@ -1076,8 +1078,8 @@ function _scheduleReconnect(): void {
 
 async function _attemptReconnect(): Promise<void> {
   // `_state` may transition to "idle" between awaits via _goIdle; read via
-  // _getState() to defeat TS narrowing on the module-level let.
-  if (_getState() === "idle") return;
+  // getStateForTest() to defeat TS narrowing on the module-level let.
+  if (getStateForTest() === "idle") return;
   if (!_pairingCoordinator.currentKeypair() || !_relayUrl) return;
 
   const edKp = _pairingCoordinator.currentKeypair()!;
@@ -1095,12 +1097,12 @@ async function _attemptReconnect(): Promise<void> {
       ...(_myRoomMeta ? { roomMeta: _myRoomMeta } : {}),
     });
   } catch {
-    if (_getState() === "idle") return;
+    if (getStateForTest() === "idle") return;
     _scheduleReconnect();
     return;
   }
 
-  if (_getState() === "idle") {
+  if (getStateForTest() === "idle") {
     // Stop fired while connect was succeeding — drop the new relay.
     relay.close();
     return;
@@ -1125,7 +1127,7 @@ async function _attemptReconnect(): Promise<void> {
 
 /** Current relay connectivity, derived from `_state` + `_relay`. */
 function _relayStatus(): RelayConnectivity {
-  if (_getState() === "idle") return "disconnected";
+  if (getStateForTest() === "idle") return "disconnected";
   return _relay ? "connected" : "reconnecting";
 }
 
@@ -1733,7 +1735,7 @@ function _startDaemonMode(): void {
 
 const _localMeshCommands = new LocalMeshCommands({
   isDisposed: () => _disposed,
-  getState: _getState,
+  getState: getStateForTest,
   meshNode: () => _meshNode,
   setMeshNode: (node) => { _meshNode = node; },
   setSessionState: (sessionName, peerCount) => {
@@ -2310,10 +2312,24 @@ export function _routeClientMessageFrom(
  * a specific sender channel. Routes to the most recently attached owner,
  * mirroring the pre-W2D singleton behavior.
  */
-export const routeClientMessage = (
+const routeClientMessageForTest = (
   msg: ClientMessage,
   ctx: Pick<ExtensionContext, "abort">,
 ): void => ownerHarness.fallbackRoute(msg, ctx);
+
+export const remotePiTestHarness: RemotePiTestHarness = createRemotePiTestHarness({
+  connect: (ctx) => connectForTest(ctx),
+  stop: (ctx) => stopForTest(ctx),
+  state: () => getStateForTest(),
+  routeClientMessage: (message, ctx) => routeClientMessageForTest(message, ctx),
+});
+
+// Legacy compatibility aliases. Keep these private test exports available while
+// new tests migrate to the named harness above.
+export const _connectForTest = remotePiTestHarness.connect;
+export const _stopForTest = remotePiTestHarness.stop;
+export const _getState = remotePiTestHarness.state;
+export const routeClientMessage = remotePiTestHarness.routeClientMessage;
 
 // ── session_sync handler + helpers ────────────────────────────────────────────
 

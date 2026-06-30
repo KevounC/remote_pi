@@ -144,6 +144,7 @@ vi.mock("./pairing/qr.js", async (importOriginal) => {
 const {
   default: extension,
   _getState,
+  remotePiTestHarness,
   _onPeerDisconnect,
   routeClientMessage,
   _routeClientMessageFrom,
@@ -413,8 +414,9 @@ describe("state machine + pair_request flow", () => {
 
   test("start: idle → started", async () => {
     captureHandler("remote-pi");
-    await _connectForTest(makeMockCtx());
-    expect(_getState()).toBe("started");
+    await remotePiTestHarness.connect(makeMockCtx());
+    expect(remotePiTestHarness.state()).toBe("started");
+    expect(_getState()).toBe(remotePiTestHarness.state());
   });
 
   test("pair without start → warning, state stays idle", async () => {
