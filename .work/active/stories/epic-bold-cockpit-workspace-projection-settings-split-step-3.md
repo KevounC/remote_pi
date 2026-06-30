@@ -1,14 +1,14 @@
 ---
 id: epic-bold-cockpit-workspace-projection-settings-split-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-settings-split
 depends_on: [epic-bold-cockpit-workspace-projection-settings-split-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Extract the connectivity settings projection
@@ -123,3 +123,13 @@ The env block is resolved (pub.dev reachable, `PUB_CACHE=/tmp/pi-pub-cache`, `/t
 - `flutter test test/settings/connectivity_settings_panel_test.dart` → **All tests passed!** but the suite contains exactly **one** test: `connectivity settings panel is importable outside settings_page`.
 
 This confirms the bounce's blocker stands on its merits, not on the env block: the AC requires fake view-model/gateway coverage for `ConnectivityViewModel.load`, relay save/check, and pairing/revoke controller disposal, and the committed test still only proves importability. `stage: implementing` unchanged; the real test gap remains.
+
+## Implementation notes (rework 2026-06-30)
+- Files changed: `cockpit/test/settings/connectivity_settings_panel_test.dart`, `.work/active/stories/epic-bold-cockpit-workspace-projection-settings-split-step-3.md`.
+- Tests added: expanded `connectivity_settings_panel_test.dart` from one import smoke test to eight tests covering `ConnectivityViewModel.load` through a fake `RelayGateway`, relay save/check behavior, `PairingController` gateway cancellation on disposal, `RevokeController` late-notification suppression after disposal, panel post-frame load/save/check wiring through a fake view model, and panel-owned pairing/revoke controller disposal after dialogs close.
+- Discrepancies from design: none for the rework; production code stayed unchanged because the refactor panel already existed and the bounce only required missing test coverage.
+- Adjacent issues parked: none.
+- Verification:
+  - `cd /home/agent/projects/remote_pi/cockpit && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && /home/agent/projects/remote_pi/.tools/flutter/bin/flutter pub get --offline` → `Got dependencies!`.
+  - `cd /home/agent/projects/remote_pi/cockpit && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && /home/agent/projects/remote_pi/.tools/flutter/bin/flutter analyze` → `No issues found! (ran in 20.3s)`.
+  - `cd /home/agent/projects/remote_pi/cockpit && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && /home/agent/projects/remote_pi/.tools/flutter/bin/flutter test test/settings/connectivity_settings_panel_test.dart` → `+8: All tests passed!`.
