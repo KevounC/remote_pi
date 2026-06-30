@@ -1,14 +1,6 @@
 import 'package:app/domain/session_state.dart';
 import 'package:app/protocol/protocol.dart'
-    show
-        AgentMessageEvt,
-        CompactionEvt,
-        SessionHistoryEvent,
-        ToolRequestEvt,
-        ToolResultEvt,
-        Usage,
-        UserInputEvt,
-        UserMessageStreamingBehavior;
+    show Usage, UserMessageStreamingBehavior;
 
 sealed class TranscriptEvent {
   const TranscriptEvent({
@@ -164,75 +156,4 @@ final class CompactionRecorded extends TranscriptEvent {
 
   final String summary;
   final int? tokensBefore;
-}
-
-Iterable<TranscriptEvent> historyToTranscriptEvents(
-  Iterable<SessionHistoryEvent> events, {
-  required String sessionId,
-}) sync* {
-  for (final event in events) {
-    final ts = DateTime.fromMillisecondsSinceEpoch(event.ts);
-    switch (event) {
-      case UserInputEvt(:final id, :final text, :final image):
-        yield UserMessageConfirmed(
-          eventId: 'history:user_confirmed:$id',
-          sessionId: sessionId,
-          ts: ts,
-          clientMessageId: id,
-          text: text,
-          image: image == null
-              ? null
-              : MessageImage(data: image.data, mime: image.mime),
-        );
-      case AgentMessageEvt(:final inReplyTo, :final text):
-        yield AssistantMessageCommitted(
-          eventId: 'history:assistant_committed:$inReplyTo:${event.ts}',
-          sessionId: sessionId,
-          ts: ts,
-          messageId: 'agent_history_${inReplyTo}_${event.ts}',
-          replyTo: inReplyTo,
-          text: text,
-        );
-      case ToolRequestEvt(:final toolCallId, :final tool, :final args):
-        yield ToolRequested(
-          eventId: 'history:tool_requested:$toolCallId',
-          sessionId: sessionId,
-          ts: ts,
-          toolCallId: toolCallId,
-          tool: tool,
-          args: _objectMap(args),
-        );
-      case ToolResultEvt(:final toolCallId, :final result, :final error):
-        yield ToolFinished(
-          eventId: 'history:tool_finished:$toolCallId',
-          sessionId: sessionId,
-          ts: ts,
-          toolCallId: toolCallId,
-          result: result,
-          error: error,
-        );
-      case CompactionEvt(:final summary, :final tokensBefore):
-        yield CompactionRecorded(
-          eventId: 'history:compaction:${event.ts}',
-          sessionId: sessionId,
-          ts: ts,
-          summary: summary,
-          tokensBefore: tokensBefore,
-        );
-    }
-  }
-}
-
-Map<String, Object?> _objectMap(Object? raw) {
-  if (raw == null) return <String, Object?>{};
-  if (raw is Map<String, Object?>) return raw;
-  if (raw is Map) {
-    return raw.map((key, value) {
-      if (key is! String) {
-        throw const FormatException('Tool request args keys must be strings');
-      }
-      return MapEntry(key, value as Object?);
-    });
-  }
-  throw const FormatException('Tool request args must be an object');
 }

@@ -18,6 +18,7 @@ import 'package:app/data/local/records/message_record.dart';
 import 'package:app/data/local/records/runtime_record.dart';
 import 'package:app/data/local/records/session_index_record.dart';
 import 'package:app/data/local/transcript_event_store_hive.dart';
+import 'package:app/data/sync/session_history_replay.dart';
 import 'package:app/data/sync/sync_events.dart';
 import 'package:app/data/sync/session_gate.dart';
 import 'package:app/data/transport/connection_manager.dart';
@@ -1023,7 +1024,7 @@ class SyncService extends Service {
     }
 
     await _appendTranscriptEvents(
-      historyToTranscriptEvents(h.events, sessionId: ref.sessionId),
+      sessionHistoryToTranscriptEvents(history: h, sessionId: ref.sessionId),
     );
 
     final shouldAdvanceSessionHighWater =

@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-hydration-replay-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-hydration-replay
 depends_on: [epic-bold-transcript-event-log-store]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 1: Add deterministic app `SessionHistory` replay adapter
@@ -76,3 +76,11 @@ List<TranscriptEvent> sessionHistoryToTranscriptEvents({
 ## Rollback
 
 Remove the adapter/tests. Existing `_convertHistory` row conversion remains until step 2 swaps callers.
+
+## Implementation
+
+- Adapter design: added `app/lib/data/sync/session_history_replay.dart` as a pure data/sync protocol-to-domain adapter. `SyncService._applyHistory` now calls `sessionHistoryToTranscriptEvents(...)`; `TranscriptEvent` no longer owns the `SessionHistoryEvent` conversion seam.
+- Determinism guarantees: replay event ids are `server:<session_id>:<history-type>:<stable-key>:<ts>` and deliberately ignore the outer `SessionHistory.inReplyTo` request id. User history replays produce `UserMessageConfirmed` with `clientMessageId` set to the wire event id, so matching optimistic submissions confirm by client id. Duplicate identical server facts produce identical event ids for store dedupe.
+- Test coverage: added `app/test/data/sync/session_history_replay_test.dart` covering user input with image, assistant message replay, tool request/result replay, compaction token replay, request-id-independent event ids, duplicate-id stability, unsupported future history event rejection, and missing canonical session id fail-fast behavior.
+- Verification: targeted `flutter test test/data/sync/session_history_replay_test.dart` passed 8/8. Full `flutter test` passed 608/608. `flutter analyze` reported only the known unrelated `axisAlignment` deprecation at `lib/ui/chat/widgets/input_bar.dart:802`.
+- Discrepancies from design: assistant usage is not present on the current generated `AgentMessageEvt` wire DTO, so the adapter preserves all currently generated assistant fields and leaves usage unset.
