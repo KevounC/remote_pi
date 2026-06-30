@@ -9,7 +9,10 @@ use crate::handlers::pi_forward::{
 };
 use crate::mesh::MeshStore;
 use crate::metrics::FirehoseMetrics;
+use crate::peers::connections::ConnectionRegistry;
 use crate::peers::registry::PeerRegistry;
+use crate::peers::registry_event_publisher::RegistryEventPublisher;
+use crate::peers::rooms::RoomStateStore;
 use crate::presence::{PeerPresence, PresenceManager};
 use crate::protocol::frame::{DecodedRelayFrame, PiEnvelopeFrame};
 use crate::protocol::outer::OuterEnvelope;
@@ -79,7 +82,9 @@ pub(crate) struct ConnectionActor {
     pub(crate) peer_short: String,
     pub(crate) room_id: String,
     conn_id: u64,
-    pub(crate) registry: Arc<PeerRegistry>,
+    pub(crate) delivery: Arc<ConnectionRegistry>,
+    pub(crate) room_state: Arc<RoomStateStore>,
+    pub(crate) events: Arc<RegistryEventPublisher>,
     pub(crate) presence: Arc<PresenceManager>,
     pub(crate) rooms: Arc<RoomManager>,
     mesh: Arc<MeshStore>,
@@ -103,7 +108,9 @@ impl ConnectionActor {
             peer_short,
             room_id,
             conn_id,
-            registry: services.registry,
+            delivery: services.registry.connections(),
+            room_state: services.registry.rooms(),
+            events: services.registry.events(),
             presence: services.presence,
             rooms: services.rooms,
             mesh: services.mesh,
@@ -142,7 +149,7 @@ impl ConnectionActor {
 
         // Skip-sender: pass this connection's conn_id so multi-device Owners
         // don't echo their own outbound messages.
-        if !self.registry.forward(
+        if !self.delivery.send_to_room(
             &dest_peer,
             &dest_room,
             axum::extract::ws::Message::Text(fwd_line),
@@ -165,7 +172,7 @@ impl ConnectionActor {
             handle_pi_envelope(
                 &self.peer_id,
                 frame,
-                &self.registry,
+                &self.delivery,
                 &self.mesh,
                 &self.mesh_auth,
             )
@@ -225,7 +232,7 @@ impl ConnectionActor {
     pub(crate) fn emit_deduped_room_snapshots(&mut self, peers: Vec<String>) -> ActorDispatch {
         let mut messages = Vec::new();
         for target_peer in peers {
-            let active_rooms = self.registry.rooms_of(&target_peer);
+            let active_rooms = self.room_state.rooms_of(&target_peer);
             let resp = serde_json::json!({
                 "type": "rooms",
                 "peer": target_peer,
@@ -264,7 +271,7 @@ mod tests {
     use crate::protocol::generated::control::{RELAY_CONTROL_FRAME_TYPES, RoomMetaUpdateFrame};
     use crate::rooms::{RoomManager, RoomMeta, RoomMetaPatch};
 
-    fn actor_services() -> ConnectionActorServices {
+    fn actor_services() -> (Arc<PeerRegistry>, ConnectionActorServices) {
         let presence = Arc::new(PresenceManager::new());
         let rooms = Arc::new(RoomManager::new());
         let metrics = Arc::new(FirehoseMetrics::new());
@@ -273,14 +280,15 @@ mod tests {
             rooms.clone(),
             metrics.clone(),
         ));
-        ConnectionActorServices {
-            registry,
+        let services = ConnectionActorServices {
+            registry: registry.clone(),
             presence,
             rooms,
             mesh: Arc::new(MeshStore::open_in_memory().unwrap()),
             mesh_auth: Arc::new(MeshAuthCache::new()),
             metrics,
-        }
+        };
+        (registry, services)
     }
 
     fn make_meta(room_id: &str) -> RoomMeta {
@@ -306,7 +314,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_malformed_pi_envelope_returns_bad_envelope_transport_error() {
-        let services = actor_services();
+        let (_, services) = actor_services();
         let mut actor = ConnectionActor::new(
             "sender-peer".to_string(),
             "der-peer".to_string(),
@@ -351,7 +359,7 @@ mod tests {
             "12345678".to_string(),
             "main".to_string(),
             42,
-            actor_services(),
+            actor_services().1,
         );
 
         assert_eq!(actor.peer_id, "peer-12345678");
@@ -416,7 +424,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_routes_control_frames_to_typed_handler() {
-        let services = actor_services();
+        let (_, services) = actor_services();
         let mut actor = ConnectionActor::new(
             "app".to_string(),
             "app".to_string(),
@@ -438,10 +446,9 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_outer_forwards_ct_verbatim_and_rewrites_sender_identity() {
-        let services = actor_services();
+        let (registry, services) = actor_services();
         let (dest_tx, mut dest_rx) = mpsc::unbounded_channel::<Message>();
-        let _dest_conn = services
-            .registry
+        let _dest_conn = registry
             .register("dest-peer".to_string(), make_meta("dest-room"), dest_tx)
             .await;
 
@@ -471,15 +478,13 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_outer_targets_exact_destination_room_without_cross_room_contamination() {
-        let services = actor_services();
+        let (registry, services) = actor_services();
         let (target_tx, mut target_rx) = mpsc::unbounded_channel::<Message>();
         let (other_tx, mut other_rx) = mpsc::unbounded_channel::<Message>();
-        let _target_conn = services
-            .registry
+        let _target_conn = registry
             .register("dest-peer".to_string(), make_meta("target-room"), target_tx)
             .await;
-        let _other_conn = services
-            .registry
+        let _other_conn = registry
             .register("dest-peer".to_string(), make_meta("other-room"), other_tx)
             .await;
 
@@ -511,15 +516,13 @@ mod tests {
     #[tokio::test]
     async fn dispatch_outer_skips_sender_connection_without_suppressing_other_matching_connections()
     {
-        let services = actor_services();
+        let (registry, services) = actor_services();
         let (sender_tx, mut sender_rx) = mpsc::unbounded_channel::<Message>();
         let (other_tx, mut other_rx) = mpsc::unbounded_channel::<Message>();
-        let sender_conn = services
-            .registry
+        let sender_conn = registry
             .register("owner-peer".to_string(), make_meta("main"), sender_tx)
             .await;
-        let _other_conn = services
-            .registry
+        let _other_conn = registry
             .register("owner-peer".to_string(), make_meta("main"), other_tx)
             .await;
 

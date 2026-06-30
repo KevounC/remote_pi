@@ -72,9 +72,13 @@ impl<'actor> ControlHandlers<'actor> {
             .presence
             .subscribe(self.actor.peer_id.clone(), peers.clone())
             .await;
-        self.actor
-            .registry
-            .backfill_presence(&self.actor.peer_id, &peers);
+        for peer in &peers {
+            if self.actor.delivery.is_online(peer) {
+                self.actor
+                    .events
+                    .publish_peer_online_backfill(&self.actor.peer_id, peer);
+            }
+        }
         ActorDispatch::Continue
     }
 
@@ -99,7 +103,7 @@ impl<'actor> ControlHandlers<'actor> {
         let states = self
             .actor
             .presence
-            .snapshot(&peers, |p| self.actor.registry.is_online(p))
+            .snapshot(&peers, |p| self.actor.delivery.is_online(p))
             .await;
         self.actor.emit_deduped_presence(states)
     }
@@ -138,18 +142,31 @@ impl<'actor> ControlHandlers<'actor> {
 
     async fn room_meta_update(&mut self, frame: RoomMetaUpdateFrame) -> ActorDispatch {
         let target_room = frame.room_id.unwrap_or_else(|| self.actor.room_id.clone());
-        if !self
-            .actor
-            .registry
-            .update_room_meta(&self.actor.peer_id, &target_room, frame.meta)
-            .await
-        {
-            warn!(
-                peer = %self.actor.peer_short,
-                room = %target_room,
-                "room_meta_update for unknown (peer, room), dropping"
-            );
+        let is_empty_patch = frame.meta.is_empty();
+        let patch_result =
+            match self
+                .actor
+                .room_state
+                .apply_patch(&self.actor.peer_id, &target_room, frame.meta)
+            {
+                Some(result) => result,
+                None => {
+                    warn!(
+                        peer = %self.actor.peer_short,
+                        room = %target_room,
+                        "room_meta_update for unknown (peer, room), dropping"
+                    );
+                    return ActorDispatch::Continue;
+                }
+            };
+
+        if !is_empty_patch {
+            self.actor
+                .events
+                .publish_room_meta_updated(&self.actor.peer_id, &target_room, &patch_result.meta)
+                .await;
         }
+
         ActorDispatch::Continue
     }
 

@@ -4,18 +4,24 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::extract::ws::Message;
 use tokio::sync::mpsc;
 
-use super::connections::ConnectionRegistry;
-use super::presence_state::PresenceState;
+use super::connections::{ConnectionInsert, ConnectionRegistry, ConnectionRemove};
+use super::presence_state::{PresenceState, PresenceTransition};
 use super::registry_event_publisher::RegistryEventPublisher;
 use super::rooms::RoomStateStore;
 use crate::metrics::FirehoseMetrics;
 use crate::presence::PresenceManager;
 use crate::rooms::{RoomManager, RoomMeta, RoomMetaPatch};
 
-/// Maps `(peer_id, room_id)` pairs to a *list* of live connections.
+/// Compatibility facade over the relay's composed live actor state.
+///
+/// `ConnectionRegistry` owns `(peer_id, room_id)` delivery, `RoomStateStore`
+/// owns canonical live room metadata, `PresenceState` computes transitions,
+/// and `RegistryEventPublisher` serializes subscription events. This facade
+/// preserves the public `PeerRegistry` lifecycle surface while handlers migrate
+/// to the narrow pieces they actually need.
 ///
 /// Plan 23 (Wave 2C) relaxed the "one connection per (peer, room)" invariant:
-/// the registry now accepts N simultaneous connections at the same key —
+/// the connection table now accepts N simultaneous connections at the same key —
 /// representing N devices of the same human Owner (shared Ed25519 key
 /// sincronizada via iCloud Keychain / Block Store). Each device authenticates
 /// independently via challenge-response, so admission is still controlled by
@@ -50,8 +56,32 @@ use crate::rooms::{RoomManager, RoomMeta, RoomMetaPatch};
 #[derive(Debug)]
 pub struct PeerRegistry {
     connections: Arc<ConnectionRegistry>,
-    room_state: RoomStateStore,
-    events: RegistryEventPublisher,
+    rooms: Arc<RoomStateStore>,
+    presence: Arc<PresenceState>,
+    events: Arc<RegistryEventPublisher>,
+}
+
+trait PresenceTransitions {
+    fn on_connection_inserted(&self, insert: &ConnectionInsert) -> PresenceTransition;
+    fn on_connection_removed(
+        &self,
+        remove: &ConnectionRemove,
+        now_ms: i64,
+    ) -> Option<PresenceTransition>;
+}
+
+impl PresenceTransitions for PresenceState {
+    fn on_connection_inserted(&self, insert: &ConnectionInsert) -> PresenceTransition {
+        PresenceState::on_connection_inserted(insert)
+    }
+
+    fn on_connection_removed(
+        &self,
+        remove: &ConnectionRemove,
+        now_ms: i64,
+    ) -> Option<PresenceTransition> {
+        PresenceState::on_connection_removed(remove, now_ms)
+    }
 }
 
 impl PeerRegistry {
@@ -61,12 +91,32 @@ impl PeerRegistry {
         metrics: Arc<FirehoseMetrics>,
     ) -> Self {
         let connections = Arc::new(ConnectionRegistry::new());
-        let events = RegistryEventPublisher::new(connections.clone(), presence, rooms, metrics);
+        let rooms_state = Arc::new(RoomStateStore::new());
+        let presence_state = Arc::new(PresenceState);
+        let events = Arc::new(RegistryEventPublisher::new(
+            connections.clone(),
+            presence,
+            rooms,
+            metrics,
+        ));
         Self {
             connections,
-            room_state: RoomStateStore::new(),
+            rooms: rooms_state,
+            presence: presence_state,
             events,
         }
+    }
+
+    pub(crate) fn connections(&self) -> Arc<ConnectionRegistry> {
+        self.connections.clone()
+    }
+
+    pub(crate) fn rooms(&self) -> Arc<RoomStateStore> {
+        self.rooms.clone()
+    }
+
+    pub(crate) fn events(&self) -> Arc<RegistryEventPublisher> {
+        self.events.clone()
     }
 
     /// Registers a new connection at `(peer_id, room_meta.room_id)`.
@@ -85,7 +135,7 @@ impl PeerRegistry {
         let room_id = room_meta.room_id.clone();
         let insert = self.connections.insert(&peer_id, &room_id, tx);
         let announced_meta = self
-            .room_state
+            .rooms
             .on_connection_inserted(&peer_id, room_meta, &insert);
 
         // room_announced fires once per (peer, room) lifecycle. Duplicate
@@ -99,24 +149,12 @@ impl PeerRegistry {
         // peer_online fires only on a real offline → online transition.
         // Re-registers from a peer that already had a live conn produce no
         // new push to subscribers — they already think it's online.
-        let presence_transition = PresenceState::on_connection_inserted(&insert);
+        let presence_transition = self.presence.on_connection_inserted(&insert);
         self.events
             .publish_presence_transition(presence_transition)
             .await;
 
         insert.conn_id
-    }
-
-    /// Immediately pushes a `peer_online` to `subscriber` for every peer in
-    /// `peers` that is currently online. Called by the handler right after
-    /// `subscribe_presence` to bridge the gap when a peer subscribed *after*
-    /// its target was already connected.
-    pub fn backfill_presence(&self, subscriber: &str, peers: &[String]) {
-        for peer in peers {
-            if self.is_online(peer) {
-                self.events.publish_peer_online_backfill(subscriber, peer);
-            }
-        }
     }
 
     /// Removes the connection identified by `conn_id` from the `Vec` at
@@ -133,23 +171,18 @@ impl PeerRegistry {
 
         let remove = self.connections.remove(peer_id, room_id, conn_id);
         let ended = self
-            .room_state
+            .rooms
             .on_connection_removed(peer_id, room_id, &remove, now_ms);
 
         if let Some(ended) = ended {
             self.events.publish_room_ended(peer_id, ended).await;
         }
 
-        if let Some(presence_transition) = PresenceState::on_connection_removed(&remove, now_ms) {
+        if let Some(presence_transition) = self.presence.on_connection_removed(&remove, now_ms) {
             self.events
                 .publish_presence_transition(presence_transition)
                 .await;
         }
-    }
-
-    /// Returns `true` if `peer_id` has at least one live connection.
-    pub fn is_online(&self, peer_id: &str) -> bool {
-        self.connections.is_online(peer_id)
     }
 
     /// Returns one `RoomMeta` per distinct live room of `peer_id`.
@@ -162,25 +195,7 @@ impl PeerRegistry {
     /// Multiple conns at the same room collapse to a single canonical entry;
     /// later duplicate registrations refresh that snapshot for compatibility.
     pub fn rooms_of(&self, peer_id: &str) -> Vec<RoomMeta> {
-        self.room_state.rooms_of(peer_id)
-    }
-
-    /// Broadcasts `msg` to every live connection at `(dest_peer, dest_room)`
-    /// **except** the one whose conn_id equals `from_conn_id` (skip-sender).
-    ///
-    /// Returns `true` if at least one recipient received the message.
-    /// Pass any `from_conn_id` that is not part of the destination `Vec`
-    /// (e.g. the sender's own conn_id from another room) to deliver to all.
-    /// Never inspects message content.
-    pub fn forward(
-        &self,
-        dest_peer: &str,
-        dest_room: &str,
-        msg: Message,
-        from_conn_id: u64,
-    ) -> bool {
-        self.connections
-            .send_to_room(dest_peer, dest_room, msg, from_conn_id)
+        self.rooms.rooms_of(peer_id)
     }
 
     /// Applies `patch` to the canonical room state at `(peer_id, room_id)` and
@@ -204,7 +219,7 @@ impl PeerRegistry {
         patch: RoomMetaPatch,
     ) -> bool {
         let is_empty_patch = patch.is_empty();
-        let patch_result = match self.room_state.apply_patch(peer_id, room_id, patch) {
+        let patch_result = match self.rooms.apply_patch(peer_id, room_id, patch) {
             Some(result) => result,
             None => return false,
         };
@@ -219,22 +234,6 @@ impl PeerRegistry {
             .await;
 
         true
-    }
-
-    /// Sends `msg` to every live connection of `peer_id` across all rooms.
-    /// Returns true when at least one live connection was present. Cross-PC
-    /// data-plane forwarding uses this peer-wide behavior until canonical
-    /// session/room targeting lands as a separate protocol change.
-    pub fn forward_to_peer(&self, peer_id: &str, msg: Message) -> bool {
-        self.connections.send_to_peer(peer_id, msg)
-    }
-
-    /// Sends `msg` to every live connection at one explicit `(peer, room)`.
-    /// Reserved for protocol paths that explicitly carry a relay-owned room
-    /// target; cross-PC forwarding stays peer-wide until that target is added.
-    pub fn forward_to_room(&self, peer_id: &str, room_id: &str, msg: Message) -> bool {
-        const EXTERNAL_CONN_ID: u64 = u64::MAX;
-        self.forward(peer_id, room_id, msg, EXTERNAL_CONN_ID)
     }
 }
 
@@ -268,6 +267,17 @@ mod tests {
     /// to collide with any conn_id allocated by the registry in tests.
     const EXTERNAL: u64 = u64::MAX;
 
+    fn forward(
+        reg: &PeerRegistry,
+        dest_peer: &str,
+        dest_room: &str,
+        msg: Message,
+        from_conn_id: u64,
+    ) -> bool {
+        reg.connections()
+            .send_to_room(dest_peer, dest_room, msg, from_conn_id)
+    }
+
     #[tokio::test]
     async fn two_rooms_same_peer_both_accepted() {
         let reg = make_registry();
@@ -281,15 +291,39 @@ mod tests {
 
         assert_ne!(conn_main, conn_work);
 
-        assert!(reg.forward(&peer, "main", Message::Text("to_main".into()), EXTERNAL));
+        assert!(forward(
+            &reg,
+            &peer,
+            "main",
+            Message::Text("to_main".into()),
+            EXTERNAL
+        ));
         assert_eq!(rx_main.try_recv().unwrap().to_text().unwrap(), "to_main");
 
-        assert!(reg.forward(&peer, "work", Message::Text("to_work".into()), EXTERNAL));
+        assert!(forward(
+            &reg,
+            &peer,
+            "work",
+            Message::Text("to_work".into()),
+            EXTERNAL
+        ));
         assert_eq!(rx_work.try_recv().unwrap().to_text().unwrap(), "to_work");
 
         reg.unregister(&peer, "work", conn_work).await;
-        assert!(!reg.forward(&peer, "work", Message::Text("gone".into()), EXTERNAL));
-        assert!(reg.forward(&peer, "main", Message::Text("still_there".into()), EXTERNAL));
+        assert!(!forward(
+            &reg,
+            &peer,
+            "work",
+            Message::Text("gone".into()),
+            EXTERNAL
+        ));
+        assert!(forward(
+            &reg,
+            &peer,
+            "main",
+            Message::Text("still_there".into()),
+            EXTERNAL
+        ));
         let _ = rx_main.try_recv();
     }
 
@@ -304,7 +338,13 @@ mod tests {
         let _ = reg.register(peer.clone(), make_meta("main"), tx_main).await;
         let _ = reg.register(peer.clone(), make_meta("work"), tx_work).await;
 
-        assert!(reg.forward_to_room(&peer, "work", Message::Text("to_work".into())));
+        assert!(forward(
+            &reg,
+            &peer,
+            "work",
+            Message::Text("to_work".into()),
+            EXTERNAL
+        ));
         assert!(
             rx_main.try_recv().is_err(),
             "main room must not receive work target"
@@ -327,12 +367,24 @@ mod tests {
         assert_ne!(conn1, conn2);
 
         // Send "from" conn1 → only conn2 receives.
-        assert!(reg.forward(&peer, "main", Message::Text("hi".into()), conn1));
+        assert!(forward(
+            &reg,
+            &peer,
+            "main",
+            Message::Text("hi".into()),
+            conn1
+        ));
         assert!(rx1.try_recv().is_err(), "sender must not echo");
         assert_eq!(rx2.try_recv().unwrap().to_text().unwrap(), "hi");
 
         // Send "from" conn2 → only conn1 receives.
-        assert!(reg.forward(&peer, "main", Message::Text("hi2".into()), conn2));
+        assert!(forward(
+            &reg,
+            &peer,
+            "main",
+            Message::Text("hi2".into()),
+            conn2
+        ));
         assert_eq!(rx1.try_recv().unwrap().to_text().unwrap(), "hi2");
         assert!(rx2.try_recv().is_err());
     }
@@ -421,7 +473,13 @@ mod tests {
 
         reg.unregister(&peer, "main", conn2).await;
 
-        assert!(reg.forward(&peer, "main", Message::Text("ping".into()), EXTERNAL));
+        assert!(forward(
+            &reg,
+            &peer,
+            "main",
+            Message::Text("ping".into()),
+            EXTERNAL
+        ));
         assert_eq!(rx1.try_recv().unwrap().to_text().unwrap(), "ping");
         assert!(
             rx2.try_recv().is_err(),
@@ -443,7 +501,13 @@ mod tests {
         let _ = reg.register(peer.clone(), make_meta("main"), tx1).await;
         let _ = reg.register(peer.clone(), make_meta("main"), tx2).await;
 
-        assert!(reg.forward(&peer, "main", Message::Text("from_pi".into()), EXTERNAL));
+        assert!(forward(
+            &reg,
+            &peer,
+            "main",
+            Message::Text("from_pi".into()),
+            EXTERNAL
+        ));
         assert_eq!(rx1.try_recv().unwrap().to_text().unwrap(), "from_pi");
         assert_eq!(rx2.try_recv().unwrap().to_text().unwrap(), "from_pi");
     }
@@ -458,10 +522,22 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
         let conn = reg.register(peer.clone(), make_meta("main"), tx).await;
 
-        assert!(!reg.forward(&peer, "main", Message::Text("echo".into()), conn));
+        assert!(!forward(
+            &reg,
+            &peer,
+            "main",
+            Message::Text("echo".into()),
+            conn
+        ));
         assert!(rx.try_recv().is_err());
 
-        assert!(reg.forward(&peer, "main", Message::Text("hi".into()), EXTERNAL));
+        assert!(forward(
+            &reg,
+            &peer,
+            "main",
+            Message::Text("hi".into()),
+            EXTERNAL
+        ));
         assert_eq!(rx.try_recv().unwrap().to_text().unwrap(), "hi");
     }
 
@@ -481,12 +557,24 @@ mod tests {
 
         // Stale unregister of conn_a is a no-op.
         reg.unregister(&peer, "main", conn_a).await;
-        assert!(reg.forward(&peer, "main", Message::Text("alive".into()), EXTERNAL));
+        assert!(forward(
+            &reg,
+            &peer,
+            "main",
+            Message::Text("alive".into()),
+            EXTERNAL
+        ));
         assert_eq!(rx_b.try_recv().unwrap().to_text().unwrap(), "alive");
 
         // Correct unregister removes the last conn → entry gone.
         reg.unregister(&peer, "main", conn_b).await;
-        assert!(!reg.forward(&peer, "main", Message::Text("gone".into()), EXTERNAL));
+        assert!(!forward(
+            &reg,
+            &peer,
+            "main",
+            Message::Text("gone".into()),
+            EXTERNAL
+        ));
     }
 
     /// First register from an offline peer with a presence subscriber must

@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-registry-split-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-relay-typed-actor-registry-split
 depends_on: [epic-bold-relay-typed-actor-registry-split-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Replace the grab-bag registry with the composed actor-state facade
@@ -62,3 +62,11 @@ High. This is the final composition switch and touches most relay live-state cal
 ## Rollback
 
 Revert this composition step to the step-4 facade. Earlier extracted modules can remain if the public composition creates too much call-site churn.
+
+## Implementation
+
+- Composed `PeerRegistry` as a thin facade over `Arc<ConnectionRegistry>`, `Arc<RoomStateStore>`, `Arc<PresenceState>`, and `Arc<RegistryEventPublisher>` while preserving the public lifecycle name and register/unregister behavior.
+- Migrated live call sites to narrow state/delivery surfaces: `ConnectionActor` stores connection delivery, room state, and event publisher pieces; typed control handlers use those pieces for presence backfill/checks and room metadata patches; `pi_forward` now depends on `ConnectionRegistry` delivery rather than the full registry facade.
+- Deleted obsolete facade broadcast helpers (`backfill_presence`, `is_online`, `forward`, `forward_to_peer`, `forward_to_room`) so production code no longer treats `PeerRegistry` as a hidden bus; registry tests exercise delivery through the composed connection piece. No obsolete tuple aliases lived in the owned facade/handler files; the extracted `RoomKey` alias remains untouched per the collision guard.
+- Verification: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build` passed from `relay/`. `cargo test` covered 158 tests across unit, integration, mesh, cross-PC, presence, rooms, protocol parity, and doc-test targets.
+- No-regression confirmation: routing, duplicate connections, stale unregister, presence transitions, room lifecycle, metadata patches, and cross-PC delivery/transport-error coverage all remained green.

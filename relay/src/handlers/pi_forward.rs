@@ -34,7 +34,7 @@ use rand::{RngCore, thread_rng};
 use tracing::warn;
 
 use crate::mesh::{MeshStore, owner_pk_hash, verify_envelope};
-use crate::peers::registry::PeerRegistry;
+use crate::peers::connections::ConnectionRegistry;
 use crate::protocol::generated::cross_pc::{
     AgentEnvelope, CrossPcFrame, PiEnvelopeFrame, PiEnvelopeInFrame,
 };
@@ -157,10 +157,10 @@ pub enum PiForwardResult {
 
 /// Handles one typed `pi_envelope` frame. `sender_peer_id` is the authenticated
 /// Pi-A pubkey (already verified by the WS handshake).
-pub async fn handle_pi_envelope(
+pub(crate) async fn handle_pi_envelope(
     sender_peer_id: &str,
     frame: PiEnvelopeFrame,
-    registry: &PeerRegistry,
+    delivery: &ConnectionRegistry,
     mesh: &MeshStore,
     cache: &MeshAuthCache,
 ) -> PiForwardResult {
@@ -183,7 +183,7 @@ pub async fn handle_pi_envelope(
         envelope: frame.envelope,
     };
 
-    if registry.forward_to_peer(
+    if delivery.send_to_peer(
         frame.to_pc.as_str(),
         Message::Text(
             serde_json::to_string(&CrossPcFrame::PiEnvelopeIn(outbound.clone()))
@@ -290,6 +290,7 @@ fn make_relay_envelope_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PeerRegistry;
     use crate::PresenceManager;
     use crate::RoomManager;
     use ed25519_dalek::{Signer, SigningKey};
@@ -455,8 +456,9 @@ mod tests {
         let cache = MeshAuthCache::new();
         let owner = make_owner_key();
         write_invalid_owner_blob(&store, &owner, &["pi_a", "pi_b"], 1);
+        let delivery = registry.connections();
 
-        match handle_pi_envelope("pi_a", valid_frame(), &registry, &store, &cache).await {
+        match handle_pi_envelope("pi_a", valid_frame(), &delivery, &store, &cache).await {
             PiForwardResult::TransportError(message) => {
                 let frame = transport_error_json(message);
                 assert_eq!(frame["envelope"]["body"]["reason"], "not_authorized");
@@ -514,7 +516,8 @@ mod tests {
         let registry = make_registry();
         let store = MeshStore::open_in_memory().unwrap();
         let cache = MeshAuthCache::new();
-        match handle_pi_envelope("pi_a", frame, &registry, &store, &cache).await {
+        let delivery = registry.connections();
+        match handle_pi_envelope("pi_a", frame, &delivery, &store, &cache).await {
             PiForwardResult::TransportError(message) => {
                 transport_error_json(message)["envelope"]["body"]["reason"]
                     .as_str()
@@ -575,8 +578,9 @@ mod tests {
         let cache = MeshAuthCache::new();
         let owner = make_owner_key();
         write_owner_blob(&store, &owner, &["pi_a", "pi_b"], 1);
+        let delivery = registry.connections();
 
-        match handle_pi_envelope("pi_a", valid_frame(), &registry, &store, &cache).await {
+        match handle_pi_envelope("pi_a", valid_frame(), &delivery, &store, &cache).await {
             PiForwardResult::TransportError(message) => {
                 let frame = transport_error_json(message);
                 assert_eq!(frame["envelope"]["body"]["reason"], "offline");
@@ -608,8 +612,9 @@ mod tests {
         write_owner_blob(&store, &owner, &["pi_a", "pi_b"], 1);
         let frame = valid_frame();
         let expected_envelope = serde_json::to_value(&frame.envelope).unwrap();
+        let delivery = registry.connections();
 
-        match handle_pi_envelope("pi_a", frame, &registry, &store, &cache).await {
+        match handle_pi_envelope("pi_a", frame, &delivery, &store, &cache).await {
             PiForwardResult::Forwarded => {}
             PiForwardResult::TransportError(_) => {
                 panic!("authorized peer-wide forward should deliver")
@@ -647,8 +652,9 @@ mod tests {
         let mut frame = valid_frame();
         frame.envelope.from = "human-readable-spoof:sess".to_string();
         let expected_from = frame.envelope.from.clone();
+        let delivery = registry.connections();
 
-        match handle_pi_envelope("pi_a", frame, &registry, &store, &cache).await {
+        match handle_pi_envelope("pi_a", frame, &delivery, &store, &cache).await {
             PiForwardResult::Forwarded => {}
             PiForwardResult::TransportError(_) => {
                 panic!("authenticated sender peer id must authorize this forward")
