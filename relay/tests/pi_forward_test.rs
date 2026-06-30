@@ -299,6 +299,41 @@ async fn malformed_pi_envelope_returns_transport_error_bad_envelope() {
     assert_transport_error(&frame, "bad_envelope", None);
 }
 
+/// A syntactically valid `pi_envelope` without `to_room` is rejected before
+/// mesh authorization or peer routing. The original envelope is still available,
+/// so the relay can correlate the transport error via `re`.
+#[tokio::test]
+async fn missing_to_room_returns_transport_error_bad_envelope() {
+    let port = start_relay().await;
+
+    let sk_a = random_key();
+    let sk_b = random_key();
+    let peer_b = B64.encode(sk_b.verifying_key().to_bytes());
+    let (mut ws_a, _) = connect_and_auth_with_key(port, &sk_a).await;
+
+    let original_id = "018f5555-5555-7555-8555-555555555555";
+    ws_a.send(Message::text(
+        json!({
+            "type": "pi_envelope",
+            "to_pc": peer_b,
+            "envelope": {
+                "from": "casa:sess-3",
+                "to": "trab:agent-1",
+                "id": original_id,
+                "re": null,
+                "body": { "type": "ping", "session_id": "opaque-session" },
+            },
+        })
+        .to_string(),
+    ))
+    .await
+    .unwrap();
+
+    let frame = recv_json(&mut ws_a, "ws_a missing-to-room bad_envelope").await;
+    assert_transport_error(&frame, "bad_envelope", Some(original_id));
+    assert_eq!(frame["envelope"]["to"], "casa:sess-3");
+}
+
 /// Cache behavior: after a successful authorization lookup, subsequent
 /// envelopes between the same two Pis don't require re-scanning SQLite.
 /// We can't easily count SQL hits at this layer, but we can verify that

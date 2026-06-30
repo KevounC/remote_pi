@@ -1,14 +1,14 @@
 ---
 id: epic-bold-canonical-session-wire-discriminator-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-canonical-session-wire-discriminator
 depends_on: [epic-bold-canonical-session-wire-discriminator-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Replace cross-PC peer-wide fanout with explicit room targeting while preserving relay opacity
@@ -62,3 +62,10 @@ Medium. Existing cross-PC senders must learn `to_room`; otherwise they receive `
 
 ## Rollback
 Restore `forward_to_peer` use and client omission of `to_room`, knowingly re-opening the cross-room fanout vector. Do not roll back by teaching the relay to parse `session_id`.
+
+## Implementation notes
+- Files changed: `relay/tests/pi_forward_test.rs`; verified existing production code in `relay/src/handlers/pi_forward.rs` and `relay/src/peers/registry.rs` already requires non-empty `to_room`, calls `PeerRegistry::forward_to_room`, and has no `forward_to_peer` call site.
+- Tests added: `missing_to_room_returns_transport_error_bad_envelope` in `relay/tests/pi_forward_test.rs`; existing unit tests cover empty/missing `to_room`, two-room targeted delivery, and verbatim opaque `session_id` carry in the inner envelope.
+- Verification: `cd /home/agent/projects/remote_pi/relay && cargo fmt --check && cargo clippy -- -D warnings && cargo test` — passed; `pi_forward_test` now runs 7 tests.
+- Discrepancies from design: implementation was already present in the checked-out relay source before this stride, so this pass landed an integration regression for the explicit missing-`to_room` wire case and advanced the story. Existing `pi_envelope_in` includes relay-owned `to_room` in addition to authenticated `from_pc` and the verbatim inner envelope, matching adjacent relay opaque-targeting work.
+- Adjacent issues parked: none.
