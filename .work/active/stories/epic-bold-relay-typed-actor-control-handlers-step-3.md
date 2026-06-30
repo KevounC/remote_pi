@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-control-handlers-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-control-handlers
 depends_on: [epic-bold-relay-typed-actor-control-handlers-step-2]
@@ -101,3 +101,13 @@ Inline `SubscriptionIndex` back into `presence.rs` and `rooms.rs`. Because publi
 - Tests added: `SubscriptionIndex` unit tests for replace, empty replace, subset remove, and remove-all cleanup; existing presence/rooms manager tests now exercise the shared graph through both managers.
 - Discrepancies from design: none; public `PresenceManager` and `RoomManager` APIs remain stable and presence-specific `last_offline_ts` stays beside the shared graph.
 - Adjacent issues parked: none.
+
+## Review (2026-06-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: I verified commit `a64249c0` against the acceptance criteria: `SubscriptionIndex` is the single internal graph used by both `PresenceManager` and `RoomManager`, while presence-only `last_offline_ts`, `snapshot`, and `record_offline` remain local to presence. The replacement semantics for `subscribe(s, [])`, disconnect cleanup paths, and public manager APIs/serialized room and presence outputs are preserved by the refactor. Verification from `relay/` passed with `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` (101 total tests across unit/integration/doc-test targets, all passing).
