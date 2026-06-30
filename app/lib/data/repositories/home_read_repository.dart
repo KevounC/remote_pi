@@ -14,6 +14,11 @@ class HomeReadRepository extends Repository {
 
   /// Reactive list of session-index rows (working/idle + last message). Home
   /// overlays this onto its peer/room tiles derived from ConnectionManager.
+  ///
+  /// Durable rows are session-scoped (`peer:room:session_id`). Compatibility
+  /// peer+room rows from older builds are ignored by [SessionIndexRecord]
+  /// because they lack `session_id`; room reachability remains supplied by the
+  /// runtime/ConnectionManager path instead of this transcript index.
   Stream<List<SessionIndexRecord>> watchSessions() {
     final box = _boxes.sessionsIndexBox();
     final byKey = <String, SessionIndexRecord>{};
@@ -59,6 +64,7 @@ class HomeReadRepository extends Repository {
   }
 
   /// Current snapshot (non-reactive) — used to seed a ViewModel synchronously.
+  /// Uses the same session-scoped filtering as [watchSessions].
   Map<String, SessionIndexRecord> snapshot() {
     final box = _boxes.sessionsIndexBox();
     final out = <String, SessionIndexRecord>{};

@@ -846,6 +846,10 @@ class SyncService extends Service {
     await box.clear();
   }
 
+  /// Canonical transcript key for the active session, or null while relay
+  /// room state is known but the SDK `session_id` is not. The null path is a
+  /// compatibility-only quarantine: transcript events/projections must wait
+  /// rather than falling back to old peer+room boxes.
   TranscriptSessionKey? _activeTranscriptKeyOrNull() {
     final ref = _activeRef;
     return ref == null ? null : _transcriptKeyForRef(ref);

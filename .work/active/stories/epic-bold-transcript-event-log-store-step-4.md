@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-store-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app, pi-extension]
 parent: epic-bold-transcript-event-log-store
 depends_on: [epic-bold-transcript-event-log-store-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Re-key transcript retention by canonical session and keep projections disposable
@@ -56,11 +56,24 @@ runtime key = '$peerId:$roomId'
 
 ## Acceptance Criteria
 
-- [ ] Two `session_id`s on the same `(peer, room)` do not share transcript events or projected rows.
-- [ ] Runtime reachability/working room snapshots remain keyed by `(peer, room)` unless the canonical-session feature explicitly changes them.
-- [ ] Old peer+room boxes are preserved for rollback and not destructively migrated.
-- [ ] Read repositories document whether they consume session-scoped keys or temporary compatibility keys.
-- [ ] Targeted app persistence tests pass.
+- [x] Two `session_id`s on the same `(peer, room)` do not share transcript events or projected rows.
+- [x] Runtime reachability/working room snapshots remain keyed by `(peer, room)` unless the canonical-session feature explicitly changes them.
+- [x] Old peer+room boxes are preserved for rollback and not destructively migrated.
+- [x] Read repositories document whether they consume session-scoped keys or temporary compatibility keys.
+- [x] Targeted app persistence tests pass.
+
+## Implementation
+
+- Re-key strategy: transcript truth uses `TranscriptSessionKey(peerId, roomId, sessionId)` and disposable message projections use `RemoteSessionRef(peerEpk, roomId, sessionId)`, so both `transcript_events_<peer>__<room>__<session>` and `msgs_<peer>__<room>__<session>` are scoped by canonical SDK `session_id`.
+- Rollback preservation: legacy peer+room boxes/rows are ignored rather than deleted; `SessionIndexRecord.tryFromJson` drops old rows missing `session_id`, while old Hive files remain available for rollback.
+- Runtime scope: runtime reachability/working snapshots continue to use `LocalBoxes.runtimeKey(epk, roomId)` because relay-room liveness is not transcript identity.
+- Repository documentation: `SessionReadRepository`, `HomeReadRepository`, and `SessionIndexRecord` now document session-scoped reads versus room-scoped runtime/compatibility rows; `SyncService._activeTranscriptKeyOrNull` quarantines the temporary no-session state instead of falling back to peer+room transcript persistence.
+- Pi-extension touch: `remoteSessionDurableKey` documents the shared canonical durable key shape alongside `RemoteSessionIssuer`.
+- Verification:
+  - Targeted app persistence tests: 65 passed (`flutter test test/data/local/transcript_event_store_hive_test.dart test/data/repositories/read_repository_test.dart test/data/sync/sync_service_test.dart`).
+  - Full app test: 597 passed.
+  - App analyze: 1 pre-existing info (`axisAlignment` deprecated in `lib/ui/chat/widgets/input_bar.dart:802`); command exits non-zero on that info per current Flutter analyzer behavior.
+  - Pi-extension typecheck: clean (`tsc --noEmit`; only expected pnpm/npmrc warnings).
 
 ## Rollback
 

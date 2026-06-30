@@ -51,6 +51,13 @@ export function resolveRemoteSessionId(ctx: unknown): RemoteSessionId {
   return uuid7();
 }
 
+/** Durable transcript identity shared with the mobile app's Hive key shape. */
+export function remoteSessionDurableKey(
+  session: Pick<RemoteSession, "peerId" | "roomId" | "sessionId">,
+): string {
+  return `${session.peerId}:${session.roomId}:${session.sessionId}`;
+}
+
 export class RemoteSessionIssuer {
   private currentId: RemoteSessionId | null = null;
 

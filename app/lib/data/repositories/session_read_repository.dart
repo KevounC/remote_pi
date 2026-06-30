@@ -18,6 +18,12 @@ class SessionReadRepository extends Repository {
 
   /// Reactive ordered message list for a canonical remote session. Emits the
   /// current snapshot on listen, then an updated list per row change.
+  ///
+  /// This repository intentionally consumes [RemoteSessionRef], not loose
+  /// `(peer, room)` keys: persisted transcript projections are scoped by the
+  /// canonical `session_id`, so two SDK sessions in the same relay room do not
+  /// share rows. The only room-scoped reader in this class is [watchRuntime]
+  /// below, because reachability/working snapshots are relay-room state.
   Stream<List<MessageRecord>> watchMessages(RemoteSessionRef ref) {
     final byKey = <int, MessageRecord>{};
     StreamSubscription? sub;

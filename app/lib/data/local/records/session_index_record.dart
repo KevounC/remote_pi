@@ -5,8 +5,12 @@ enum SessionActivity { idle, working }
 
 /// Plan/31 — durable top-level index of sessions, so Home can query
 /// cross-session (working/idle + last message) without opening every
-/// per-session box. Keyed by `<epk>:<roomId>:<sessionId>` in the
-/// `sessions_index` box.
+/// per-session box. Keyed by canonical transcript identity
+/// `<epk>:<roomId>:<sessionId>` in the `sessions_index` box.
+///
+/// Older peer+room-only rows are rollback artifacts. [tryFromJson] returns
+/// null for those rows instead of migrating or deleting them, keeping the old
+/// cache available for rollback while active reads use session-scoped keys.
 class SessionIndexRecord {
   final String epk;
   final String roomId;
