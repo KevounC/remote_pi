@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-schema-source
 kind: feature
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-generated-protocol
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Generated protocol — canonical schema source
@@ -409,3 +409,9 @@ Verification in this run: Python parsed all `protocol/**/*.json` and `protocol/*
 - Step 1 locks the schema-language direction for downstream codegen. Rollback is mechanically simple but strategically high-impact, so the implementation should commit the decision in `protocol/README.md`.
 - Future enforcement of canonical `session_id`/`turn_id` is intentionally not atomic here. This design records it as profile metadata and leaves live enforcement to the canonical-session epic to avoid a hidden behavior change.
 
+
+## Review — advanced to done (2026-06-30)
+
+All 5 child stories `done`. The schema/fixture/check artifacts this epic added
+are the foundation the generated-protocol-codegen epics (rust/dart/ts) build on;
+several of their steps are already landing in the active drain. Epic complete.

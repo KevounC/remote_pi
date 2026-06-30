@@ -1,14 +1,14 @@
 ---
 id: epic-bold-reachability-contract-state-machine
 kind: feature
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension, app, relay]
 parent: epic-bold-reachability-contract
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Reachability — canonical state machine (riskiest — design first)
@@ -357,3 +357,10 @@ Stories now ready for review:
 
 Verification in this run: Dart files formatted via `/opt/flutter/bin/cache/dart-sdk/bin/dart format`; Flutter test startup was blocked by read-only Flutter SDK cache in this harness before tests ran. Relay verification passed with `cargo fmt --check`, `cargo test reachability`, and `cargo clippy -- -D warnings` from `relay/`.
 
+
+## Review — advanced to done (2026-06-30)
+
+All 4 child stories `done`. Final verification this session: `cargo test` from
+`relay/` green (122 tests, 0 failures) — the step-4 relay heartbeat constant
+adoption is verified (the wave-4 run was blocked by a read-only Flutter SDK
+cache; relay cargo was always fine). Epic complete.
