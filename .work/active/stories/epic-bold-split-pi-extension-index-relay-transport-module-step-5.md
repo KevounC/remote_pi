@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-relay-transport-module-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-relay-transport-module
 depends_on: [epic-bold-split-pi-extension-index-relay-transport-module-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Route owner ingress through RelayTransportPort and lock compatibility tests
@@ -83,3 +83,15 @@ paired apps after reconnect.
 Restore direct `_installAutoListener(relay)` and `new PlainPeerChannel(relay, ...)`
 construction in `index.ts`. Because the wire format is unchanged, rollback is a
 wiring-only revert.
+
+## Implementation
+- Routed owner ingress through `RelayTransportPort.onOuterMessage()` in `index.ts`; reconnect keeps the outer owner-ingress subscription owned by relay transport while relay-specific owner channels detach on drop.
+- Added `RelayTransportPort.createPeerChannel()` in `relay_transport.ts` and moved owner `PlainPeerChannel` construction behind that port. `index.ts` no longer constructs `PlainPeerChannel` or installs relay message listeners directly.
+- Preserved known-peer reconnect semantics: the first non-pair known-peer message attaches the owner and routes that consumed inner message exactly once; tests assert a single `pong` and listener counts before/after attach.
+- Preserved unknown-peer behavior without logging payloads; one-off peer replies use the relay channel factory and detach immediately.
+- Added reconnect coverage proving relay drop detaches owners, removes old message listeners, reconnect installs one owner-ingress listener, and the known peer reattaches/routes exactly once on the new relay stream.
+- Verification:
+  - `corepack pnpm typecheck` passed.
+  - `corepack pnpm build` passed.
+  - Focused owner-ingress vitest selection passed: 6 passed / 147 skipped in `src/extension.test.ts`.
+  - Required combined vitest command reported 161 total tests: 157 passed / 4 failed. By file: `src/transport/relay_client.test.ts` 8 passed; `src/extension.test.ts` 149 passed / 4 failed. The 4 failures are the known false-alarm group (`after a clean reset`, `remote-pi:name-assigned`, `rename:<name>`, same-folder cwd-lock) described in the story prompt, not owner-ingress regressions.
