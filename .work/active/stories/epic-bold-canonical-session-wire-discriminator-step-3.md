@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-wire-discriminator-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-canonical-session-wire-discriminator
 depends_on: [epic-bold-canonical-session-wire-discriminator-step-2]
@@ -96,3 +96,20 @@ Disable the app gate via one internal seam, then revert the protocol fields and 
   - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && FLUTTER=/home/agent/projects/remote_pi/.tools/flutter/bin/flutter && $FLUTTER pub get` — passed.
   - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && FLUTTER=/home/agent/projects/remote_pi/.tools/flutter/bin/flutter && $FLUTTER test test/data/sync/sync_service_test.dart` — passed, 40 tests.
   - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && FLUTTER=/home/agent/projects/remote_pi/.tools/flutter/bin/flutter && $FLUTTER analyze` — only the known unrelated `axisAlignment` info at `lib/ui/chat/widgets/input_bar.dart:802` remained (Flutter exits non-zero for the info).
+
+## Review (2026-06-30)
+
+**Verdict**: Approve
+
+**Blockers**: none.
+
+**Important**: none.
+
+**Nits**: none.
+
+**Notes**:
+- Reviewed rework commit `98a88a6`. The legacy no-room unconditional route is removed from `app/lib/data/transport/ws_transport.dart`: missing/empty `room` envelopes now log `DROPPED (missing-room)` and return before queuing payload bytes, while explicit room mismatches still drop.
+- Verified `SyncService._onServerMessage` still applies `SessionGate` before session mutation cases, and the rework tests cover foreign `session_history`, missing-`session_id` history, foreign chunk/done/assistant/tool request/tool result/queued/error/compaction frames, and same-session reconnect history replay idempotency.
+- Exact targeted suite count is 40 passing tests, not 41. The sibling transcript tests coexist; the count difference comes from refactoring/splitting the prior combined history test rather than adding four net-new tests.
+- No existing app test asserting legacy no-room routing was found (`Legacy Pis without room` / missing-room transport grep only found work-item prose, not test assertions), so there was no deleted legacy-routing test to flag.
+- Verification run: `flutter pub get` passed; `flutter analyze` returned only the known unrelated `axisAlignment` info at `lib/ui/chat/widgets/input_bar.dart:802`; `flutter test test/data/sync/sync_service_test.dart` passed with `+40` / `All tests passed!`.
