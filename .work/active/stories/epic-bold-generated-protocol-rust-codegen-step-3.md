@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-rust-codegen-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-generated-protocol-rust-codegen
 depends_on: [epic-bold-generated-protocol-rust-codegen-step-2]
@@ -103,3 +103,19 @@ Verification:
 - `cargo build` — passed.
 
 Deferred scope: none.
+
+## Review
+
+Approved (2026-06-30) with generated-contract verification. Independently ran
+the canonical regen-check from `protocol/`:
+- `--check` mode: pass (no drift between committed generated files and generator output).
+- Determinism: two fresh regen runs to temp dirs are byte-identical (`diff -r` empty).
+- No hand-edits: committed `relay/src/protocol/generated/control.rs` matches fresh generator output exactly.
+
+Relay verification: `cargo fmt --check` clean; `cargo clippy -- -D warnings` clean;
+`cargo test` 122 passed / 0 failed (68 lib + 3 integ + 13 mesh + 9 pi_forward + 10
+presence + 19 rooms). Commit `c485dca` scoped to owned files (generated/control.rs,
+auth/challenge.rs, handlers/{control,peer}.rs, generator). Acceptance criteria
+verified: generated types own the auth/control serde boundary; `pi_envelope` kept
+on the cross-PC path; `MAX_CONTROL_FRAME_PEERS=64` ceiling preserved; malformed/
+unknown frames warn-and-drop (no panic, no payload logging).
