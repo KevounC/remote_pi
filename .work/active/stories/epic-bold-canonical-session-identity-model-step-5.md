@@ -1,14 +1,14 @@
 ---
 id: epic-bold-canonical-session-identity-model-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-canonical-session-identity-model
 depends_on: [epic-bold-canonical-session-identity-model-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Re-key endpoint projections by canonical session
@@ -67,3 +67,11 @@ High. Re-keying persistence can appear as lost history until re-sync completes. 
 
 ## Rollback
 Keep old boxes untouched; restore app reads/writes to `(epk, roomId)` keys and remove the Cockpit naming alignment. Because old boxes are not deleted, rollback recovers previous local cache behavior.
+
+## Implementation
+- Re-key approach: app transcript `msgs_*` boxes and the durable `sessions_index` key now use the canonical `RemoteSessionRef` shape `(peer, room, session_id)` via `RemoteSessionRef.storageKey`; message and transcript event box filenames sanitize peer/room/session path segments. `RemoteSessionRef` keeps the existing app-facing `peerEpk` field and adds `peerId` as the canonical alias so the model aligns with sync_service's existing `_activeRef` instead of forking it.
+- Session selection/UI: tablet `SessionSelection` now carries a full `RemoteSessionRef`, the detail-pane key includes `sessionId`, and sheet-dismiss/highlight tests cover same-room session rotations. Room reachability and Home working/live dots still query `ConnectionManager` by `(peer, room)` only.
+- Clean-room migration/re-sync path: old peer+room-only message boxes are deliberately never opened or deleted. A freshly keyed canonical box starts empty, then `SyncService.requestSync()`/Pi `session_history` replay repopulates it for the active `session_id`. Rollback can restore old `(peer, room)` reads because the old cache files remain untouched.
+- Tests added/updated: `read_repository_test` now proves two different `session_id`s on the same `(peer, room)` read from different boxes; the existing `sync_service_test` same-room session-rotation test still proves writer/index isolation and old-box preservation; action tests now seed canonical `session_id` before action dispatch.
+- Verification: `flutter test` full app suite passes. `flutter analyze` reports only the known unrelated `axisAlignment` deprecation at `app/lib/ui/chat/widgets/input_bar.dart:802`.
+- Deviations: cockpit terminology alignment was not changed because the caller explicitly scoped this wave to app-only work and forbade cockpit edits due concurrent ownership. `SyncService`/transcript reducer files were not rewritten; this work only aligns call sites and persistence keys with their existing `RemoteSessionRef` concept.

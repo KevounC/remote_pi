@@ -69,7 +69,18 @@ _setup({Duration timeout = const Duration(seconds: 5)}) async {
       pairedAt: '2026-01-01T00:00:00Z',
     ),
   );
-  // Let the StatusOnline emit propagate into the repo.
+  // Let the StatusOnline emit propagate into the repo, then seed the canonical
+  // session id now required on every app action frame.
+  await Future<void>.delayed(const Duration(milliseconds: 5));
+  ch.push(
+    PairOk(
+      inReplyTo: 'pair-actions',
+      sessionName: 'pi',
+      sessionStartedAt: DateTime.utc(2026).millisecondsSinceEpoch,
+      roomId: 'main',
+      sessionId: 'session-actions',
+    ),
+  );
   await Future<void>.delayed(const Duration(milliseconds: 5));
   return (repo: repo, cm: cm, ch: ch);
 }
@@ -367,6 +378,7 @@ void main() {
             peer: 'epk_actions',
             roomId: 'main',
             startedAt: 1,
+            sessionId: 'session-actions',
             model: 'claude-opus-4-7',
           ),
         );
@@ -378,6 +390,7 @@ void main() {
             model: 'gpt-4o',
             hasModel: true,
             hasThinking: false,
+            hasSessionId: false,
           ),
         );
         await Future<void>.delayed(const Duration(milliseconds: 20));

@@ -21,7 +21,7 @@ class DismissOnSessionChange extends StatefulWidget {
 }
 
 class _DismissOnSessionChangeState extends State<DismissOnSessionChange> {
-  ({String epk, String roomId})? _initial;
+  ({String epk, String roomId, String sessionId})? _initial;
 
   @override
   void initState() {
@@ -30,9 +30,10 @@ class _DismissOnSessionChangeState extends State<DismissOnSessionChange> {
     widget.selection.addListener(_onChange);
   }
 
-  static ({String epk, String roomId})? _key(
-    ({String epk, String roomId, String title, String device, bool online})? c,
-  ) => c == null ? null : (epk: c.epk, roomId: c.roomId);
+  static ({String epk, String roomId, String sessionId})? _key(
+    SelectedSession? c,
+  ) =>
+      c == null ? null : (epk: c.epk, roomId: c.roomId, sessionId: c.sessionId);
 
   void _onChange() {
     if (!mounted) return;

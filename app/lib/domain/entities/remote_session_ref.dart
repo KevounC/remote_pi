@@ -15,7 +15,11 @@ final class RemoteSessionRef {
   final String roomId;
   final String sessionId;
 
-  String get storageKey => '$peerEpk:$roomId:$sessionId';
+  /// Canonical peer identity alias used by generic persistence code. Today the
+  /// mobile app's peer id is the paired Pi EPK.
+  String get peerId => peerEpk;
+
+  String get storageKey => '$peerId:$roomId:$sessionId';
 
   @override
   bool operator ==(Object other) =>

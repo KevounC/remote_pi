@@ -7,6 +7,11 @@
 //
 //   DURABLE  msgs_<epk>__<roomId>__<sessionId>
 //                                           key = seq (int)  → MessageRecord
+//
+// Peer+room-only boxes from early rp_v2 builds are intentionally not opened or
+// deleted here. A clean-room re-sync from the Pi repopulates the active
+// canonical `(peer, room, session_id)` box, while rollback can still see the old
+// cache files untouched.
 //   DURABLE  sessions_index         key = <epk>:<roomId>:<sessionId>
 //                                                           → SessionIndexRecord
 //   VOLATILE runtime  (wiped@boot)  key = <epk>:<roomId>   → RuntimeRecord
@@ -77,12 +82,12 @@ class LocalBoxes {
       Hive.isBoxOpen(transcriptEventsBoxName(key));
 
   /// `:` and the epk's `/`+`=` would break the on-disk filename — sanitise to
-  /// the url-safe, unpadded epk form (same approach as the v1 store).
+  /// the url-safe, unpadded epk form plus safe room/session segments.
   static String msgsBoxName(RemoteSessionRef ref) =>
-      'msgs_${toAppEpk(ref.peerEpk)}__${ref.roomId}__${_safe(ref.sessionId)}';
+      'msgs_${_safe(toAppEpk(ref.peerEpk))}__${_safe(ref.roomId)}__${_safe(ref.sessionId)}';
 
   static String transcriptEventsBoxName(TranscriptSessionKey key) =>
-      'transcript_events_${toAppEpk(key.peerId)}__${_safe(key.roomId)}__${_safe(key.sessionId)}';
+      'transcript_events_${_safe(toAppEpk(key.peerId))}__${_safe(key.roomId)}__${_safe(key.sessionId)}';
 
   static String sessionKey(RemoteSessionRef ref) => ref.storageKey;
 

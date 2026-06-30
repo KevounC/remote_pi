@@ -6,6 +6,7 @@
 //   3. The StatefulShellRoute + navigatorContainerBuilder layout decision:
 //      wide → master + detail side by side; narrow → only the active branch.
 
+import 'package:app/domain/entities/remote_session_ref.dart';
 import 'package:app/routing/adaptive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -64,6 +65,9 @@ Future<void> _pumpAt(WidgetTester tester, Size size) async {
   await tester.pumpAndSettle();
 }
 
+RemoteSessionRef _ref(String epk, String roomId, String sessionId) =>
+    RemoteSessionRef(peerEpk: epk, roomId: roomId, sessionId: sessionId);
+
 void main() {
   group('SessionSelection', () {
     test('starts empty (no pre-selection on launch)', () {
@@ -72,35 +76,52 @@ void main() {
       expect(sel.matches('epk', 'main'), isFalse);
     });
 
-    test('select sets current and matches the (epk, room)', () {
+    test('select sets current and matches the canonical session', () {
       final sel = SessionSelection();
       var notifications = 0;
       sel.addListener(() => notifications++);
 
-      sel.select('epkA', 'main', 'Title A');
+      sel.select(_ref('epkA', 'main', 'session-a'), 'Title A');
       expect(sel.current?.epk, 'epkA');
       expect(sel.current?.roomId, 'main');
+      expect(sel.current?.sessionId, 'session-a');
       expect(sel.current?.title, 'Title A');
-      expect(sel.matches('epkA', 'main'), isTrue);
-      expect(sel.matches('epkA', 'other'), isFalse);
-      expect(sel.matches('epkB', 'main'), isFalse);
+      expect(sel.matches('epkA', 'main', 'session-a'), isTrue);
+      expect(sel.matches('epkA', 'main', 'session-b'), isFalse);
+      expect(sel.matches('epkA', 'other', 'session-a'), isFalse);
+      expect(sel.matches('epkB', 'main', 'session-a'), isFalse);
       expect(notifications, 1);
     });
 
-    test('re-selecting the same session is a no-op (no rebuild)', () {
+    test('re-selecting the same canonical session is a no-op (no rebuild)', () {
       final sel = SessionSelection();
-      sel.select('epkA', 'main', 'Title A');
+      sel.select(_ref('epkA', 'main', 'session-a'), 'Title A');
       var notifications = 0;
       sel.addListener(() => notifications++);
 
-      sel.select('epkA', 'main', 'Title A again');
-      expect(notifications, 0, reason: 'same (epk, room) must not notify');
+      sel.select(_ref('epkA', 'main', 'session-a'), 'Title A again');
+      expect(
+        notifications,
+        0,
+        reason: 'same (epk, room, sessionId) must not notify',
+      );
       expect(sel.current?.title, 'Title A', reason: 'unchanged');
+    });
+
+    test('same room with a different session id notifies', () {
+      final sel = SessionSelection();
+      sel.select(_ref('epkA', 'main', 'session-a'), 'Title A');
+      var notifications = 0;
+      sel.addListener(() => notifications++);
+
+      sel.select(_ref('epkA', 'main', 'session-b'), 'Title B');
+      expect(notifications, 1);
+      expect(sel.current?.sessionId, 'session-b');
     });
 
     test('clear resets to empty and notifies once', () {
       final sel = SessionSelection();
-      sel.select('epkA', 'main', 'Title A');
+      sel.select(_ref('epkA', 'main', 'session-a'), 'Title A');
       var notifications = 0;
       sel.addListener(() => notifications++);
 

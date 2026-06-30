@@ -1,4 +1,5 @@
 import 'package:app/data/transport/epk_encoding.dart';
+import 'package:app/domain/entities/remote_session_ref.dart';
 import 'package:app/pairing/storage.dart';
 import 'package:app/protocol/protocol.dart' show RoomInfo;
 import 'package:app/routing/adaptive.dart';
@@ -348,9 +349,8 @@ class HomePage extends StatelessWidget {
     // persistent highlight would be meaningless).
     final isSelected =
         isWideLayout(context) &&
-        context.watch<SessionSelection>().matches(
-          it.peer.remoteEpk,
-          it.room.roomId,
+        context.watch<SessionSelection>().matchesRef(
+          _remoteSessionRef(it.peer, it.room),
         );
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -532,8 +532,7 @@ class HomePage extends StatelessWidget {
     // highlighted tile. Set AFTER openSession so the detail's fresh
     // ChatViewModel reads the already-updated prefs.
     context.read<SessionSelection>().select(
-      peer.remoteEpk,
-      room.roomId,
+      _remoteSessionRef(peer, room),
       title,
       device,
       online,
@@ -547,6 +546,18 @@ class HomePage extends StatelessWidget {
       );
     }
   }
+
+  static RemoteSessionRef _remoteSessionRef(
+    PeerRecord peer,
+    RoomInfo room,
+  ) => RemoteSessionRef(
+    peerEpk: peer.remoteEpk,
+    roomId: room.roomId,
+    // Room reachability can exist before metadata reports session_id; in
+    // that pre-canonical window transcript persistence is still gated by
+    // SyncService.activeSessionRef, and the next authoritative sync fills it.
+    sessionId: room.sessionId ?? '',
+  );
 
   /// Plan/32g — the paired-device label for the Chat AppBar's line 2
   /// (nickname → sessionName → epk prefix). Mirrors [ChatPage]'s own peer

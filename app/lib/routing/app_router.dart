@@ -381,9 +381,9 @@ GoRouter buildRouter(
 
 /// Detail pane for the tablet's right side. Reacts to [SessionSelection]:
 /// shows the placeholder until a session is picked, then the chat — keyed
-/// by (epk, room) so switching sessions tears down the old ChatViewModel
-/// and builds a fresh one, which re-binds to the now-selected peer (the
-/// VM reads `Preferences.selectedPeerEpk`, already set by Home._open).
+/// by `(epk, room, sessionId)` so switching canonical Pi sessions in the same
+/// relay room tears down the old ChatViewModel and builds a fresh one. The VM
+/// still reads `Preferences.selectedPeerEpk`, already set by Home._open.
 class _DetailPane extends StatelessWidget {
   const _DetailPane();
 
@@ -394,7 +394,9 @@ class _DetailPane extends StatelessWidget {
       return const DetailPlaceholder();
     }
     return MultiProvider(
-      key: ValueKey('chat-${sel.current!.epk}-${sel.current!.roomId}'),
+      key: ValueKey(
+        'chat-${sel.current!.epk}-${sel.current!.roomId}-${sel.current!.sessionId}',
+      ),
       providers: [
         ViewmodelProvider<ChatViewModel>(),
         ViewmodelProvider<VoiceInputViewModel>(),

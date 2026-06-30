@@ -1,3 +1,4 @@
+import 'package:app/domain/entities/remote_session_ref.dart';
 import 'package:flutter/widgets.dart';
 
 /// Lado menor (em pixels lógicos) a partir do qual o app entra no modo tablet
@@ -82,40 +83,62 @@ class ShellLayout extends ChangeNotifier {
 /// chat apareça pré-selecionado — o placeholder é mostrado até o primeiro
 /// toque. Vive enquanto o app roda (não é restaurada entre execuções, já
 /// que queremos iniciar sempre sem seleção).
+class SelectedSession {
+  const SelectedSession({
+    required this.ref,
+    required this.title,
+    this.device = '',
+    this.online = false,
+  });
+
+  final RemoteSessionRef ref;
+  final String title;
+  final String device;
+  final bool online;
+
+  String get epk => ref.peerEpk;
+  String get roomId => ref.roomId;
+  String get sessionId => ref.sessionId;
+}
+
 class SessionSelection extends ChangeNotifier {
-  ({String epk, String roomId, String title, String device, bool online})?
-  _current;
+  SelectedSession? _current;
 
-  ({String epk, String roomId, String title, String device, bool online})?
-  get current => _current;
+  SelectedSession? get current => _current;
 
-  /// `true` se `(epk, roomId)` é a sessão selecionada agora.
-  bool matches(String epk, String roomId) {
+  /// `true` se a sessão canônica é a seleção atual. Production callers pass
+  /// [sessionId] so a Pi SDK session rotation in the same relay room tears down
+  /// the old detail chat instead of reusing its transcript-scoped state.
+  bool matches(String epk, String roomId, [String? sessionId]) {
     final c = _current;
-    return c != null && c.epk == epk && c.roomId == roomId;
+    return c != null &&
+        c.epk == epk &&
+        c.roomId == roomId &&
+        (sessionId == null || c.sessionId == sessionId);
   }
+
+  bool matchesRef(RemoteSessionRef ref) => _current?.ref == ref;
 
   /// Plan/32g — `device` é o nome do dispositivo pareado (nickname /
   /// sessionName) que o Home já conhece; o detail-pane do tablet o repassa pro
   /// `ChatPage.initialDevice` pra renderizar a linha 2 da AppBar de cara, sem
   /// esperar o PeerRecord assíncrono. `online` é o estado live do tile (verde),
   /// repassado pro `ChatPage.initialOnline` pra o ponto de status não piscar
-  /// "reconnecting" no boot do runtime. Ambos opcionais pra não quebrar
-  /// chamadas legadas/testes que só passam o título.
+  /// "reconnecting" no boot do runtime. Ambos acompanham o
+  /// [RemoteSessionRef] completo; a seleção é transcript-scoped, enquanto
+  /// liveness permanece consultada por `(epk, roomId)`.
   void select(
-    String epk,
-    String roomId,
+    RemoteSessionRef ref,
     String title, [
     String device = '',
     bool online = false,
   ]) {
     final c = _current;
-    if (c != null && c.epk == epk && c.roomId == roomId) {
+    if (c != null && c.ref == ref) {
       return; // no-op — evita rebuild do detail/master
     }
-    _current = (
-      epk: epk,
-      roomId: roomId,
+    _current = SelectedSession(
+      ref: ref,
       title: title,
       device: device,
       online: online,

@@ -66,6 +66,41 @@ void main() {
     },
   );
 
+  test(
+    'watchMessages isolates two session ids on the same peer and room',
+    () async {
+      final boxes = LocalBoxes();
+      final repo = SessionReadRepository(boxes);
+      final epk = 'epk_isolate_${++_c}';
+      final first = RemoteSessionRef(
+        peerEpk: epk,
+        roomId: 'main',
+        sessionId: 'session-a',
+      );
+      final second = RemoteSessionRef(
+        peerEpk: epk,
+        roomId: 'main',
+        sessionId: 'session-b',
+      );
+
+      expect(
+        LocalBoxes.msgsBoxName(first),
+        isNot(LocalBoxes.msgsBoxName(second)),
+      );
+
+      final firstBox = await boxes.msgsBox(first);
+      final secondBox = await boxes.msgsBox(second);
+      await firstBox.put(0, _msg(0, 'a', 'from session a').toJson());
+      await secondBox.put(0, _msg(0, 'b', 'from session b').toJson());
+
+      final firstRows = await repo.watchMessages(first).first;
+      final secondRows = await repo.watchMessages(second).first;
+
+      expect(firstRows.map((m) => m.text), ['from session a']);
+      expect(secondRows.map((m) => m.text), ['from session b']);
+    },
+  );
+
   test('watchRuntime reflects writes for the (epk, room) key', () async {
     final boxes = LocalBoxes();
     final repo = SessionReadRepository(boxes);
