@@ -123,7 +123,6 @@ void main() {
 
       expect(snapshot.turn.status, AgentTurnStatus.streaming);
       expect(snapshot.turn.working, isTrue);
-      expect(snapshot.isStreaming, isTrue);
     });
 
     test('maps richer turn projection when present', () {

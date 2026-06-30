@@ -65,6 +65,9 @@ class RpcDataMapper {
 
   AgentSnapshot state(Object? data) {
     final map = data is Map ? data : const <String, dynamic>{};
+    // Short-lived wire compatibility: older `pi --mode rpc get_state` payloads
+    // expose `isStreaming` instead of `turn`. Convert it at the adapter boundary
+    // so UI/domain consumers only read [AgentTurnProjection].
     return AgentSnapshot(
       model: model(map['model']),
       thinkingLevel: ThinkingLevel.fromWire(map['thinkingLevel'] as String?),

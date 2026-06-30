@@ -1,3 +1,4 @@
+import 'package:cockpit/app/cockpit/domain/entities/agent_session_projection.dart';
 import 'package:cockpit/app/cockpit/ui/session/agent_session.dart';
 import 'package:cockpit/app/core/ui/themes/themes.dart';
 import 'package:flutter/services.dart'
@@ -56,7 +57,8 @@ class _AgentEditDialogState extends State<_AgentEditDialog> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final session = widget.session;
-    final ctx = session.contextUsage;
+    final projection = session.projection;
+    final ctx = projection.controls.contextUsage;
 
     return AlertDialog(
       title: Text(
@@ -105,8 +107,8 @@ class _AgentEditDialogState extends State<_AgentEditDialog> {
               _SectionTitle('Information'),
               const SizedBox(height: 8),
               _InfoRow('Folder', session.workingDirectory),
-              _InfoRow('Model', session.model?.name ?? '—'),
-              _InfoRow('State', _statusLabel(session)),
+              _InfoRow('Model', projection.controls.model?.name ?? '—'),
+              _InfoRow('State', _statusLabel(projection)),
               _InfoRow(
                 'Context',
                 ctx?.percent != null
@@ -127,13 +129,13 @@ class _AgentEditDialogState extends State<_AgentEditDialog> {
     );
   }
 
-  String _statusLabel(AgentSession session) {
-    if (session.turn.working) return 'working';
-    return switch (session.status) {
-      AgentStatus.empty => 'empty',
-      AgentStatus.booting => 'starting',
-      AgentStatus.idle => 'ready',
-      AgentStatus.crashed => 'ended',
+  String _statusLabel(AgentSessionProjection projection) {
+    if (projection.turn.working) return 'working';
+    return switch (projection.lifecycle) {
+      AgentProcessLifecycle.empty => 'empty',
+      AgentProcessLifecycle.booting => 'starting',
+      AgentProcessLifecycle.idle || AgentProcessLifecycle.running => 'ready',
+      AgentProcessLifecycle.crashed => 'ended',
     };
   }
 }

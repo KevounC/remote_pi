@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:cockpit/app/cockpit/domain/entities/transcript_message.dart';
 import 'package:cockpit/app/cockpit/ui/session/agent_entry.dart';
 import 'package:cockpit/app/cockpit/ui/widgets/agent_markdown.dart';
 import 'package:cockpit/app/core/ui/file_icons/file_icons.dart';
@@ -34,7 +35,7 @@ class AgentTranscript extends StatelessWidget {
     this.bottomPadding = 8,
   });
 
-  final List<AgentEntry> entries;
+  final List<Object> entries;
   final ScrollController controller;
 
   /// Callback pros cards de `extension_ui_request` interativos responderem.
@@ -121,22 +122,22 @@ class AgentTranscript extends StatelessWidget {
     );
   }
 
-  /// Agrupa as entradas em turnos: cada [UserEntry] abre um turno (header) e as
+  /// Agrupa as entradas em turnos: cada [ProjectedUserMessage] abre um turno (header) e as
   /// entradas seguintes (até o próximo usuário) são o corpo. Entradas antes do
   /// primeiro usuário viram um turno sem header.
-  List<({UserEntry? header, List<AgentEntry> body})> _groupIntoTurns(
-    List<AgentEntry> entries,
+  List<({ProjectedUserMessage? header, List<Object> body})> _groupIntoTurns(
+    List<Object> entries,
   ) {
-    final turns = <({UserEntry? header, List<AgentEntry> body})>[];
-    UserEntry? header;
-    var body = <AgentEntry>[];
+    final turns = <({ProjectedUserMessage? header, List<Object> body})>[];
+    ProjectedUserMessage? header;
+    var body = <Object>[];
     for (final entry in entries) {
-      if (entry is UserEntry) {
+      if (entry is ProjectedUserMessage) {
         if (header != null || body.isNotEmpty) {
           turns.add((header: header, body: body));
         }
         header = entry;
-        body = <AgentEntry>[];
+        body = <Object>[];
       } else {
         body.add(entry);
       }
@@ -145,7 +146,7 @@ class AgentTranscript extends StatelessWidget {
     return turns;
   }
 
-  Widget _bodySliver(List<AgentEntry> body) {
+  Widget _bodySliver(List<Object> body) {
     return SliverList(
       delegate: SliverChildBuilderDelegate(
         (context, i) => _EntryView(
@@ -164,7 +165,7 @@ class AgentTranscript extends StatelessWidget {
 /// o balão normal (sem mudar de tamanho → sem "pulo").
 class _PinnedUserHeader extends StatelessWidget {
   const _PinnedUserHeader({required this.entry, required this.pinned});
-  final UserEntry entry;
+  final ProjectedUserMessage entry;
   final bool pinned;
 
   @override
@@ -188,17 +189,17 @@ class _PinnedUserHeader extends StatelessWidget {
 
 class _EntryView extends StatelessWidget {
   const _EntryView({super.key, required this.entry, this.onUiResponse});
-  final AgentEntry entry;
+  final Object entry;
   final UiResponder? onUiResponse;
 
   @override
   Widget build(BuildContext context) {
     return switch (entry) {
-      UserEntry(:final text, :final images) => _UserMessage(
+      ProjectedUserMessage(:final text, :final images) => _UserMessage(
         text: text,
         images: images,
       ),
-      AssistantTextEntry(:final text) => Padding(
+      ProjectedAssistantTextMessage(:final text) => Padding(
         padding: const EdgeInsets.only(bottom: 14),
         child: text.isEmpty
             ? Text(
@@ -207,8 +208,19 @@ class _EntryView extends StatelessWidget {
               )
             : _CachedMarkdown(text),
       ),
-      ThinkingEntry(:final text) => _ThinkingBlock(text: text),
-      ToolEntry() => _ToolCard(tool: entry as ToolEntry),
+      ProjectedThinkingMessage(:final text) => _ThinkingBlock(text: text),
+      ProjectedToolMessage(
+        :final name,
+        :final args,
+        :final status,
+        :final resultText,
+      ) =>
+        _ToolCard(
+          name: name,
+          args: args,
+          status: status,
+          resultText: resultText,
+        ),
       InfoEntry(:final text, :final isError) => Padding(
         padding: const EdgeInsets.only(bottom: 10),
         child: Text(
@@ -240,6 +252,7 @@ class _EntryView extends StatelessWidget {
         entry: entry as UiRequestEntry,
         onRespond: onUiResponse,
       ),
+      _ => const SizedBox.shrink(),
     };
   }
 }
@@ -633,15 +646,26 @@ class _ThinkingBlock extends StatelessWidget {
 }
 
 class _ToolCard extends StatelessWidget {
-  const _ToolCard({required this.tool});
-  final ToolEntry tool;
+  const _ToolCard({
+    required this.name,
+    required this.args,
+    required this.status,
+    required this.resultText,
+  });
+
+  final String name;
+  final Map<String, dynamic> args;
+  final ToolProjectionStatus status;
+  final String resultText;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final accent = tool.isError ? colors.error : colors.ok;
-    final argsText = tool.args.isEmpty ? '' : jsonEncode(tool.args);
-    final hasResult = tool.done && tool.resultText.isNotEmpty;
+    final done = status != ToolProjectionStatus.running;
+    final isError = status == ToolProjectionStatus.error;
+    final accent = isError ? colors.error : colors.ok;
+    final argsText = args.isEmpty ? '' : jsonEncode(args);
+    final hasResult = done && resultText.isNotEmpty;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -659,14 +683,14 @@ class _ToolCard extends StatelessWidget {
               height: 24,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: tool.done
+                color: done
                     ? accent.withValues(alpha: 0.10)
                     : colors.accentSoft,
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: tool.done
+              child: done
                   ? Icon(
-                      tool.isError ? Icons.close : Icons.check,
+                      isError ? Icons.close : Icons.check,
                       size: 14,
                       color: accent,
                     )
@@ -678,7 +702,7 @@ class _ToolCard extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             Text(
-              tool.toolName,
+              name,
               style: context.typo.body.copyWith(
                 fontSize: 13,
                 color: colors.text,
@@ -699,7 +723,7 @@ class _ToolCard extends StatelessWidget {
           ],
         ),
         body: SelectableText(
-          _clip(tool.resultText, 20000),
+          _clip(resultText, 20000),
           style: context.typo.mono.copyWith(
             fontSize: 11.5,
             color: colors.text3,

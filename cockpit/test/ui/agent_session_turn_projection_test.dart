@@ -14,7 +14,6 @@ import 'package:cockpit/app/cockpit/domain/entities/thinking_level.dart';
 import 'package:cockpit/app/cockpit/domain/entities/transcript_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/transcript_message.dart';
 import 'package:cockpit/app/cockpit/domain/exceptions/rpc_error.dart';
-import 'package:cockpit/app/cockpit/ui/session/agent_entry.dart';
 import 'package:cockpit/app/cockpit/ui/session/agent_session.dart';
 import 'package:cockpit/app/core/domain/result.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,22 +25,20 @@ void main() {
     final (session, gateway) = await _bootSession();
 
     gateway.emit(const RpcAgentStart());
-    expect(session.turn.status, AgentTurnStatus.working);
-    expect(session.turn.working, isTrue);
-    expect(session.isStreaming, isFalse);
+    expect(session.projection.turn.status, AgentTurnStatus.working);
+    expect(session.projection.turn.working, isTrue);
     expect(session.isBusy, isTrue);
-    expect(session.turnStartedAt, isNotNull);
+    expect(session.projection.turn.startedAt, isNotNull);
 
     gateway.emit(const RpcTextDelta('hello'));
-    expect(session.turn.status, AgentTurnStatus.streaming);
-    expect(session.isStreaming, isTrue);
+    expect(session.projection.turn.status, AgentTurnStatus.streaming);
 
     gateway.emit(const RpcAgentEnd());
     expect(session.status, AgentStatus.idle);
-    expect(session.turn.status, AgentTurnStatus.idle);
-    expect(session.turn.working, isFalse);
+    expect(session.projection.turn.status, AgentTurnStatus.idle);
+    expect(session.projection.turn.working, isFalse);
     expect(session.isBusy, isFalse);
-    expect(session.turnStartedAt, isNull);
+    expect(session.projection.turn.startedAt, isNull);
 
     await session.dispose();
   });
@@ -55,11 +52,11 @@ void main() {
       ..emit(const RpcStreamError('provider failed'));
 
     expect(session.status, AgentStatus.idle);
-    expect(session.turn.status, AgentTurnStatus.error);
-    expect(session.turn.error, 'provider failed');
-    expect(session.turn.working, isFalse);
+    expect(session.projection.turn.status, AgentTurnStatus.error);
+    expect(session.projection.turn.error, 'provider failed');
+    expect(session.projection.turn.working, isFalse);
     expect(session.isBusy, isFalse);
-    expect(session.turnStartedAt, isNull);
+    expect(session.projection.turn.startedAt, isNull);
 
     await session.dispose();
   });
@@ -70,15 +67,15 @@ void main() {
     gateway
       ..emit(const RpcAgentStart())
       ..emit(const RpcTextDelta('partial'));
-    expect(session.turn.canStop, isTrue);
+    expect(session.projection.turn.canStop, isTrue);
 
     await session.stop();
 
     expect(gateway.abortCount, 1);
-    expect(session.turn.status, AgentTurnStatus.idle);
-    expect(session.turn.working, isFalse);
+    expect(session.projection.turn.status, AgentTurnStatus.idle);
+    expect(session.projection.turn.working, isFalse);
     expect(session.isBusy, isFalse);
-    expect(session.turnStartedAt, isNull);
+    expect(session.projection.turn.startedAt, isNull);
 
     await session.dispose();
   });
@@ -92,11 +89,11 @@ void main() {
       ..emit(const RpcProcessExit(1));
 
     expect(session.status, AgentStatus.crashed);
-    expect(session.turn.status, AgentTurnStatus.stale);
-    expect(session.turn.error, 'process exited (code=1)');
-    expect(session.turn.working, isFalse);
+    expect(session.projection.turn.status, AgentTurnStatus.stale);
+    expect(session.projection.turn.error, 'process exited (code=1)');
+    expect(session.projection.turn.working, isFalse);
     expect(session.isBusy, isFalse);
-    expect(session.turnStartedAt, isNull);
+    expect(session.projection.turn.startedAt, isNull);
 
     await session.dispose();
   });
@@ -112,17 +109,17 @@ void main() {
 
     await pumpEventQueue();
     expect(gateway.stateCount, 1);
-    expect(session.turn.status, AgentTurnStatus.streaming);
+    expect(session.projection.turn.status, AgentTurnStatus.streaming);
     expect(session.isBusy, isTrue);
 
     messages.complete(const <CockpitTranscriptEvent>[]);
     await pumpEventQueue();
 
     expect(session.sessionPath, '/sessions/restored.jsonl');
-    expect(session.turn.status, AgentTurnStatus.idle);
-    expect(session.turn.working, isFalse);
+    expect(session.projection.turn.status, AgentTurnStatus.idle);
+    expect(session.projection.turn.working, isFalse);
     expect(session.isBusy, isFalse);
-    expect(session.turnStartedAt, isNull);
+    expect(session.projection.turn.startedAt, isNull);
 
     await session.dispose();
   });
@@ -163,11 +160,15 @@ void main() {
       expect(_transcriptEntries(session), hasLength(2));
       expect(
         _transcriptEntries(session)[0],
-        isA<UserEntry>().having((entry) => entry.text, 'text', 'hello history'),
+        isA<ProjectedUserMessage>().having(
+          (entry) => entry.text,
+          'text',
+          'hello history',
+        ),
       );
       expect(
         _transcriptEntries(session)[1],
-        isA<AssistantTextEntry>().having(
+        isA<ProjectedAssistantTextMessage>().having(
           (entry) => entry.text,
           'text',
           'hello back',
@@ -189,7 +190,7 @@ void main() {
 
       final textEntries = _transcriptEntries(
         session,
-      ).whereType<AssistantTextEntry>();
+      ).whereType<ProjectedAssistantTextMessage>();
       expect(textEntries, hasLength(1));
       expect(textEntries.single.text, 'hello');
       expect(
@@ -223,11 +224,12 @@ void main() {
           ),
         );
 
-      final tools = _transcriptEntries(session).whereType<ToolEntry>();
+      final tools = _transcriptEntries(
+        session,
+      ).whereType<ProjectedToolMessage>();
       expect(tools, hasLength(1));
-      expect(tools.single.toolCallId, 'tool-1');
-      expect(tools.single.done, isTrue);
-      expect(tools.single.isError, isFalse);
+      expect(tools.single.callId, 'tool-1');
+      expect(tools.single.status, ToolProjectionStatus.completed);
       expect(tools.single.resultText, 'ok');
 
       await session.dispose();
@@ -240,7 +242,7 @@ void main() {
     await session.send('hello');
     gateway.emit(const RpcUserMessage('hello'));
 
-    final users = _transcriptEntries(session).whereType<UserEntry>();
+    final users = _transcriptEntries(session).whereType<ProjectedUserMessage>();
     expect(users, hasLength(1));
     expect(users.single.text, 'hello');
 
@@ -264,10 +266,13 @@ void main() {
         )
         ..emit(const RpcAgentEnd());
       expect(
-        _transcriptEntries(session).whereType<AssistantTextEntry>(),
+        _transcriptEntries(session).whereType<ProjectedAssistantTextMessage>(),
         hasLength(1),
       );
-      expect(_transcriptEntries(session).whereType<ToolEntry>(), hasLength(1));
+      expect(
+        _transcriptEntries(session).whereType<ProjectedToolMessage>(),
+        hasLength(1),
+      );
 
       final load = session.loadHistory('/sessions/new.jsonl');
       messages.complete(<CockpitTranscriptEvent>[
@@ -283,13 +288,20 @@ void main() {
 
       expect(gateway.getMessagesSessionIds, <String>['/sessions/new.jsonl']);
       expect(
-        _transcriptEntries(session).whereType<AssistantTextEntry>(),
+        _transcriptEntries(session).whereType<ProjectedAssistantTextMessage>(),
         isEmpty,
       );
-      expect(_transcriptEntries(session).whereType<ToolEntry>(), isEmpty);
+      expect(
+        _transcriptEntries(session).whereType<ProjectedToolMessage>(),
+        isEmpty,
+      );
       expect(
         _transcriptEntries(session).single,
-        isA<UserEntry>().having((entry) => entry.text, 'text', 'new history'),
+        isA<ProjectedUserMessage>().having(
+          (entry) => entry.text,
+          'text',
+          'new history',
+        ),
       );
 
       await session.dispose();
@@ -308,9 +320,9 @@ void main() {
 
     expect(gateway.newSessionCount, 1);
     expect(session.sessionPath, isNull);
-    expect(session.turn.status, AgentTurnStatus.idle);
-    expect(session.turn.working, isFalse);
-    expect(session.turnStartedAt, isNull);
+    expect(session.projection.turn.status, AgentTurnStatus.idle);
+    expect(session.projection.turn.working, isFalse);
+    expect(session.projection.turn.startedAt, isNull);
 
     await session.dispose();
   });
@@ -326,10 +338,10 @@ void main() {
 
     expect(gateway.killCount, 1);
     expect(session.status, AgentStatus.crashed);
-    expect(session.turn.status, AgentTurnStatus.stale);
-    expect(session.turn.working, isFalse);
+    expect(session.projection.turn.status, AgentTurnStatus.stale);
+    expect(session.projection.turn.working, isFalse);
     expect(session.isBusy, isFalse);
-    expect(session.turnStartedAt, isNull);
+    expect(session.projection.turn.startedAt, isNull);
   });
 
   test(
@@ -346,10 +358,10 @@ void main() {
       expect(gateway.killCount, 1);
       expect(gateway.disposeCount, 1);
       expect(session.status, AgentStatus.empty);
-      expect(session.turn.status, AgentTurnStatus.stale);
-      expect(session.turn.working, isFalse);
+      expect(session.projection.turn.status, AgentTurnStatus.stale);
+      expect(session.projection.turn.working, isFalse);
       expect(session.isBusy, isFalse);
-      expect(session.turnStartedAt, isNull);
+      expect(session.projection.turn.startedAt, isNull);
     },
   );
 
@@ -405,7 +417,7 @@ void main() {
 
       gateway.emit(const RpcAgentStart());
       expect(session.projection.pendingLocalSend, isFalse);
-      expect(session.turn.status, AgentTurnStatus.working);
+      expect(session.projection.turn.status, AgentTurnStatus.working);
       expect(session.isAlive, isTrue);
       expect(session.isBusy, isTrue);
       expect(session.isBusy, session.projection.isBusy);
@@ -425,14 +437,8 @@ void main() {
 
 final _ts = DateTime.utc(2026, 6, 30);
 
-List<AgentEntry> _transcriptEntries(AgentSession session) => session.entries
-    .where(
-      (entry) =>
-          entry is UserEntry ||
-          entry is AssistantTextEntry ||
-          entry is ThinkingEntry ||
-          entry is ToolEntry,
-    )
+List<Object> _transcriptEntries(AgentSession session) => session.entries
+    .whereType<ProjectedTranscriptMessage>()
     .toList(growable: false);
 
 Future<(AgentSession, _RpcGateway)> _bootSession({

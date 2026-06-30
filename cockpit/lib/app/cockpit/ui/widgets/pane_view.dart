@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math';
 
+import 'package:cockpit/app/cockpit/domain/entities/agent_session_projection.dart';
 import 'package:cockpit/app/cockpit/ui/session/agent_session.dart';
 import 'package:cockpit/app/cockpit/ui/session/file_viewer_session.dart';
 import 'package:cockpit/app/cockpit/ui/session/pane_item.dart';
@@ -132,7 +133,8 @@ const double _kTabWidth = 188;
 IconData _tabIcon(PaneItem? item) {
   if (item is TerminalSession) return Icons.terminal_outlined;
   if (item is FileViewerSession) return Icons.description_outlined;
-  if (item is AgentSession && item.status == AgentStatus.empty) {
+  if (item is AgentSession &&
+      item.projection.lifecycle == AgentProcessLifecycle.empty) {
     return Icons.edit_outlined;
   }
   return Icons.auto_awesome;
@@ -447,7 +449,9 @@ class _TabState extends State<_Tab> {
     final s = widget.item;
     final agent = s is AgentSession ? s : null;
     final viewer = s is FileViewerSession ? s : null;
-    final canRename = agent != null && agent.status != AgentStatus.empty;
+    final canRename =
+        agent != null &&
+        agent.projection.lifecycle != AgentProcessLifecycle.empty;
     final canPin = viewer != null && viewer.isPreview;
     final now = DateTime.now();
     final last = _lastTapAt;
@@ -525,7 +529,7 @@ class _TabState extends State<_Tab> {
     final s = widget.item;
     if (s == null) return;
     final agent = s is AgentSession ? s : null;
-    final isEmpty = agent?.status == AgentStatus.empty;
+    final isEmpty = agent?.projection.lifecycle == AgentProcessLifecycle.empty;
     final viewer = s is FileViewerSession ? s : null;
     final isPreview = viewer?.isPreview ?? false;
 
@@ -585,8 +589,9 @@ class _TabState extends State<_Tab> {
         final colors = context.colors;
         final isFocusedActive = widget.active && widget.focused;
         final agent = s is AgentSession ? s : null;
-        final isEmpty = agent?.status == AgentStatus.empty;
-        final streaming = agent?.turn.working ?? false;
+        final projection = agent?.projection;
+        final isEmpty = projection?.lifecycle == AgentProcessLifecycle.empty;
+        final streaming = projection?.turn.working ?? false;
         final dirty = s is FileViewerSession && s.dirty;
 
         final icon = _tabIcon(s);
@@ -1092,7 +1097,7 @@ class _PaneBodyState extends State<_PaneBody> {
     return ListenableBuilder(
       listenable: agent,
       builder: (context, _) {
-        if (agent.status == AgentStatus.empty) {
+        if (agent.projection.lifecycle == AgentProcessLifecycle.empty) {
           if (_showAgentSetup) {
             return AgentSetupChecklist(
               onReady: () => widget.onFillEmpty(false),

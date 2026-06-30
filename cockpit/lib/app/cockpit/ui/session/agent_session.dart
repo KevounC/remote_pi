@@ -133,7 +133,7 @@ class AgentSession extends PaneItem {
   AgentTurnProjection _turn = AgentTurnProjection.idle;
   CockpitTranscriptProjection _transcriptProjection =
       _emptyTranscriptProjection;
-  final List<AgentEntry> _entries = <AgentEntry>[];
+  final List<Object> _entries = <Object>[];
   final List<CockpitTranscriptEvent> _transcriptEvents =
       <CockpitTranscriptEvent>[];
   var _transcriptEventSeq = 0;
@@ -209,12 +209,9 @@ class AgentSession extends PaneItem {
 
   AgentTurnProjection get turn => projection.turn;
 
-  /// Início do turno em andamento (`null` se ocioso).
-  DateTime? get turnStartedAt => projection.turn.startedAt;
-  bool get isStreaming => projection.turn.status == AgentTurnStatus.streaming;
   bool get isBusy => projection.isBusy;
   bool get isAlive => projection.isAlive;
-  List<AgentEntry> get entries => List<AgentEntry>.unmodifiable(_entries);
+  List<Object> get entries => List<Object>.unmodifiable(_entries);
   List<PiModel> get models => projection.controls.models;
   List<PiCommand> get commands => projection.controls.commands;
   PiModel? get model => projection.controls.model;
@@ -759,8 +756,7 @@ class AgentSession extends PaneItem {
     );
     _entries.removeWhere(_isProjectedTranscriptEntry);
     _transcriptProjection = deriveCockpitTranscript(_transcriptEvents);
-    final projected = _transcriptProjection.entries;
-    final newEntries = projected.map(_toAgentEntry).toList(growable: false);
+    final newEntries = _transcriptProjection.entries;
     final insertionIndex = firstProjectedIndex < 0
         ? _entries.length
         : firstProjectedIndex > _entries.length
@@ -769,34 +765,8 @@ class AgentSession extends PaneItem {
     _entries.insertAll(insertionIndex, newEntries);
   }
 
-  bool _isProjectedTranscriptEntry(AgentEntry entry) {
-    return entry is UserEntry ||
-        entry is AssistantTextEntry ||
-        entry is ThinkingEntry ||
-        entry is ToolEntry;
-  }
-
-  AgentEntry _toAgentEntry(ProjectedTranscriptMessage message) {
-    switch (message) {
-      case ProjectedUserMessage(:final text, :final images):
-        return UserEntry(text, images: images);
-      case ProjectedAssistantTextMessage(:final text):
-        return AssistantTextEntry(text);
-      case ProjectedThinkingMessage(:final text):
-        return ThinkingEntry(text);
-      case ProjectedToolMessage(
-        :final callId,
-        :final name,
-        :final args,
-        :final status,
-        :final resultText,
-      ):
-        final tool = ToolEntry(toolCallId: callId, toolName: name, args: args);
-        tool.done = status != ToolProjectionStatus.running;
-        tool.isError = status == ToolProjectionStatus.error;
-        tool.resultText = resultText;
-        return tool;
-    }
+  bool _isProjectedTranscriptEntry(Object entry) {
+    return entry is ProjectedTranscriptMessage;
   }
 
   void _notifyProjectionChanged() {

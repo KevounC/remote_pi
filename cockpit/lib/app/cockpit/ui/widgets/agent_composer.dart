@@ -302,7 +302,7 @@ class _AgentComposerState extends State<AgentComposer> {
   /// Embutidos + comandos das extensions, **suprimindo os `/remote-pi`**.
   List<PiCommand> get _allCommands => <PiCommand>[
     ..._builtins,
-    ...widget.session.commands.where(
+    ...widget.session.projection.controls.commands.where(
       (c) => c.name != 'remote-pi' && !c.name.startsWith('remote-pi '),
     ),
   ];
@@ -451,7 +451,8 @@ class _AgentComposerState extends State<AgentComposer> {
 
   Future<void> _submit() async {
     final session = widget.session;
-    if (session.turn.canStop) {
+    final projection = session.projection;
+    if (projection.turn.canStop) {
       session.stop();
       return;
     }
@@ -540,9 +541,10 @@ class _AgentComposerState extends State<AgentComposer> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final session = widget.session;
-    final turn = session.turn;
+    final projection = session.projection;
+    final turn = projection.turn;
     final canStop = turn.canStop;
-    final controlsEnabled = session.isAlive && !turn.working;
+    final controlsEnabled = projection.isAlive && !turn.working;
 
     // Drop **nativo** do SO (Finder/Explorer/…) → anexa imagem / vira `@`. O
     // drag-drop **interno** (do painel Files) é o DragTarget<String> filho.
@@ -596,7 +598,7 @@ class _AgentComposerState extends State<AgentComposer> {
                   ),
                 // Aviso: o modelo atual é text-only e não vai enxergar a imagem.
                 if (_attachments.any((a) => a.isImage) &&
-                    !(session.model?.supportsImages ?? false))
+                    !(projection.controls.model?.supportsImages ?? false))
                   const _ImageModelWarning(),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
@@ -667,7 +669,7 @@ class _AgentComposerState extends State<AgentComposer> {
                       ),
                       _ModelChip(session: session, enabled: controlsEnabled),
                       // Effort só pra modelos com raciocínio (senão o pi não usa).
-                      if (session.model?.reasoning ?? false)
+                      if (projection.controls.model?.reasoning ?? false)
                         _EffortChip(session: session, enabled: controlsEnabled),
                       // Bolinha de uso do contexto (enche conforme a janela enche).
                       _ContextGauge(session: session),
@@ -869,16 +871,17 @@ class _ModelChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final model = session.model;
+    final controls = session.projection.controls;
+    final model = controls.model;
     return _Chip(
       icon: Icons.auto_awesome,
       iconColor: context.colors.accentText,
       label: model?.name ?? 'model',
-      enabled: enabled && session.models.isNotEmpty,
+      enabled: enabled && controls.models.isNotEmpty,
       onTap: () async {
         final picked = await showModelPicker(
           context,
-          models: session.models,
+          models: controls.models,
           current: model,
         );
         if (picked != null) session.changeModel(picked);
@@ -894,10 +897,11 @@ class _EffortChip extends StatelessWidget {
 
   Future<void> _show(BuildContext context) async {
     // Níveis que ESTE modelo aceita (derivados do thinkingLevelMap dele).
+    final controls = session.projection.controls;
     final levels = ThinkingLevel.availableFor(
-      session.model?.thinkingLevelMap ?? const <String, String?>{},
+      controls.model?.thinkingLevelMap ?? const <String, String?>{},
     );
-    final current = session.thinking;
+    final current = controls.thinkingLevel;
     final level = await showAppMenu<ThinkingLevel>(
       context,
       minWidth: 170,
@@ -918,7 +922,7 @@ class _EffortChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return _Chip(
       icon: Icons.psychology_alt_outlined,
-      label: session.thinking.label,
+      label: session.projection.controls.thinkingLevel.label,
       enabled: enabled,
       onTap: () => _show(context),
     );
@@ -959,8 +963,8 @@ class _TurnIndicatorState extends State<_TurnIndicator> {
 
   /// Liga/desliga o tick de 1s conforme o turno está rodando.
   void _sync() {
-    final active =
-        widget.session.turn.working && widget.session.turnStartedAt != null;
+    final turn = widget.session.projection.turn;
+    final active = turn.working && turn.startedAt != null;
     if (active && _ticker == null) {
       _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
         if (mounted) setState(() {});
@@ -984,8 +988,9 @@ class _TurnIndicatorState extends State<_TurnIndicator> {
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
-    final start = session.turnStartedAt;
-    if (!session.turn.working || start == null) return const SizedBox.shrink();
+    final turn = session.projection.turn;
+    final start = turn.startedAt;
+    if (!turn.working || start == null) return const SizedBox.shrink();
     final colors = context.colors;
     final elapsed = DateTime.now().difference(start);
     return Padding(
@@ -1021,7 +1026,7 @@ class _ContextGauge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final percent = session.contextUsage?.percent;
+    final percent = session.projection.controls.contextUsage?.percent;
     if (percent == null) return const SizedBox.shrink();
     final colors = context.colors;
     final fraction = (percent / 100).clamp(0.0, 1.0);
@@ -1202,7 +1207,7 @@ class _RelayButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final status = session.relayStatus;
+    final status = session.projection.relayStatus;
     final (icon, color, tooltip) = switch (status) {
       RelayStatus.connected => (
         Icons.cell_tower,
@@ -1224,7 +1229,7 @@ class _RelayButton extends StatelessWidget {
       tooltip: (context) => TooltipContainer(child: Text(tooltip)),
       child: HoverTap(
         borderRadius: BorderRadius.circular(5),
-        onTap: session.isAlive
+        onTap: session.projection.isAlive
             ? () => session.sendRelayControl('relay:toggle')
             : null,
         child: SizedBox(

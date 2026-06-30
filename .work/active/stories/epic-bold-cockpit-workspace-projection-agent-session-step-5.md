@@ -1,14 +1,14 @@
 ---
 id: epic-bold-cockpit-workspace-projection-agent-session-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-agent-session
 depends_on: [epic-bold-cockpit-workspace-projection-agent-session-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Migrate UI consumers to the AgentSession projection and retire compatibility state
@@ -71,11 +71,20 @@ ProjectedToolMessage(:final status) => _ToolCard(status: status, ...),
 
 ## Acceptance Criteria
 
-- [ ] UI widgets read `session.projection`, `projection.turn`, and immutable projected transcript entries instead of branching on `AgentStatus.streaming`, `_turnStartedAt`, or mutable tool entries.
-- [ ] `AgentStatus.streaming` and `AgentSnapshot.isStreaming` are removed or documented as a short-lived wire compatibility adapter with no UI consumers.
-- [ ] Stop/cancel affordance, controls enabled state, elapsed timer, tab activity indicator, edit-dialog status label, transcript tool card, and notification count preserve current visible behavior.
-- [ ] Tests cover the high-risk UI projection paths listed in the implementation notes.
-- [ ] `flutter test` targeted cockpit tests, `flutter analyze`, and `dart format .` pass, or skipped commands/tooling blockers are recorded.
+- [x] UI widgets read `session.projection`, `projection.turn`, and immutable projected transcript entries instead of branching on `AgentStatus.streaming`, `_turnStartedAt`, or mutable tool entries.
+- [x] `AgentStatus.streaming` and `AgentSnapshot.isStreaming` are removed or documented as a short-lived wire compatibility adapter with no UI consumers.
+- [x] Stop/cancel affordance, controls enabled state, elapsed timer, tab activity indicator, edit-dialog status label, transcript tool card, and notification count preserve current visible behavior.
+- [x] Tests cover the high-risk UI projection paths listed in the implementation notes.
+- [x] `flutter test` targeted cockpit tests, `flutter analyze`, and `dart format .` pass, or skipped commands/tooling blockers are recorded.
+
+## Implementation
+
+- Migrated `agent_composer.dart`, `pane_view.dart`, `agent_edit_dialog.dart`, and `CockpitViewModel.notificationCount` to source busy/alive/lifecycle/model/context state from `session.projection`, `projection.turn`, and `projection.controls`.
+- Migrated `agent_transcript.dart` to render immutable `ProjectedTranscriptMessage` values directly, including `ProjectedToolMessage` done/error states, while leaving only non-projected side-channel rows (`InfoEntry`, `WorkedEntry`, `NoticeEntry`, `UiRequestEntry`) in `AgentEntry`.
+- Removed `AgentSession.isStreaming`, `AgentSession.turnStartedAt`, `AgentSnapshot.isStreaming`, and the mutable transcript compatibility entries (`UserEntry`, `AssistantTextEntry`, `ThinkingEntry`, `ToolEntry`). `RpcDataMapper` retains only the documented short-lived wire adapter from legacy `isStreaming` payloads into `AgentTurnProjection`; no UI consumers read it.
+- Preserved visible behavior for stop/cancel affordance, disabled controls while pending/working, elapsed timer start/stop, tab activity spinner, edit-dialog state label, projected tool card done/error rendering, and notification badge counts.
+- Test coverage updated for projection-backed turn state, pending/busy controls semantics, elapsed convergence, projected transcript text/tool rows, notification count clearing, and added `test/ui/agent_transcript_projection_test.dart` for projected tool done/error rendering.
+- Verification: `flutter pub get --offline` passed; `flutter analyze` passed; full `flutter test` passed (222 tests); targeted projection tests passed after final cleanup. Targeted owned-file `dart format --output=none --set-exit-if-changed ...` passed. The exact requested `dart format` check path falls back because `dart` is not on PATH in this sandbox; the SDK dart full-tree check also reports pre-existing formatting drift in six unowned cockpit files outside this story's write set, so those files were not modified.
 
 ## Risk
 

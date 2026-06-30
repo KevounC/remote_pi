@@ -15,7 +15,4 @@ class AgentSnapshot {
   final PiModel? model;
   final ThinkingLevel thinkingLevel;
   final AgentTurnProjection turn;
-
-  /// Compatibilidade temporária para widgets/testes ainda migrando para [turn].
-  bool get isStreaming => turn.status == AgentTurnStatus.streaming;
 }

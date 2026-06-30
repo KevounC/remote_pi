@@ -582,8 +582,10 @@ class CockpitViewModel extends ChangeNotifier {
 
   /// Nº de agentes do workspace que terminaram um turno e ainda não foram
   /// vistos (badge de notificações).
-  int notificationCount(String projectId) =>
-      _workspace.notificationCount(projectId);
+  int notificationCount(String projectId) => _workspace.items.where((item) {
+    if (item is! AgentSession) return false;
+    return item.projection.projectId == projectId && item.unseenFinish;
+  }).length;
 
   // ---- init -----------------------------------------------------------------
   Future<void> init() async {
