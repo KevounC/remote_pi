@@ -15,9 +15,10 @@ under a fresh-context review (subagent `957158c6`, launched end of session).
 
 **Story stage counts:**
 - Before this session: 44 done / 0 review / 92 implementing / 4 drafting
-- After: **50 done / 0 review / 86 implementing / 4 drafting**
-  (6 stories advanced implementing→done via review; 1 bounced back, re-fixed,
-  now awaiting its second review).
+- After: **51 done / 0 review / 85 implementing / 4 drafting**
+  (7 stories advanced implementing→done via Wave 1+1b implement + review,
+  including the twice-bounced transcript-projection-derive-step-3 which was
+  re-fixed inline and approved on its second review).
 
 ## Dev environment — RESOLVED (the big unblocker this session)
 
@@ -104,25 +105,23 @@ existing `_resetTurnState()` to converge working state false. Added regression
 test `clearActiveSession resets the in-memory turn state — working/streaming
 converge false on a mid-turn session wipe (plan/32)`. Verification: analyze
 clean (only known axisAlignment info); sync_service_test.dart All tests
-passed! (41 = 40 + new regression). Story at `stage: review`; fresh-context
-review subagent `957158c6` launched at end of session — **check its verdict
-on resume** (approve → done, or bounce → implement again).
+passed! (41 = 40 + new regression). Second review (subagent `957158c6`)
+returned **Approve** (`2e1d8bd`) — story now `done`.
 
 ## Resume instructions (full autopilot queue drain)
 
-1. **First**: harvest subagent `957158c6` (the transcript-projection-derive
-   second-bounce review). If approve → story `done` (50→51). If bounce → small
-   re-fix, re-review.
-2. **Then: full autopilot queue drain.** ~86 stories still at `implementing`;
-   probe the ready-set (all deps `done`) with the `stage_map` script in
+1. **All 7 bounced stories are `done`** — the campaign's review backlog is
+   fully cleared. No pending review subagents to harvest.
+2. **Full autopilot queue drain.** ~85 stories still at `implementing`; probe
+   the ready-set (all deps `done`) with the `stage_map` script in
    `.work/WAVE-RUN-NOTES-2026-06-30.md`. Last probe found ~18 ready beyond the
    bounce set. Bundle by disjoint file ownership, fan out `openai-codex`
    implement subagents (model explicit per AGENTS.md — spark for small,
    `gpt-5.5` for cross-file), harvest, run fresh-context `gpt-5.5` reviews.
 3. **Watch the generated-contract invariant**: identity-model hand-edited a
    generated file; rust-codegen legitimized it. If any future story touches
-   `relay/src/protocol/generated/*` or `app/lib/protocol/generated/*`,
-   ensure the change is in the GENERATOR, not the generated file.
+   `relay/src/protocol/generated/*` or `app/lib/protocol/generated/*`, ensure
+   the change is in the GENERATOR, not the generated file.
 4. **Coordination rule (learned the hard way)**: do NOT run `git add`/`git
    commit` while parallel write-subagents are in flight — it can sweep in an
    agent's in-progress story transition. Let agents commit their own work;
