@@ -1,14 +1,14 @@
 ---
 id: epic-bold-turn-state-machine-late-attach-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-turn-state-machine-late-attach
 depends_on: [epic-bold-turn-state-machine-late-attach-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Guard cross-PC bridge late attach with a lifecycle epoch
@@ -121,3 +121,14 @@ Medium. The main risk is over-invalidating a legitimate failover/reconnect bridg
 ## Rollback
 
 Revert `mesh_node.ts`, `bridge.ts`, and the focused bridge late-attach test. This does not require reverting the turn reducer or owner late-attach integration.
+
+## Implementation
+
+- Files changed: `pi-extension/src/session/mesh_node.ts`, `pi-extension/src/session/mesh_node.test.ts`.
+- Late-attach behavior: `MeshNode` now carries a bridge lifecycle epoch plus a terminal `closed` guard. Every bridge attach captures an epoch, and stale continuations after `detachBridge()` or `close()` detach any returned `BrokerRemote`/`PiForwardClient` instead of publishing them.
+- Convergence guarantee: bridge teardown invalidates in-flight attach work, clears active bridge handles, cancels self-managed reconnect timers, and preserves injected-relay ownership so `index.ts` remains the injected relay lifecycle owner.
+- Tests added: 2 deterministic late-attach regression tests in `mesh_node.test.ts` covering in-flight `detachBridge()` and `close()` with injected relays, `hasBridge() === false`, relay listener cleanup, broker remote listener cleanup, and no injected relay close.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm exec vitest run src/session/mesh_node.test.ts` passed (4 tests); `corepack pnpm exec vitest run src/session/broker_remote.test.ts` passed (32 tests).
+- Full-suite signal: `corepack pnpm exec vitest run src/extension.test.ts` was run twice and reported 142 passed / 5 failed in this sandbox. Failures were confined to existing UDS/cwd-lock setup tests (`session_shutdown DURING _cmdStart`, clean reset/name-assigned/rename/same-folder lock cases), with no assertion pointing at the changed bridge epoch logic. `src/session/e2e.test.ts` also failed broadly on `leader election failed` for `/tmp/.../broker.sock`, matching the same local IPC environment limitation; `src/session/broker_remote.test.ts` remained green.
+- Discrepancies from design: no `bridge.ts` changes were needed; `MeshNode` detaches stale returned bridge objects at the owner boundary as required.
+- Adjacent issues parked: none.

@@ -1,7 +1,24 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi, beforeEach } from "vitest";
+
+type Handler = (...args: unknown[]) => void;
+
+class FakeBroker {
+  public remoteRouter: unknown = null;
+
+  constructor(readonly name: string, readonly cwd: string) {}
+
+  setRemoteRouter(router: unknown): void {
+    this.remoteRouter = router;
+  }
+
+  remoteListenerCount(): number {
+    return this.remoteRouter === null ? 0 : 1;
+  }
+}
 
 class FakeSessionPeer {
   private onReconnectCb: null | (() => void) = null;
+  private readonly broker: FakeBroker;
 
   constructor(
     public readonly opts: {
@@ -11,7 +28,9 @@ class FakeSessionPeer {
       auditPath?: string;
       defaultTimeoutMs?: number;
     },
-  ) {}
+  ) {
+    this.broker = new FakeBroker(opts.name, opts.cwd ?? "");
+  }
 
   async start(): Promise<string> {
     return this.opts.name;
@@ -28,11 +47,8 @@ class FakeSessionPeer {
     return "leader";
   }
 
-  localBroker(): object {
-    return {
-      name: this.opts.name,
-      cwd: this.opts.cwd ?? "",
-    };
+  localBroker(): FakeBroker {
+    return this.broker;
   }
 
   name(): string {
@@ -57,31 +73,74 @@ class FakeSessionPeer {
 
 class FakeRelayClient {
   public static readonly instances: FakeRelayClient[] = [];
+  private readonly listeners = new Map<string, Set<Handler>>();
 
   constructor(readonly url: string, readonly keypair: unknown) {
     FakeRelayClient.instances.push(this);
   }
 
   connect = vi.fn(async () => {});
-  on = vi.fn((_event: string, _handler: () => void) => { });
-  close = vi.fn(() => {});
+  close = vi.fn(() => {
+    this.emit("close");
+  });
+  send = vi.fn((_line: string) => {});
+  on = vi.fn((event: string, handler: Handler): this => {
+    const set = this.listeners.get(event) ?? new Set<Handler>();
+    set.add(handler);
+    this.listeners.set(event, set);
+    return this;
+  });
+  off = vi.fn((event: string, handler: Handler): this => {
+    this.listeners.get(event)?.delete(handler);
+    return this;
+  });
+
+  emit(event: string, ...args: unknown[]): void {
+    for (const handler of this.listeners.get(event) ?? []) handler(...args);
+  }
+
+  listenerCount(event: string): number {
+    return this.listeners.get(event)?.size ?? 0;
+  }
 }
 
-const attachCrossPcBridgeMock = vi.fn(async () => ({
-  brokerRemote: {
-    detach: vi.fn(),
-    setSiblings: vi.fn(),
-    onLocalPeersChanged: vi.fn(),
-  },
-  piForward: {
-    detach: vi.fn(),
-  },
-}));
+const attachCrossPcBridgeMock = vi.fn(
+  async (opts: { broker: FakeBroker; relay: FakeRelayClient }) => makeTrackedBridge(opts.relay, opts.broker),
+);
 
 const keypair = {
   publicKey: new Uint8Array([1, 2, 3]),
   secretKey: new Uint8Array([4, 5, 6]),
 };
+
+function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (reason?: unknown) => void } {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function makeTrackedBridge(relay: FakeRelayClient, broker: FakeBroker) {
+  const relayListener: Handler = () => {};
+  relay.on("message", relayListener);
+  const piForward = {
+    detach: vi.fn(() => {
+      relay.off("message", relayListener);
+    }),
+  };
+  const brokerRemote = {
+    detach: vi.fn(() => {
+      broker.setRemoteRouter(null);
+    }),
+    setSiblings: vi.fn(),
+    onLocalPeersChanged: vi.fn(),
+  };
+  broker.setRemoteRouter(brokerRemote);
+  return { brokerRemote, piForward };
+}
 
 vi.mock("./peer.js", () => ({
   SessionPeer: FakeSessionPeer,
@@ -114,6 +173,14 @@ vi.mock("../config.js", () => ({
 }));
 
 const { MeshNode } = await import("./mesh_node.js");
+
+beforeEach(() => {
+  FakeRelayClient.instances.length = 0;
+  attachCrossPcBridgeMock.mockReset();
+  attachCrossPcBridgeMock.mockImplementation(
+    async (opts: { broker: FakeBroker; relay: FakeRelayClient }) => makeTrackedBridge(opts.relay, opts.broker),
+  );
+});
 
 describe("MeshNode relay reconnect policy", () => {
   const makeMeshNode = (): InstanceType<typeof MeshNode> =>
@@ -165,5 +232,71 @@ describe("MeshNode relay reconnect policy", () => {
 
     expect(mesh.relayBackoffIdx).toBe(0);
     expect(FakeRelayClient.instances.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("detachBridge invalidates an in-flight injected bridge and detaches stale listeners", async () => {
+    const meshNode = new MeshNode({ sockPath: "/tmp/injected-mesh.sock", name: "mesh-node" });
+    const broker = meshNode.localBroker() as unknown as FakeBroker;
+    const relay = new FakeRelayClient("wss://example.invalid/relay", keypair);
+    const gate = deferred<void>();
+    let bridge: ReturnType<typeof makeTrackedBridge> | null = null;
+    attachCrossPcBridgeMock.mockImplementationOnce(async (opts: { broker: FakeBroker; relay: FakeRelayClient }) => {
+      await gate.promise;
+      bridge = makeTrackedBridge(opts.relay, opts.broker);
+      return bridge;
+    });
+
+    const attachPromise = meshNode.attachBridge({
+      relay: relay as never,
+      relayUrl: "https://example.invalid/relay",
+      keypair,
+    });
+
+    expect(attachCrossPcBridgeMock).toHaveBeenCalledTimes(1);
+    meshNode.detachBridge();
+    expect(relay.close).not.toHaveBeenCalled();
+
+    gate.resolve(undefined);
+    await attachPromise;
+
+    expect(meshNode.hasBridge()).toBe(false);
+    expect(bridge?.brokerRemote.detach).toHaveBeenCalledTimes(1);
+    expect(bridge?.piForward.detach).toHaveBeenCalledTimes(1);
+    expect(relay.listenerCount("message")).toBe(0);
+    expect(broker.remoteListenerCount()).toBe(0);
+    expect(relay.close).not.toHaveBeenCalled();
+  });
+
+  test("close invalidates an in-flight injected bridge without closing the injected relay", async () => {
+    const meshNode = new MeshNode({ sockPath: "/tmp/closing-mesh.sock", name: "mesh-node" });
+    const broker = meshNode.localBroker() as unknown as FakeBroker;
+    const relay = new FakeRelayClient("wss://example.invalid/relay", keypair);
+    const gate = deferred<void>();
+    let bridge: ReturnType<typeof makeTrackedBridge> | null = null;
+    attachCrossPcBridgeMock.mockImplementationOnce(async (opts: { broker: FakeBroker; relay: FakeRelayClient }) => {
+      await gate.promise;
+      bridge = makeTrackedBridge(opts.relay, opts.broker);
+      return bridge;
+    });
+
+    const attachPromise = meshNode.attachBridge({
+      relay: relay as never,
+      relayUrl: "https://example.invalid/relay",
+      keypair,
+    });
+
+    expect(attachCrossPcBridgeMock).toHaveBeenCalledTimes(1);
+    await meshNode.close();
+    expect(relay.close).not.toHaveBeenCalled();
+
+    gate.resolve(undefined);
+    await attachPromise;
+
+    expect(meshNode.hasBridge()).toBe(false);
+    expect(bridge?.brokerRemote.detach).toHaveBeenCalledTimes(1);
+    expect(bridge?.piForward.detach).toHaveBeenCalledTimes(1);
+    expect(relay.listenerCount("message")).toBe(0);
+    expect(broker.remoteListenerCount()).toBe(0);
+    expect(relay.close).not.toHaveBeenCalled();
   });
 });

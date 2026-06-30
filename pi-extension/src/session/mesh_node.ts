@@ -101,6 +101,8 @@ export class MeshNode {
    *  owns its own reconnect upstream, so these stay idle there. */
   private relayReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private relayBackoffIdx = 0;
+  private bridgeEpoch = 0;
+  private closed = false;
 
   constructor(opts: MeshNodeOptions) {
     this.log = opts.log ?? ((): void => {});
@@ -130,6 +132,7 @@ export class MeshNode {
    * fresh relay after a relay reconnect.
    */
   async attachBridge(opts: { relay: RelayClient; relayUrl: string; keypair?: Ed25519Keypair }): Promise<void> {
+    if (this.closed) return;
     const p: BridgeParams = { relayUrl: opts.relayUrl, injectedRelay: opts.relay };
     if (opts.keypair !== undefined) p.keypair = opts.keypair;
     this.bridgeParams = p;
@@ -170,20 +173,40 @@ export class MeshNode {
     }
   }
 
+  private _nextBridgeEpoch(): number {
+    return ++this.bridgeEpoch;
+  }
+
+  private _isBridgeSetupCurrent(epoch: number, params: BridgeParams, broker: Broker): boolean {
+    return !this.closed &&
+      this.bridgeEpoch === epoch &&
+      this.bridgeParams === params &&
+      this.peer_.currentRole() === "leader" &&
+      this.peer_.localBroker() === broker;
+  }
+
+  private _isBridgeEpochCurrent(epoch: number, params: BridgeParams, broker: Broker, relay: RelayClient): boolean {
+    return this._isBridgeSetupCurrent(epoch, params, broker) && this.relay === relay;
+  }
+
   private async _maybeBridge(): Promise<void> {
-    if (this.brokerRemote) return;
+    if (this.closed || this.brokerRemote) return;
     if (this.peer_.currentRole() !== "leader") return;
     const broker: Broker | null = this.peer_.localBroker();
     if (!broker) return;
     const params = this.bridgeParams;
     if (!params) return;
+    const epoch = this._nextBridgeEpoch();
 
     let relay: RelayClient;
     if (params.injectedRelay) {
       relay = params.injectedRelay;
+      this.relay = relay;
       this.relayOwned = false;
     } else {
-      if (!this.keypair) this.keypair = params.keypair ?? (await getOrCreateEd25519Keypair());
+      const nextKeypair = this.keypair ?? params.keypair ?? (await getOrCreateEd25519Keypair());
+      if (!this._isBridgeSetupCurrent(epoch, params, broker)) return;
+      this.keypair = nextKeypair;
       // plan/41: room is keyed by (cwd, name) so two agents in the same folder
       // get distinct App↔Pi rooms. Use the SAME name as room_meta.name so the
       // derivation and the announced label agree.
@@ -194,40 +217,56 @@ export class MeshNode {
       try {
         await r.connect({ roomId, roomMeta });
       } catch (err) {
-        // UDS mesh still works; cross-PC stays unavailable until a leader
-        // with a healthy relay appears.
-        this.log(`mesh bridge: relay connect failed: ${String(err)}`);
+        if (this._isBridgeSetupCurrent(epoch, params, broker)) {
+          // UDS mesh still works; cross-PC stays unavailable until a leader
+          // with a healthy relay appears.
+          this.log(`mesh bridge: relay connect failed: ${String(err)}`);
+        }
+        return;
+      }
+      if (!this._isBridgeSetupCurrent(epoch, params, broker)) {
+        r.close();
         return;
       }
       relay = r;
+      this.relay = relay;
       this.relayOwned = true;
-    }
-    this.relay = relay;
-
-    // Self-managed relay only: when the WS drops (liveness terminate after
-    // ~70s idle, NAT/router reaping, relay restart, laptop sleep), rebuild the
-    // bridge against a fresh connection with backoff. Without this the MCP's
-    // cross-PC routing dies silently on the first drop and never returns. The
-    // injected-relay (Pi) path is reconnected by the host, so we skip it here.
-    if (this.relayOwned) {
       this.relayBackoffIdx = 0;  // healthy connect → reset backoff
       relay.on("close", () => this._onSelfRelayClosed(relay));
     }
 
-    if (!this.keypair) this.keypair = params.keypair ?? (await getOrCreateEd25519Keypair());
+    if (!this.keypair) {
+      const nextKeypair = params.keypair ?? (await getOrCreateEd25519Keypair());
+      if (!this._isBridgeEpochCurrent(epoch, params, broker, relay)) return;
+      this.keypair = nextKeypair;
+    }
 
-    const { brokerRemote, piForward } = await attachCrossPcBridge({
+    const bridge = await attachCrossPcBridge({
       broker,
       relay,
       relayUrl: params.relayUrl,
       keypair: this.keypair,
       log: this.log,
     });
-    this.brokerRemote = brokerRemote;
-    this.piForward = piForward;
+    if (!this._isBridgeEpochCurrent(epoch, params, broker, relay)) {
+      try {
+        bridge.brokerRemote.detach();
+      } catch (err) {
+        this.log(`mesh bridge: stale broker remote detach failed: ${String(err)}`);
+      }
+      try {
+        bridge.piForward.detach();
+      } catch (err) {
+        this.log(`mesh bridge: stale pi forward detach failed: ${String(err)}`);
+      }
+      return;
+    }
+    this.brokerRemote = bridge.brokerRemote;
+    this.piForward = bridge.piForward;
   }
 
   private _detachBridgeKeepingParams(): void {
+    this._nextBridgeEpoch();
     if (this.relayReconnectTimer) {
       clearTimeout(this.relayReconnectTimer);
       this.relayReconnectTimer = null;
@@ -245,7 +284,9 @@ export class MeshNode {
    *  closed — don't double-close it) and schedule a reconnect with backoff.
    *  Ignores stale closes from a relay we've already replaced. */
   private _onSelfRelayClosed(closed: RelayClient): void {
+    if (this.closed) return;
     if (closed !== this.relay) return;  // superseded by a newer relay
+    this._nextBridgeEpoch();
     this.log("mesh bridge: relay closed — scheduling reconnect");
     this.brokerRemote?.detach();
     this.brokerRemote = null;
@@ -257,6 +298,7 @@ export class MeshNode {
   }
 
   private _scheduleRelayReconnect(): void {
+    if (this.closed) return;
     if (this.relayReconnectTimer) return;                       // already pending
     if (!this.bridgeParams || this.bridgeParams.injectedRelay) return;  // self-managed only
     const backoffPolicy = REACHABILITY_BACKOFF_MS;
@@ -275,6 +317,7 @@ export class MeshNode {
 
   private async _attemptRelayReconnect(): Promise<void> {
     try {
+      if (this.closed) return;
       if (!this.bridgeParams || this.bridgeParams.injectedRelay) return;
       if (this.peer_.currentRole() !== "leader") return;  // no longer leader
       if (this.brokerRemote) return;                       // already rebuilt
@@ -389,6 +432,7 @@ export class MeshNode {
 
   /** Tear down the bridge (if any) and leave the mesh. */
   async close(): Promise<void> {
+    this.closed = true;
     this.detachBridge();
     await this.peer_.leave();
   }
