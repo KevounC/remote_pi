@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-rust-codegen-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-generated-protocol-rust-codegen
 depends_on: [epic-bold-generated-protocol-rust-codegen-step-1, epic-bold-generated-protocol-schema-source-step-3]
@@ -115,3 +115,13 @@ Revert the generated `OuterEnvelope` consumption and restore the handwritten str
   - `cd /home/agent/projects/remote_pi/protocol && COREPACK_HOME=/tmp/remote-pi-corepack XDG_CACHE_HOME=/tmp/remote-pi-xdg PNPM_HOME=/tmp/remote-pi-pnpm-home corepack pnpm --config.store-dir=/home/agent/projects/remote_pi/.pnpm-store --config.state-dir=/tmp/remote-pi-pnpm-state generate:rust:check` — passed (with a temporary local `pnpm-workspace.yaml` allowing the already-approved `esbuild` build script, removed afterward; pnpm warned about unreadable `/home/agent/.npmrc`).
   - `cd /home/agent/projects/remote_pi/protocol && COREPACK_HOME=/tmp/remote-pi-corepack XDG_CACHE_HOME=/tmp/remote-pi-xdg PNPM_HOME=/tmp/remote-pi-pnpm-home corepack pnpm --config.store-dir=/home/agent/projects/remote_pi/.pnpm-store --config.state-dir=/tmp/remote-pi-pnpm-state check` — passed, validated 5 protocol schema fixture families (same temporary workspace note as above; pnpm warned about unreadable `/home/agent/.npmrc`).
   - `cd /home/agent/projects/remote_pi/relay && cargo fmt --check && cargo clippy -- -D warnings && cargo test` — passed; clippy finished cleanly; cargo test passed 64 lib tests, 3 integration tests, 13 mesh tests, 6 pi-forward tests, 10 presence tests, 19 rooms tests, and doc-tests.
+
+## Review (2026-06-30)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+
+**Notes**: Rework commit `e4ec27e` resolves both prior blockers. `emitRustOuter()` is schema-derived for the relay outer contract: it resolves the schema/IR, reads struct fields from `properties`, derives required field handling from `required` by refusing optional/default semantics, and emits `#[serde(deny_unknown_fields)]` from `additionalProperties: false`. `protocol/schema/relay-outer.schema.json` now requires `peer`, `room`, and `ct`, keeps `additionalProperties: false`, and no longer declares a `room` default/compat default; generated `outer.rs` therefore preserves missing-room rejection and unknown-field rejection. Independent regeneration with `node tools/protocol-codegen/bin/protocol-codegen.mjs --target rust --schema protocol/schema/relay-outer.schema.json --out /tmp/_rev_check.rs && diff /tmp/_rev_check.rs relay/src/protocol/generated/outer.rs` produced an empty diff. `corepack pnpm --dir protocol generate:rust:check` passed when rerun with writable Corepack/PNPM cache settings and dependency auto-install disabled for this noninteractive review environment. Relay verification from `relay/` passed: `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` (64 lib tests, integration/mesh/pi-forward/presence/rooms suites, and doc-tests).
