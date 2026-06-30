@@ -596,12 +596,7 @@ describe("state machine + pair_request flow", () => {
     captureHandler("remote-pi");
     await _connectForTest(makeMockCtx());
     expect(_getState()).toBe("started");
-    // After relay-transport step-4, `start()` also attaches the cross-PC bridge's
-    // PiForwardClient, which subscribes its own `relay.on("message")` listener.
-    // So the post-connect count is 2: the outer-message handler (bindRelay) + the
-    // bridge's PiForwardClient. (Before step-4 the bridge attached elsewhere, so
-    // this was 1.)
-    expect(relayRef.current!.listenerCount("message")).toBe(2);
+    expect(relayRef.current!.listenerCount("message")).toBe(1);
 
     relayRef.current!.emit("message", makeInnerLine(APP_PEER_ID, {
       type: "ping", id: "ping-reconnect",
@@ -613,8 +608,7 @@ describe("state machine + pair_request flow", () => {
       .map(decodeSentCt)
       .filter((d) => d.peer === APP_PEER_ID && d.inner.type === "pong" && d.inner["in_reply_to"] === "ping-reconnect");
     expect(pongs).toHaveLength(1);
-    // +1 for the known peer's attached PlainPeerChannel listener.
-    expect(relayRef.current!.listenerCount("message")).toBe(3);
+    expect(relayRef.current!.listenerCount("message")).toBe(2);
   });
 
   test("unknown peer non-pair message → state stays started, no peer added", async () => {
@@ -4003,24 +3997,16 @@ describe("relay reconnect", () => {
       }));
       await vi.waitFor(() => expect(_getState()).toBe("paired"), { timeout: 2000 });
       expect(_hasActivePeerForTest(APP_PEER_ID)).toBe(true);
-      // outer handler + bridge PiForwardClient + known-peer PlainPeerChannel = 3
-      // (post relay-transport step-4: `start()` attaches the cross-PC bridge,
-      // adding 1 listener vs the pre-step-4 architecture this test was written against).
-      expect(relayInstances[0]!.listenerCount("message")).toBe(3);
+      expect(relayInstances[0]!.listenerCount("message")).toBe(2);
 
       relayInstances[0]!.emit("close");
       expect(_getState()).toBe("started");
       expect(_hasActivePeerForTest(APP_PEER_ID)).toBe(false);
-      // The dropped relay is discarded; the bridge's PiForwardClient listener on it
-      // is functionally inert (no further dispatch on a dead socket). We assert the
-      // owner + peer channels are detached; the bridge listener on the dead relay is
-      // best-effort and does not affect the fresh reconnect relay below.
-      expect(relayInstances[0]!.listenerCount("message")).toBe(1);
+      expect(relayInstances[0]!.listenerCount("message")).toBe(0);
 
       await vi.advanceTimersByTimeAsync(1_000);
       expect(relayInstances).toHaveLength(2);
-      // outer handler + bridge PiForwardClient = 2 on the fresh reconnect relay.
-      expect(relayInstances[1]!.listenerCount("message")).toBe(2);
+      expect(relayInstances[1]!.listenerCount("message")).toBe(1);
 
       relayInstances[1]!.emit("message", makeInnerLine(APP_PEER_ID, {
         type: "ping", id: "after-reconnect",
@@ -4032,8 +4018,7 @@ describe("relay reconnect", () => {
         .map(decodeSentCt)
         .filter((d) => d.peer === APP_PEER_ID && d.inner.type === "pong" && d.inner["in_reply_to"] === "after-reconnect");
       expect(pongs).toHaveLength(1);
-      // +1 for the re-attached known-peer PlainPeerChannel listener.
-      expect(relayInstances[1]!.listenerCount("message")).toBe(3);
+      expect(relayInstances[1]!.listenerCount("message")).toBe(2);
     } finally {
       vi.useRealTimers();
     }

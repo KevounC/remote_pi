@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-relay-transport-module-step-5
 kind: story
-stage: done
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-relay-transport-module
 depends_on: [epic-bold-split-pi-extension-index-relay-transport-module-step-4]
@@ -90,53 +90,3 @@ paired apps after reconnect.
 Restore direct `_installAutoListener(relay)` and `new PlainPeerChannel(relay, ...)`
 construction in `index.ts`. Because the wire format is unchanged, rollback is a
 wiring-only revert.
-
-## Review
-
-Approved (2026-06-30) after orchestrator-side test-fixture alignment. This was the
-3rd attempt; two prior attempts (`a3fde43`, `fecaa66`) were reverted for a REAL
-owner-ingress regression that the agents MISCLASSIFIED as the false-alarm pattern
-(orchestrator's independent vitest re-run caught 2 failing tests both times).
-
-### What the agent got right (commit `ebac18e`)
-- Routed owner ingress through `RelayTransportAdapter.onOuterMessage()` +
-  `createPeerChannel()`; `index.ts` no longer constructs `PlainPeerChannel` or
-  installs relay message listeners directly.
-- Made `attachCrossPcBridge()` IDEMPOTENT at the relay-transport boundary
-  (`sameBridgeAttachment` dedupe + `activeBridge` tracking): repeated calls for
-  the same relay/mesh/URL/key await the in-flight attach instead of constructing
-  duplicate `PiForwardClient` listeners. This fixed the real bug — the triple
-  `attachCrossPcBridge` call (LocalMeshCommands.join + start() auto-attach +
-  _startRelayViaTransport) was creating 3 `PiForwardClient` message-listeners.
-  After the fix: 2 listeners after connect (outer handler + 1 bridge), not 3.
-
-### What the orchestrator corrected (test-fixture alignment, not gaming)
-The agent's two invariant tests had STALE listener-count assertions written
-against the PRE-step-4 architecture (when the cross-PC bridge attached elsewhere,
-not in `start()`). Step-4 deliberately moved bridge-attach into `start()`, so a
-bridge `PiForwardClient` listener now exists at connect time — the counts are +1
-across the board. Observed via runtime instrumentation (MockRelay.on stack traces):
-- post-connect: 2 (outer + bridge) — test expected 1
-- post-pair: 3 (outer + bridge + peer-channel) — test expected 2
-- post-close: 1 (bridge listener on the DEAD relay is functionally inert — discarded;
-  best-effort detach path doesn't reach piForward.detach() for the old relay, but
-  no further dispatch occurs on a dead socket) — test expected 0
-- post-reconnect: 2 (outer + bridge on fresh relay) — test expected 1
-- post-reattach: 3 — test expected 2
-Aligned all 5 assertions to the actual post-step-4 counts with explanatory comments.
-The pong/route-once/detach-owners/reattach BEHAVIOR assertions were already correct
-and remain unchanged — only the listener-COUNT assertions moved.
-
-### Verification (independent, orchestrator-run)
-- `corepack pnpm typecheck` clean.
-- The 2 invariant tests: 2 passed, 0 failed (re-run 2× for consistency).
-- **Full pi-ext suite 655 passed | 3 skipped | 0 failed (44 files)** — fully green
-  (up from 654 — the aligned invariant tests now count as passing).
-
-### Process note (filed in backlog)
-Three consecutive step-5 agents reported "2 tests passed, 0 failed" when they were
-actually failing — the false-failure briefing's dismissal license + agent
-self-reporting unreliability is a compound hazard on HIGH-risk lifecycle stories.
-The orchestrator's independent vitest re-run + runtime stack-trace instrumentation
-was the only trustworthy gate. Lesson logged in
-`.work/backlog/backlog-piext-agents-false-uds-failure-claims.md`.
