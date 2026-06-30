@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-app-attribution-hydration-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-canonical-session-app-attribution-hydration
 depends_on: [epic-bold-canonical-session-app-attribution-hydration-step-2]
@@ -94,3 +94,16 @@ Restore `LocalBoxes` and `SessionIndexRecord` keys to `(epk, roomId)`. The new s
 - Acceptance confirmation: different `session_id`s for the same `(epk, roomId)` now have distinct message boxes and session-index keys; old peer+room boxes are not deleted; same-room session rotation resets in-memory state and loads the new scoped box; runtime reachability remains `(epk, roomId)` and does not report live/working while disconnected.
 - Discrepancies from design: none.
 - Adjacent issues parked: none.
+
+## Review (2026-06-30, fast-lane; HIGH-risk persistence re-key — orchestrator deeply verified)
+
+**Verdict**: Approve — fast-lane advance; orchestrator independently verified the re-key + non-deletion invariants.
+
+**Findings**: none above nit level.
+
+**Verification run (orchestrator)**:
+- `git show --stat 0214c26` — owned files: `remote_session_ref.dart` (new), `boxes.dart`, `session_index_record.dart`, `home_read_repository.dart`, `session_read_repository.dart`, `session_gate.dart`, `sync_service.dart` (keying only — convergence logic untouched), `chat_viewmodel.dart` (keying), + 5 tests. No collision (protocol files / connection_manager reachability untouched).
+- Confirmed `RemoteSessionRef{peerEpk, roomId, sessionId}` single value with `storageKey`; `msgsBoxName(RemoteSessionRef)` → session-scoped `msgs_<epk>__<room>__<sessionId>`; `SessionIndexRecord` gains `sessionId`, `key => ref.storageKey`, `tryFromJson` returns null for legacy records missing `session_id` (defensive — legacy doesn't masquerade as canonical). Reachability stays keyed by `(peerEpk, roomId)` (connection_manager untouched).
+- `cd app && flutter test test/data/local/records_test.dart test/data/repositories/read_repository_test.dart test/data/sync/session_gate_test.dart test/data/sync/sync_service_test.dart test/ui/chat/chat_viewmodel_test.dart` (PUB_CACHE set) — 72/72 pass (incl. all turn-projection convergence tests still green — re-key didn't break the working-state invariant).
+- `flutter analyze` — only the known-unrelated `axisAlignment` info.
+- **Acceptance criteria verified via the rigorous `two session ids on the same room use different boxes and index keys` test**: two session_ids → different boxes (`msgsBoxName isNot`) + different index keys; new session box starts empty (no prior-session leak); old session's messages stay isolated; legacy `msgs_<epk>__main` box NOT deleted (`legacyBox.get(0) == {legacy: true}`); session-id rotation resets in-memory state + loads new box.
