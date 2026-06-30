@@ -1,19 +1,13 @@
-use std::collections::HashMap;
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicU64, Ordering},
-};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::ws::Message;
 use tokio::sync::mpsc;
 
+use super::connections::ConnectionRegistry;
 use crate::metrics::FirehoseMetrics;
 use crate::presence::PresenceManager;
 use crate::rooms::{RoomManager, RoomMeta, RoomMetaPatch};
-
-type RoomKey = (String, String); // (peer_id, room_id)
-type ConnEntry = (u64, RoomMeta, mpsc::UnboundedSender<Message>);
 
 /// Maps `(peer_id, room_id)` pairs to a *list* of live connections.
 ///
@@ -52,8 +46,7 @@ type ConnEntry = (u64, RoomMeta, mpsc::UnboundedSender<Message>);
 ///   state changes, but the offline edge is the authoritative one).
 #[derive(Debug)]
 pub struct PeerRegistry {
-    next_conn: AtomicU64,
-    senders: Mutex<HashMap<RoomKey, Vec<ConnEntry>>>,
+    connections: ConnectionRegistry,
     presence: Arc<PresenceManager>,
     rooms: Arc<RoomManager>,
     metrics: Arc<FirehoseMetrics>,
@@ -66,8 +59,7 @@ impl PeerRegistry {
         metrics: Arc<FirehoseMetrics>,
     ) -> Self {
         Self {
-            next_conn: AtomicU64::new(0),
-            senders: Mutex::new(HashMap::new()),
+            connections: ConnectionRegistry::new(),
             presence,
             rooms,
             metrics,
@@ -87,25 +79,10 @@ impl PeerRegistry {
         room_meta: RoomMeta,
         tx: mpsc::UnboundedSender<Message>,
     ) -> u64 {
-        let room_id = room_meta.room_id.clone();
-        let key = (peer_id.clone(), room_id.clone());
-
-        let conn_id = self.next_conn.fetch_add(1, Ordering::Relaxed);
-
-        // Compute both flags **before** the insert so they reflect the prior
-        // state of the registry.
-        let (was_offline_before, is_first_in_room) = {
-            let mut lock = self.senders.lock().unwrap();
-            let was_offline_before = !lock.keys().any(|(p, _)| p == &peer_id);
-            let is_first_in_room = !lock.contains_key(&key);
-            lock.entry(key)
-                .or_default()
-                .push((conn_id, room_meta.clone(), tx));
-            (was_offline_before, is_first_in_room)
-        };
+        let insert = self.connections.insert(&peer_id, room_meta.clone(), tx);
 
         // room_announced fires once per (peer, room) lifecycle.
-        if is_first_in_room {
+        if insert.is_first_in_room {
             let room_subs = self.rooms.subscribers_of(&peer_id).await;
             if !room_subs.is_empty() {
                 let mut announced =
@@ -125,7 +102,7 @@ impl PeerRegistry {
         let pres_subs = self.presence.subscribers_of(&peer_id).await;
         let sub_count = pres_subs.len() as u64;
         if sub_count > 0 {
-            if was_offline_before {
+            if insert.was_offline_before {
                 let msg = serde_json::json!({"type": "peer_online", "peer": peer_id}).to_string();
                 for sub in pres_subs {
                     self.forward_to_all_rooms_of(&sub, Message::Text(msg.clone()));
@@ -136,7 +113,7 @@ impl PeerRegistry {
             }
         }
 
-        conn_id
+        insert.conn_id
     }
 
     /// Immediately pushes a `peer_online` to `subscriber` for every peer in
@@ -164,24 +141,9 @@ impl PeerRegistry {
             .unwrap_or_default()
             .as_millis() as i64;
 
-        let (room_emptied, peer_offlined) = {
-            let mut lock = self.senders.lock().unwrap();
-            let key = (peer_id.to_string(), room_id.to_string());
-            let mut room_emptied = false;
-            if let Some(v) = lock.get_mut(&key) {
-                let before = v.len();
-                v.retain(|(cid, _, _)| *cid != conn_id);
-                let removed_something = v.len() != before;
-                if v.is_empty() {
-                    lock.remove(&key);
-                    room_emptied = removed_something;
-                }
-            }
-            let peer_offlined = room_emptied && !lock.keys().any(|(p, _)| p == peer_id);
-            (room_emptied, peer_offlined)
-        };
+        let remove = self.connections.remove(peer_id, room_id, conn_id);
 
-        if room_emptied {
+        if remove.room_emptied {
             let room_subs = self.rooms.subscribers_of(peer_id).await;
             if !room_subs.is_empty() {
                 let msg = serde_json::json!({
@@ -197,7 +159,7 @@ impl PeerRegistry {
             }
         }
 
-        if peer_offlined {
+        if remove.peer_offlined {
             let pres_subs = self.presence.subscribers_of(peer_id).await;
             if !pres_subs.is_empty() {
                 let msg = serde_json::json!({
@@ -217,8 +179,7 @@ impl PeerRegistry {
 
     /// Returns `true` if `peer_id` has at least one live connection.
     pub fn is_online(&self, peer_id: &str) -> bool {
-        let lock = self.senders.lock().unwrap();
-        lock.keys().any(|(p, _)| p == peer_id)
+        self.connections.is_online(peer_id)
     }
 
     /// Returns one `RoomMeta` per distinct live room of `peer_id`.
@@ -231,16 +192,7 @@ impl PeerRegistry {
     /// Multiple conns at the same room collapse to a single entry (using
     /// the most recently registered meta for stability).
     pub fn rooms_of(&self, peer_id: &str) -> Vec<RoomMeta> {
-        let lock = self.senders.lock().unwrap();
-        let mut by_room: HashMap<String, RoomMeta> = HashMap::new();
-        for ((p, _), v) in lock.iter() {
-            if p == peer_id
-                && let Some((_, meta, _)) = v.last()
-            {
-                by_room.insert(meta.room_id.clone(), meta.clone());
-            }
-        }
-        by_room.into_values().collect()
+        self.connections.rooms_of(peer_id)
     }
 
     /// Broadcasts `msg` to every live connection at `(dest_peer, dest_room)`
@@ -257,21 +209,8 @@ impl PeerRegistry {
         msg: Message,
         from_conn_id: u64,
     ) -> bool {
-        let lock = self.senders.lock().unwrap();
-        let key = (dest_peer.to_string(), dest_room.to_string());
-        let Some(v) = lock.get(&key) else {
-            return false;
-        };
-        let mut delivered = false;
-        for (cid, _, tx) in v.iter() {
-            if *cid == from_conn_id {
-                continue;
-            }
-            if tx.send(msg.clone()).is_ok() {
-                delivered = true;
-            }
-        }
-        delivered
+        self.connections
+            .send_to_room(dest_peer, dest_room, msg, from_conn_id)
     }
 
     /// Applies `patch` to every live conn at `(peer_id, room_id)` and
@@ -294,37 +233,9 @@ impl PeerRegistry {
         room_id: &str,
         patch: RoomMetaPatch,
     ) -> bool {
-        let (current_model, current_thinking, current_session_id, current_working) = {
-            let mut lock = self.senders.lock().unwrap();
-            let key = (peer_id.to_string(), room_id.to_string());
-            match lock.get_mut(&key) {
-                Some(v) if !v.is_empty() => {
-                    for (_, meta, _) in v.iter_mut() {
-                        if let Some(ref m) = patch.model {
-                            meta.model = m.clone();
-                        }
-                        if let Some(ref t) = patch.thinking {
-                            meta.thinking = t.clone();
-                        }
-                        if let Some(ref session_id) = patch.session_id {
-                            meta.session_id = session_id.clone();
-                        }
-                        if let Some(w) = patch.working {
-                            meta.working = w;
-                        }
-                    }
-                    // All conns at this key carry the same post-patch state
-                    // now; read the first as the canonical snapshot.
-                    let head = v.first().expect("v is non-empty");
-                    (
-                        head.1.model.clone(),
-                        head.1.thinking.clone(),
-                        head.1.session_id.clone(),
-                        head.1.working,
-                    )
-                }
-                _ => return false,
-            }
+        let snapshot = match self.connections.update_room_meta(peer_id, room_id, &patch) {
+            Some(snapshot) => snapshot,
+            None => return false,
         };
 
         // Empty patch → state didn't change, suppress broadcast.
@@ -335,13 +246,13 @@ impl PeerRegistry {
         let room_subs = self.rooms.subscribers_of(peer_id).await;
         if !room_subs.is_empty() {
             let mut meta_obj = serde_json::Map::new();
-            if let Some(m) = &current_model {
+            if let Some(m) = &snapshot.model {
                 meta_obj.insert("model".to_string(), serde_json::Value::String(m.clone()));
             }
-            if let Some(t) = &current_thinking {
+            if let Some(t) = &snapshot.thinking {
                 meta_obj.insert("thinking".to_string(), serde_json::Value::String(t.clone()));
             }
-            if let Some(session_id) = &current_session_id {
+            if let Some(session_id) = &snapshot.session_id {
                 meta_obj.insert(
                     "session_id".to_string(),
                     serde_json::Value::String(session_id.clone()),
@@ -351,7 +262,7 @@ impl PeerRegistry {
             // rides along in the broadcast — subscribers can rely on it.
             meta_obj.insert(
                 "working".to_string(),
-                serde_json::Value::Bool(current_working),
+                serde_json::Value::Bool(snapshot.working),
             );
             let msg = serde_json::json!({
                 "type": "room_meta_updated",
@@ -373,7 +284,7 @@ impl PeerRegistry {
     /// `room_announced`/`room_ended`, `room_meta_updated`) where the
     /// subscriber's room isn't known in advance.
     fn forward_to_all_rooms_of(&self, peer_id: &str, msg: Message) {
-        let _ = self.forward_to_peer(peer_id, msg);
+        let _ = self.connections.send_to_all_rooms_of(peer_id, msg);
     }
 
     /// Sends `msg` to every live connection of `peer_id` across all rooms.
@@ -381,17 +292,7 @@ impl PeerRegistry {
     /// data-plane forwarding uses this peer-wide behavior until canonical
     /// session/room targeting lands as a separate protocol change.
     pub fn forward_to_peer(&self, peer_id: &str, msg: Message) -> bool {
-        let mut sent = false;
-        let lock = self.senders.lock().unwrap();
-        for ((p, _), v) in lock.iter() {
-            if p == peer_id {
-                for (_, _, tx) in v.iter() {
-                    let _ = tx.send(msg.clone());
-                    sent = true;
-                }
-            }
-        }
-        sent
+        self.connections.send_to_peer(peer_id, msg)
     }
 
     /// Sends `msg` to every live connection at one explicit `(peer, room)`.

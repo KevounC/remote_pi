@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-registry-split-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-relay-typed-actor-registry-split
 depends_on: [epic-bold-relay-typed-actor-frame-dispatch, epic-bold-relay-typed-actor-control-handlers]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 1: Extract the connection table and delivery adapter
@@ -63,6 +63,16 @@ pub(crate) struct ConnectionRegistry {
 - [ ] Existing call sites compile without behavior changes.
 - [ ] Duplicate room, skip-sender, stale unregister, and cross-PC delivery tests still pass.
 - [ ] From `relay/`: `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` pass.
+
+## Implementation
+
+- Extracted `ConnectionRegistry` and `ConnectionEntry` into `relay/src/peers/connections.rs`; `next_conn` and `senders` now live there instead of directly in `PeerRegistry`.
+- Kept `PeerRegistry` as the public facade. Existing `register`, `unregister`, `forward`, `forward_to_peer`, `forward_to_room`, `rooms_of`, `backfill_presence`, and `update_room_meta` delegate sender-table and delivery operations through `ConnectionRegistry`.
+- `ConnectionRegistry::insert` / `remove` return explicit mutation facts (`was_offline_before`, `is_first_in_room`, `room_emptied`, `peer_offlined`) so the facade publishes the same lifecycle events without rescanning for those transitions.
+- Preserved step-1 compatibility by keeping `room_meta` on each `ConnectionEntry`; room metadata store extraction remains for the next story.
+- Tests added: none; existing registry, presence, rooms, integration, and cross-PC forwarding coverage remained the refactor proof.
+- Verification: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` (148 tests), and `cargo build` passed from `relay/`.
+- Discrepancies from design: none.
 
 ## Risk
 
