@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-frame-dispatch-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-frame-dispatch
 depends_on: [epic-bold-relay-typed-actor-frame-dispatch-step-3]
@@ -116,3 +116,24 @@ Restore the `serde_json::Value` signature on `handle_pi_envelope` and the raw `f
 - Preserved peer-wide `forward_to_peer`; no `to_room` targeting or registry behavior changed.
 - Regen verdict: not applicable; generator and generated protocol files were untouched.
 - Verification: targeted `cargo test pi_forward --lib` passed (13/13); targeted `cargo test dispatch_malformed_pi_envelope --lib` passed (1/1); full relay `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build` passed. Full `cargo test` reported 89 lib tests, 0 main tests, and integration suites 3 + 13 + 8 + 10 + 2 + 19 all passing.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: relay `cargo fmt --check` clean;
+`cargo clippy -- -D warnings` clean; `cargo test` 144 passed / 0 failed (89 lib +
+3 integ + 13 mesh + 8 pi_forward + 10 presence + 2 parity + 19 rooms). Commit
+`0589f70` scoped to connection_actor.rs + pi_forward.rs + story .md; relay-only,
+no generated files touched (regen N/A).
+
+Typed dispatch verified: `handle_pi_envelope` consumes generated `PiEnvelopeFrame`
+(not raw `serde_json::Value`); `dispatch_pi_envelope` routes `DecodedRelayFrame::
+PiEnvelope` directly. Opacity preserved: relay never parses generic envelope `body`
+or endpoint-owned `session_id` (tests carry session_id unchanged in opaque bodies).
+Transport-error shape compatible: `_relay` `pi_envelope_in` wrappers carry
+`body.type: "transport_error"`, reasons `bad_envelope`/`not_authorized`/`offline`,
+`re` correlation from original envelope id. Mesh auth via authenticated
+`sender_peer_id` (NOT human-readable `envelope.from`) — verified by a test
+proving spoofed `envelope.from` doesn't bypass authorization. Peer-wide
+`forward_to_peer` preserved (no `to_room` targeting — deferred to
+relay-opaque-targeting). `handle_malformed_pi_envelope` isolation (recovers only
+`id`/`from` correlation from boundary raw value) is sound.
