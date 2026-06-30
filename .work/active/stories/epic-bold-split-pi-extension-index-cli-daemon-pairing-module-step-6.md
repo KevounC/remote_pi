@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-6
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-cli-daemon-pairing-module
 depends_on: [epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-5]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 6: Extract the standalone CLI dispatcher and compatibility harness; finish `index.ts` as wiring
@@ -91,6 +91,18 @@ export interface RemotePiCommandSurfaceHarness {
 - [ ] Existing test-only exports remain available or are explicitly aliased from `extension/testing.ts`.
 - [ ] `remote-pi devices/revoke/set-relay/create/remove/daemons/daemon/cron/peers/claude/install/uninstall/restart-supervisor` CLI paths still execute through the same command handlers.
 - [ ] `corepack pnpm typecheck`, `corepack pnpm test`, and `corepack pnpm build` pass.
+
+## Implementation
+- Extracted standalone CLI dispatch to `pi-extension/src/extension/command_surface/standalone_cli.ts` as `runStandaloneRemotePiCli(...)`, with injected handlers for devices/revoke/set-relay/create/remove/daemons/daemon/cron/peers/claude/install/uninstall/restart-supervisor.
+- Kept `pi-extension/src/index.ts` as the CLI bootstrap/wiring point: it preserves the shebang, keeps `package.json` bin unchanged (`remote-pi: dist/index.js`), checks `isDirectRun(import.meta.url, process.argv[1])`, and passes the existing command handler instances into `createStandaloneCliDeps(...)`.
+- Added the compatibility command-surface harness in `pi-extension/src/extension/testing.ts`; legacy test exports from `index.ts` remain available, and `index.ts` also exports `commandSurfaceHarness` for newer tests/seams.
+- Moved the `remote-pi claude` launcher body into the standalone CLI module while passing the package entrypoint URL from `index.ts`, preserving the built `dist/index.js` path assumptions for `dist/mcp/mesh_server.js` and packaged `skills/agent-network/SKILL.md`.
+- Updated `src/session/e2e.test.ts` to import `probeListPeers` from its extracted module instead of from `index.ts`.
+- Added CLI dispatcher coverage in `src/extension.test.ts` for the published standalone paths and argument re-quoting.
+- Verification: `corepack pnpm typecheck` clean; `corepack pnpm build` clean; `corepack pnpm exec vitest run src/extension.test.ts -t "standalone|cli|devices|revoke|set-relay|create|daemon|cron|peers|install|supervisor"` passed 31 tests / 118 skipped in 1 file.
+- `corepack pnpm exec vitest run src/session/e2e.test.ts` reported 4 passed / 28 failed; every failure hit leader-election/UDS broker setup (`leader election failed after 20 attempts: /tmp/pi-e2e-*/broker.sock`) before behavior assertions, matching the known mesh/UDS false-alarm group called out for this wave. No code changes were made to chase that environment failure.
+- Discrepancies from design: `index.ts` necessarily remains the broader legacy composition root for owner/session/transcript wiring outside this CLI/daemon/pairing arc, but the standalone CLI dispatcher and `remote-pi claude` command body are no longer embedded there.
+- Adjacent issues parked: none.
 
 ## Rollback
 Restore the direct-run `if (_isDirectRun())` block and compatibility helpers to `index.ts`. If a wrapper file/package bin change was made, revert it with this step.

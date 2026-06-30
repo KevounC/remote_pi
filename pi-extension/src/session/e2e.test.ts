@@ -7,7 +7,7 @@ import { createConnection } from "node:net";
 import { ipcAddress } from "./ipc.js";
 import { SessionPeer } from "./peer.js";
 import type { Envelope } from "./envelope.js";
-import { probeListPeers } from "../index.js";
+import { probeListPeers } from "../extension/probe_list_peers.js";
 import { composeAddress, sanitizeMeshName, type PeerInfo } from "./broker.js";
 import { migrateAgentName } from "./local_config.js";
 

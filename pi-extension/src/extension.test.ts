@@ -169,6 +169,7 @@ const {
   _handleControl,
   CTRL_PREFIX,
 } = await import("./index.js");
+const { runStandaloneRemotePiCli } = await import("./extension/command_surface/standalone_cli.js");
 const { acquireCwdLock } = await import("./session/cwd_lock.js");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -314,6 +315,75 @@ describe("extension default export", () => {
     ]) {
       expect(registeredCommands).not.toContain(removed);
     }
+  });
+});
+
+describe("standalone remote-pi CLI dispatcher", () => {
+  test("routes published CLI subcommands through injected command handlers", async () => {
+    const logs = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const deps = {
+      devices: vi.fn(async () => undefined),
+      revoke: vi.fn(async () => undefined),
+      setRelay: vi.fn(),
+      daemon: {
+        create: vi.fn(async () => undefined),
+        remove: vi.fn(async () => undefined),
+        list: vi.fn(async () => undefined),
+        start: vi.fn(async () => undefined),
+        stop: vi.fn(async () => undefined),
+        restart: vi.fn(async () => undefined),
+        status: vi.fn(async () => undefined),
+        send: vi.fn(async () => undefined),
+      },
+      cron: { run: vi.fn(async () => undefined) },
+      service: {
+        install: vi.fn(() => true),
+        uninstall: vi.fn(() => undefined),
+      },
+      probePeers: vi.fn(async () => undefined),
+      launchClaude: vi.fn(async () => undefined),
+      restartSupervisor: vi.fn(),
+    };
+
+    try {
+      await runStandaloneRemotePiCli(["node", "remote-pi", "devices"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "revoke", "abcd1234"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "set-relay", "https://relay.example.test"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "create", "/tmp/agent dir", "--name", "Tmp Agent"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "remove", "daemon-a"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "daemons"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "daemon", "start", "daemon-a"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "daemon", "stop", "daemon-a"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "daemon", "restart", "daemon-a"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "daemon", "status"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "daemon", "send", "daemon-a", "hello world"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "cron", "list"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "peers"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "claude", "/tmp/project", "--resume"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "install"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "uninstall"], deps);
+      await runStandaloneRemotePiCli(["node", "remote-pi", "restart-supervisor"], deps);
+    } finally {
+      logs.mockRestore();
+    }
+
+    expect(deps.devices).toHaveBeenCalledTimes(1);
+    expect(deps.revoke).toHaveBeenCalledWith("abcd1234");
+    expect(deps.setRelay).toHaveBeenCalledWith("https://relay.example.test");
+    expect(deps.daemon.create.mock.calls[0]![0]).toBe('"/tmp/agent dir" --name "Tmp Agent"');
+    expect(deps.daemon.remove.mock.calls[0]![0]).toBe("daemon-a");
+    expect(deps.daemon.list).toHaveBeenCalledTimes(1);
+    expect(deps.daemon.start.mock.calls[0]![1]).toBe("daemon-a");
+    expect(deps.daemon.stop.mock.calls[0]![1]).toBe("daemon-a");
+    expect(deps.daemon.restart.mock.calls[0]![1]).toBe("daemon-a");
+    expect(deps.daemon.status).toHaveBeenCalledTimes(1);
+    expect(deps.daemon.send.mock.calls[0]![0]).toBe('daemon-a "hello world"');
+    expect(deps.cron.run.mock.calls[0]![0]).toBe("list");
+    expect(deps.probePeers).toHaveBeenCalledTimes(1);
+    expect(deps.launchClaude).toHaveBeenCalledWith(["/tmp/project", "--resume"]);
+    expect(deps.service.install).toHaveBeenCalledWith(expect.anything(), { linkCli: false });
+    expect(deps.service.uninstall).toHaveBeenCalledWith(expect.anything(), { linkCli: true });
+    expect(deps.restartSupervisor).toHaveBeenCalledTimes(1);
   });
 });
 

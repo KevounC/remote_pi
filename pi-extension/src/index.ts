@@ -38,7 +38,7 @@ import type {
   ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
 import { qrSession } from "./pairing/qr.js";
-import { addPeer, listPeers } from "./pairing/storage.js";
+import { addPeer, listPeers, removePeer } from "./pairing/storage.js";
 import type {
   ClientMessage,
   ServerMessage,
@@ -59,7 +59,11 @@ import {
 import { RelayClient } from "./transport/relay_client.js";
 import { PlainPeerChannel } from "./transport/peer_channel.js";
 import { OwnerMultiplexer } from "./extension/owner_multiplexer.js";
-import type { OwnerMultiplexerTestHarness } from "./extension/testing.js";
+import {
+  createRemotePiCommandSurfaceHarness,
+  type OwnerMultiplexerTestHarness,
+  type RemotePiCommandSurfaceHarness,
+} from "./extension/testing.js";
 import { createCommandSurface } from "./extension/command_surface.js";
 import { registerRemotePiCommands, type RemotePiCommandSpec } from "./extension/command_surface/commands.js";
 import { LocalMeshCommands } from "./extension/command_surface/local_mesh_commands.js";
@@ -69,7 +73,8 @@ import { PairingCommands } from "./extension/command_surface/pairing_commands.js
 import { PairingCoordinator } from "./extension/command_surface/pairing_coordinator.js";
 import { RelayCommands } from "./extension/command_surface/relay_commands.js";
 import { ServiceCommands } from "./extension/command_surface/service_commands.js";
-import { restartSupervisor } from "./extension/command_surface/supervisor_restart.js";
+import { restartSupervisor, restartSupervisorCommand } from "./extension/command_surface/supervisor_restart.js";
+import { createStandaloneCliDeps, isDirectRun, launchClaudeCli, runStandaloneRemotePiCli } from "./extension/command_surface/standalone_cli.js";
 import { probeListPeers } from "./extension/probe_list_peers.js";
 export { probeListPeers } from "./extension/probe_list_peers.js";
 export { restartSupervisorCommand as _restartSupervisorCommand } from "./extension/command_surface/supervisor_restart.js";
@@ -114,22 +119,15 @@ import {
   defaultAgentName,
   effectiveAutoStartRelay,
   loadLocalConfig,
-  localConfigExists,
-  saveLocalConfig,
 } from "./session/local_config.js";
 import { updateFooter, type FooterState } from "./ui/footer.js";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, copyFileSync, existsSync, unlinkSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
-import { createInterface } from "node:readline";
-import { spawnSync } from "node:child_process";
-import { hostname, tmpdir } from "node:os";
+import { mkdirSync, copyFileSync, existsSync, unlinkSync, readFileSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import {
-  kDefaultRelayUrl,
   resolveRelayUrl,
   saveConfig,
-  isValidRelayUrl,
-  isWebSocketScheme,
   toWebSocketUrl,
 } from "./config.js";
 
@@ -912,6 +910,15 @@ export function _getState(): "idle" | "started" | "paired" {
   if (_state === "idle") return "idle";
   return _owners.activeCount() > 0 ? "paired" : "started";
 }
+
+export const commandSurfaceHarness: RemotePiCommandSurfaceHarness = createRemotePiCommandSurfaceHarness({
+  connect: (ctx) => _connectForTest(ctx),
+  stop: (ctx) => _stopForTest(ctx),
+  state: () => _getState(),
+  handleControl: (cmd) => _handleControl(cmd),
+  resetCwdLock: () => _resetCwdLockForTest(),
+  restartSupervisorCommand: (platform, uid) => restartSupervisorCommand(platform, uid),
+});
 
 /** Test-only: number of owners currently attached via PlainPeerChannel. */
 export const _getActivePeerCountForTest = (): number => ownerHarness.activeOwnerCount();
@@ -2618,301 +2625,18 @@ export function _mapAgentMessagesToEvents(
 
 // ── Standalone CLI ────────────────────────────────────────────────────────────
 
-// Supervisor restart command planning/execution lives in command_surface/supervisor_restart.ts.
-
-function _isDirectRun(): boolean {
-  try {
-    return fileURLToPath(import.meta.url) === realpathSync(process.argv[1] ?? "");
-  } catch {
-    return false;
-  }
-}
-
-if (_isDirectRun()) {
-  const [, , subcmd, ...cliArgs] = process.argv;
-  if (subcmd === "devices" || subcmd === "list") {
-    const peers = await listPeers();
-    if (peers.length === 0) { console.log("[remote-pi] No peers"); }
-    else { for (const p of peers) console.log(`• ${p.remote_epk.slice(0, 8)} — ${p.name}`); }
-  } else if (subcmd === "revoke") {
-    const shortid = (cliArgs[0] ?? "").trim();
-    if (!shortid) {
-      console.log("Usage: revoke <shortid>");
-    } else {
-      const peers = await listPeers();
-      const matches = peers.filter((p) => p.remote_epk.startsWith(shortid));
-      if (matches.length === 0) console.log(`No peer matching '${shortid}'`);
-      else if (matches.length > 1) console.log(`Ambiguous: ${matches.map((p) => p.remote_epk.slice(0, 8)).join(", ")}`);
-      else {
-        const peer = matches[0]!;
-        const { removePeer } = await import("./pairing/storage.js");
-        await removePeer(peer.remote_epk);
-        console.log(`Revoked: ${peer.name} (${peer.remote_epk.slice(0, 8)}…)`);
-      }
-    }
-  } else if (subcmd === "set-relay") {
-    const raw = (cliArgs[0] ?? "").trim();
-    if (!raw) {
-      console.log(`Usage: set-relay <url> (default: ${kDefaultRelayUrl})`);
-    } else if (isWebSocketScheme(raw)) {
-      console.log(`Use http:// or https://. The extension converts to WebSocket automatically.`);
-    } else if (!isValidRelayUrl(raw)) {
-      console.log(`Invalid URL: ${raw}. Must start with http:// or https://`);
-    } else {
-      saveConfig({ relay: raw });
-      console.log(`Relay set to ${raw}`);
-    }
-  } else if (subcmd === "create") {
-    // Standalone: `remote-pi create <cwd> [--name "X"]`. The shell already
-    // split the args and stripped the outer quotes, so an arg like
-    // `Tmp Agent` arrives as a single element with embedded space. Re-add
-    // quotes around any arg containing whitespace so the regex-based
-    // parser (shared with the slash-command path) sees the same shape
-    // as it would from a Pi interactive prompt.
-    const joined = cliArgs.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ");
-    await _daemonCommands.create(joined, {
-      ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"],
-    });
-  } else if (subcmd === "remove") {
-    const id = (cliArgs[0] ?? "").trim();
-    await _daemonCommands.remove(id, {
-      ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"],
-    });
-  } else if (subcmd === "daemons") {
-    // Mirror the slash handler: ask the supervisor when reachable,
-    // fall back to registry-only when not.
-    const stubCtx = { ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"] };
-    await _daemonCommands.list(stubCtx);
-  } else if (subcmd === "daemon") {
-    // `remote-pi daemon <op> [args]`. Reuse the fleet-ops handlers — they
-    // already accept a minimal ctx with `notify`.
-    const op = cliArgs[0] ?? "";
-    const rest = cliArgs.slice(1).map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ");
-    const stubCtx = { ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"] };
-    if      (op === "start")   { await _daemonCommands.start(stubCtx, cliArgs[1]); }
-    else if (op === "stop")    { await _daemonCommands.stop(stubCtx, cliArgs[1]); }
-    else if (op === "restart") { await _daemonCommands.restart(stubCtx, cliArgs[1]); }
-    else if (op === "status")  { await _daemonCommands.status(stubCtx); }
-    else if (op === "send")    { await _daemonCommands.send(rest, stubCtx); }
-    else {
-      console.log("Usage: remote-pi daemon <start|stop|restart [<id>]|status|send <id> \"<text>\">");
-    }
-  } else if (subcmd === "cron") {
-    // `remote-pi cron <op> [args]`. Re-quote args with spaces so the shared
-    // parser sees the same shape as a Pi slash prompt.
-    const joined = cliArgs.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ");
-    const stubCtx = { ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"] };
-    await _cronCommands.run(joined, stubCtx);
-  } else if (subcmd === "peers") {
-    // Read-only roster of the local + cross-PC mesh. Unlike `devices` (which
-    // reads paired phones from peers.json), the mesh roster lives only in the
-    // running broker's memory, so we probe the UDS broker. The probe never
-    // registers as a peer — it leaves no trace on the mesh (see
-    // Broker._tryObserverProbe). Null = no broker reachable on this machine.
-    const peers = await probeListPeers(sessionSockPath(LOCAL_SESSION_NAME));
-    if (peers === null) {
-      console.log("[remote-pi] Mesh offline — no agent is running on this machine.");
-    } else {
-      console.log(`[remote-pi] peers:\n${formatPeerInventory(peers)}`);
-    }
-  } else if (subcmd === "claude") {
-    await _cmdClaudeCli(cliArgs);
-  } else if (subcmd === "install") {
-    // CLI mode = user installed via `npm install -g remote-pi`, so the
-    // `remote-pi` / `pi-supervisord` bins are already on $PATH via npm's
-    // global prefix. Explicit `linkCli: false` so we never stomp those
-    // with symlinks pointing at a parallel Pi-extension install.
-    const stubCtx = { ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"] };
-    // Propagate failure as a non-zero exit so callers (Cockpit / CI) detect it
-    // — installService throws on a failed schtasks/launchctl/systemctl step.
-    if (!_serviceCommands.install(stubCtx, { linkCli: false })) process.exit(1);
-  } else if (subcmd === "uninstall") {
-    const stubCtx = { ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"] };
-    // `linkCli: true` even from the CLI: unlinking is ALWAYS safe and must run
-    // regardless of how install ran. `unlinkCliBinaries` only removes OUR
-    // reserved symlinks (`remote-pi` / `pi-supervisord`) under `~/.local/bin`;
-    // npm-global bins live in a different prefix and are never touched. So a
-    // user who installed via the TUI (`/remote-pi install`, which links) and
-    // uninstalls from a shell still gets the links cleaned up — the asymmetry
-    // that left an orphaned `~/.local/bin/remote-pi` behind.
-    _serviceCommands.uninstall(stubCtx, { linkCli: true });
-  } else if (subcmd === "restart-supervisor") {
-    restartSupervisor();
-  } else {
-    console.log([
-      "Usage: remote-pi <command>",
-      "",
-      "Daemon registry:",
-      "  create <cwd> [--name \"Name\"]   Register a folder as a daemon",
-      "  remove <id>                     Unregister a daemon",
-      "  daemons                         List registered daemons",
-      "",
-      "Fleet control:",
-      "  daemon start [<id>]             Start all daemons, or one by id",
-      "  daemon stop [<id>]              Stop all daemons, or one by id",
-      "  daemon restart [<id>]           Restart all daemons, or one by id",
-      "  daemon status                   Show pid / uptime / restarts",
-      "  daemon send <id> \"<text>\"       Send a prompt to a daemon",
-      "  cron add <id> \"<expr>\" \"<txt>\"  Schedule a recurring prompt (≥60s; --tz, --wake)",
-      "  cron list|run|remove|log        Manage scheduled prompts (needs the supervisor)",
-      "",
-      "Service:",
-      "  install                         Install pi-supervisord as a system service",
-      "  uninstall                       Remove the system service",
-      "  restart-supervisor              Restart the pi-supervisord process",
-      "",
-      "Devices:",
-      "  devices                         List paired phones (peers.json)",
-      "  revoke <shortid>                Revoke a paired device",
-      "",
-      "Config:",
-      "  set-relay <url>                 Set the relay URL (http:// or https://)",
-      "",
-      "Agent mesh:",
-      "  peers                           List agents on the local + cross-PC mesh",
-      "  claude [cwd]                    Start Claude Code connected to the agent mesh",
-    ].join("\n"));
-  }
-}
-
-// ── `remote-pi claude` — launch Claude Code connected to the mesh ─────────────
-
-/**
- * Resolve the packaged agent-network skill path
- * (`<pkgRoot>/skills/agent-network/SKILL.md`). Single source of truth shared
- * by both runtimes: Pi discovers it via `resources_discover`, and the Claude
- * launcher injects it as a system prompt (see `_cmdClaudeCli`). Returns null
- * if the file is missing (e.g. running before `pnpm build`).
- */
-function _agentNetworkSkillPath(): string | null {
-  const here = fileURLToPath(import.meta.url);            // dist/index.js (or src/index.ts via tsx)
-  const pkgRoot = dirname(dirname(here));                 // package root (dist → ..; src → ..)
-  const skill = join(pkgRoot, "skills", "agent-network", "SKILL.md");
-  return existsSync(skill) ? skill : null;
-}
-
-async function _cmdClaudeCli(args: string[]): Promise<void> {
-  // Contract: `remote-pi claude [cwd] [claude-flags...]`. The optional cwd is
-  // ONLY the leading positional (first token, not a flag); everything after it
-  // is forwarded verbatim to the `claude` binary (e.g. `--resume`, `-c`,
-  // `-p "prompt"`). Restricting cwd to the leading token avoids mistaking a
-  // flag's value (e.g. the id in `--resume <id>`) for the cwd.
-  const hasCwdArg = args.length > 0 && !args[0]!.startsWith("-");
-  const targetCwd = hasCwdArg ? args[0]! : process.cwd();
-  const passthroughArgs = hasCwdArg ? args.slice(1) : args;
-
-  // Wizard when no local config exists
-  if (!localConfigExists(targetCwd)) {
-    const suggested = defaultAgentName(targetCwd);
-    process.stdout.write(`\n[remote-pi] No config found for ${targetCwd}\n`);
-    process.stdout.write("Let's set up this agent.\n\n");
-
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const agentName: string = await new Promise((res) =>
-      rl.question(`Agent name [${suggested}]: `, (ans) => { rl.close(); res(ans.trim() || suggested); }),
-    );
-
-    saveLocalConfig(targetCwd, { agent_name: agentName, auto_start_relay: true });
-    process.stdout.write(`[remote-pi] Config saved: agent="${agentName}"\n\n`);
-  }
-
-  // Resolve mesh server script path (dist/mcp/mesh_server.js)
-  const here = fileURLToPath(import.meta.url);
-  const distRoot = dirname(here);
-  const meshServerPath = resolve(distRoot, "mcp/mesh_server.js");
-
-  if (!existsSync(meshServerPath)) {
-    console.log(`[remote-pi] mesh server not found at ${meshServerPath}. Run pnpm build first.`);
-    process.exit(1);
-  }
-
-  const absCwd = resolve(targetCwd);
-  const SERVER_NAME = "remote-pi-mesh";
-
-  // The mesh MCP must be visible ONLY inside a `remote-pi claude` session — a
-  // plain `claude` in the same repo must NOT inherit it (otherwise every
-  // ordinary session silently joins the mesh as a stray agent).
-  //
-  // Older builds registered the server with `claude mcp add -s local`. That
-  // scope lives in `~/.claude.json` keyed by the **git repo root** and is
-  // inherited by EVERY claude session under that root — which is exactly the
-  // leak we're closing. So we no longer write any persistent scope; we load
-  // the server through an ephemeral `--mcp-config <tmpfile>` passed on the
-  // launch command line (see below). That config is session-only: it is never
-  // recorded in any scope `claude mcp list` enumerates, so a normal `claude`
-  // sees nothing.
-  //
-  // Migration: best-effort scrub of the stale `-s local` entry that prior
-  // versions left behind (and that is the source of the inherited-mesh bug).
-  // Idempotent — a no-op (non-zero, ignored) when the entry is already gone.
-  spawnSync("claude", ["mcp", "remove", SERVER_NAME, "-s", "local"], {
-    cwd: absCwd, stdio: "ignore", shell: false,
-  });
-
-  // Ephemeral MCP config consumed by `--mcp-config` below. We do NOT bake a
-  // `cwd` into it: the server resolves its folder from its own `process.cwd()`,
-  // which Claude sets to the directory the session was launched in (verified
-  // empirically — NOT the git root, NOT CLAUDE_PROJECT_DIR). We spawn claude
-  // with `cwd: absCwd`, the MCP child inherits it, so the server self-identifies
-  // as the right agent without leaking that path to any other session.
-  // Unique per pid so concurrent `remote-pi claude` launches don't collide.
-  const mcpConfigPath = join(tmpdir(), `remote-pi-mesh-mcp-${process.pid}.json`);
-  writeFileSync(mcpConfigPath, JSON.stringify({
-    mcpServers: {
-      [SERVER_NAME]: { command: process.execPath, args: [meshServerPath] },
-    },
+if (isDirectRun(import.meta.url, process.argv[1])) {
+  await runStandaloneRemotePiCli(process.argv, createStandaloneCliDeps({
+    commandSurface: commandSurfaceHarness,
+    listPeers: () => listPeers(),
+    removePeer: (remoteEpk) => removePeer(remoteEpk),
+    saveRelayConfig: (url) => { saveConfig({ relay: url }); },
+    daemon: _daemonCommands,
+    cron: _cronCommands,
+    service: _serviceCommands,
+    probeListPeers: () => probeListPeers(sessionSockPath(LOCAL_SESSION_NAME)),
+    formatPeerInventory: (peers) => formatPeerInventory([...peers]),
+    launchClaude: (args) => launchClaudeCli(args, import.meta.url),
+    restartSupervisor: () => restartSupervisor(),
   }));
-
-  // Inject the agent-network protocol as a system prompt instead of deploying a
-  // skill file into ~/.claude. Anyone running `remote-pi claude` is here to use
-  // the mesh, so load the protocol unconditionally — no lazy skill gating, no
-  // global skills-dir pollution, and the packaged file is the single source of
-  // truth shared with the Pi runtime. Skipped only if the file is missing.
-  const skillPath = _agentNetworkSkillPath();
-
-  // Launch flags:
-  //   --mcp-config <tmpfile>                       — load the mesh server for
-  //       THIS session only (never a persistent scope). We intentionally omit
-  //       `--strict-mcp-config` so the user's own persistent MCP servers stay
-  //       available alongside the mesh.
-  //   --dangerously-load-development-channels TAG  — enable claude/channel push
-  //       for our local (non-allowlisted) server, so incoming mesh messages
-  //       wake Claude instead of waiting for a get_messages poll. Entries must
-  //       be tagged: `server:<name>` for a manually configured MCP server
-  //       (`plugin:<name>@<marketplace>` is the plugin form). Shows a one-time
-  //       confirmation dialog at startup. Works against the `--mcp-config`
-  //       server in current Claude Code; if a build ever fails to match it, the
-  //       per-turn `get_messages` poll (mandated by the mesh protocol) still
-  //       delivers — we lose the wake, not the messages.
-  //   --dangerously-skip-permissions               — auto-approve tool calls
-  //   --append-system-prompt-file=<skill>           — load the mesh protocol
-  // `--append-system-prompt-file` uses the glued `--flag=value` form (a SINGLE
-  // argv token) on purpose: tools that restore a session by capturing and
-  // replaying the live process's argv (e.g. cmux) drop the TRAILING token,
-  // which here was the skill path — leaving a dangling `--append-system-prompt-file`
-  // → `claude` aborts with "argument missing" and the session never comes back.
-  // As one token, the worst case is the whole flag being dropped: claude still
-  // starts (just without the injected protocol), which is recoverable instead
-  // of fatal. (The other flags stay separate pairs — never last, so unaffected,
-  // and we don't risk a parser that may not accept `=`.)
-  // Any extra args the user passed (e.g. `--resume`, `-c`) are appended last so
-  // they reach the claude binary; ours come first as sensible defaults.
-  try {
-    spawnSync("claude", [
-      "--mcp-config", mcpConfigPath,
-      "--dangerously-load-development-channels", `server:${SERVER_NAME}`,
-      "--dangerously-skip-permissions",
-      ...(skillPath ? [`--append-system-prompt-file=${skillPath}`] : []),
-      ...passthroughArgs,
-    ], {
-      cwd: absCwd,
-      stdio: "inherit",
-      shell: false,
-    });
-  } finally {
-    // Session over — drop the ephemeral config so it never lingers as a stray
-    // file. spawnSync blocks until claude exits, so claude has long since read
-    // it. Best-effort: ignore if already gone.
-    try { unlinkSync(mcpConfigPath); } catch { /* already removed */ }
-  }
 }
