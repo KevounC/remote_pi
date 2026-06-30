@@ -63,15 +63,24 @@ export type TurnEvent =
   | { type: "queued_message_clear" };
 
 export interface TurnProjection {
+  /** Existing room_meta projection. Sibling projection-consumers derives UI from this. */
   working: boolean;
+  /** Existing wire target for agent_chunk/agent_done/cancel while a turn is active. */
   activeTurnId: string | null;
+  /** Current reply target for assistant/tool frames; distinct so steering cannot replace it. */
   replyTo: string | null;
+  /** Existing cancel target projection. Terminal states must always project null. */
   cancelTargetId: string | null;
+  /** Late-attach sibling consumes Done(awaitingSync) through this projection. */
   awaitingSyncTurnId: string | null;
+  /** Late-attach owners/bridges collected during the turn that should receive final sync. */
   lateAttachSyncTargets: readonly LateAttachTarget[];
+  /** True only once the SDK turn_end makes Done(awaitingSync) safe to flush. */
   canFlushLateAttachSync: boolean;
+  /** Queue drain is legal only when true. */
   canDrainQueuedMessage: boolean;
-  phase: TurnStateTag;
+  /** Algebraic phase name; consumers should branch here rather than re-infer booleans. */
+  phase: TurnState["tag"];
   peersAttachedDuringTurn: readonly string[];
   queuedMessage: QueuedMessage | null;
 }

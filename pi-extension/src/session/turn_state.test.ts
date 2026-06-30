@@ -234,4 +234,68 @@ describe("turn state reducer", () => {
       lateAttachSyncTargets: [],
     });
   });
+
+  test("all terminal causes converge to idle projection with no cancel target", () => {
+    const terminalCases: Array<[string, TurnEvent[]]> = [
+      ["success", [{ type: "turn_start", fallbackTurnId: "u1" }, { type: "agent_done" }]],
+      ["provider error", [{ type: "turn_start", fallbackTurnId: "u1" }, { type: "provider_error" }, { type: "turn_end" }]],
+      ["cancel/abort", [{ type: "turn_start", fallbackTurnId: "u1" }, { type: "cancelled" }, { type: "turn_end" }]],
+      ["compaction", [{ type: "compaction_start", turnId: "c1" }, { type: "compaction_done" }]],
+      ["session replacement/shutdown", [{ type: "turn_start", fallbackTurnId: "u1" }, { type: "session_shutdown" }]],
+      ["reconnect late-attach recovery", [
+        { type: "turn_start", fallbackTurnId: "u1" },
+        { type: "peer_attached", target: { kind: "owner", id: "late-owner" } },
+        { type: "agent_done" },
+        { type: "turn_end" },
+        { type: "flush_late_attach_sync" },
+      ]],
+    ];
+
+    for (const [name, events] of terminalCases) {
+      const projection = projectTurn(reduce(events));
+      expect(projection.working, name).toBe(false);
+      expect(projection.activeTurnId, name).toBeNull();
+      expect(projection.cancelTargetId, name).toBeNull();
+    }
+  });
+
+  test("Done(awaitingSync) is explicit in the projection before late-attach flush", () => {
+    const projection = projectTurn(reduce([
+      { type: "turn_start", fallbackTurnId: "u1" },
+      { type: "peer_attached", target: { kind: "owner", id: "late-owner" } },
+      { type: "agent_done" },
+      { type: "turn_end" },
+    ]));
+
+    expect(projection).toMatchObject({
+      phase: "done",
+      working: false,
+      activeTurnId: null,
+      cancelTargetId: null,
+      awaitingSyncTurnId: "u1",
+      canFlushLateAttachSync: true,
+      lateAttachSyncTargets: [{ kind: "owner", id: "late-owner" }],
+    });
+  });
+
+  test("queued message drain becomes legal after every drain-preserving terminal state reaches idle", () => {
+    const terminalCases: Array<[string, TurnEvent[]]> = [
+      ["success", [{ type: "agent_done" }, { type: "turn_end" }, { type: "flush_late_attach_sync" }]],
+      ["provider error", [{ type: "provider_error" }, { type: "turn_end" }]],
+      ["cancel/abort", [{ type: "cancelled" }, { type: "turn_end" }]],
+      ["compaction", [{ type: "compaction_done" }, { type: "turn_end" }, { type: "flush_late_attach_sync" }]],
+    ];
+
+    for (const [name, terminalEvents] of terminalCases) {
+      const projection = projectTurn(reduce([
+        { type: "queued_message_set", id: "q1", text: "next" },
+        { type: "turn_start", fallbackTurnId: name === "compaction" ? "ignored" : "u1" },
+        ...(name === "compaction" ? [{ type: "compaction_start", turnId: "c1" } as const] : []),
+        ...terminalEvents,
+      ]));
+      expect(projection.phase, name).toBe("idle");
+      expect(projection.canDrainQueuedMessage, name).toBe(true);
+      expect(projection.queuedMessage, name).toEqual({ id: "q1", text: "next" });
+    }
+  });
 });

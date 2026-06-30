@@ -155,6 +155,7 @@ const {
   _setCurrentModelForTest,
   _setPiForTest,
   _getCurrentTurnIdForTest,
+  _getTurnProjectionForTest,
   _connectForTest,
   _hasActivePeerForTest,
   _getActivePeerCountForTest,
@@ -218,6 +219,30 @@ function decodeSentCt(raw: string): { peer: string; inner: { type: string; [k: s
     [k: string]: unknown;
   };
   return { peer: outer.peer, inner };
+}
+
+function sentControlFramesSince(index: number): Array<{ type: string; meta?: { working?: boolean } }> {
+  return relayRef.current!.sendControl.mock.calls.slice(index)
+    .map((c) => c[0] as { type: string; meta?: { working?: boolean } });
+}
+
+function expectTurnProjectionConvergedIdle(): void {
+  expect(_getTurnProjectionForTest()).toMatchObject({
+    working: false,
+    activeTurnId: null,
+    cancelTargetId: null,
+  });
+}
+
+function currentSessionIdFromSends(): string {
+  const pairOk = relayRef.current!.send.mock.calls
+    .map((c) => c[0] as string)
+    .map(decodeSentCt)
+    .reverse()
+    .find((d) => d.inner.type === "pair_ok");
+  const sessionId = pairOk?.inner["session_id"];
+  if (typeof sessionId !== "string") throw new Error("pair_ok session_id not found");
+  return sessionId;
 }
 
 // ── Registration tests ────────────────────────────────────────────────────────
@@ -1151,6 +1176,13 @@ describe("multi-channel broadcast (W2D)", () => {
     onAgentEnd({ type: "agent_end" });
     await new Promise<void>((r) => setImmediate(r));
     expect(sendUserMessage).not.toHaveBeenCalled();
+    expect(_getTurnProjectionForTest()).toMatchObject({
+      phase: "done",
+      working: false,
+      activeTurnId: null,
+      cancelTargetId: null,
+      canDrainQueuedMessage: false,
+    });
 
     onTurnEnd({ type: "turn_end", turnIndex: 0 });
     await new Promise<void>((r) => setImmediate(r));
@@ -1168,11 +1200,99 @@ describe("multi-channel broadcast (W2D)", () => {
       text: "run next",
     });
     expect(drainedEcho?.inner).not.toHaveProperty("streaming_behavior");
+    expect(_getTurnProjectionForTest()).toMatchObject({
+      working: true,
+      activeTurnId: "queued-drain",
+      cancelTargetId: "queued-drain",
+      queuedMessage: null,
+    });
 
     onAgentEnd({ type: "agent_end" });
     onTurnEnd({ type: "turn_end", turnIndex: 1 });
     await new Promise<void>((r) => setImmediate(r));
     expect(sendUserMessage).toHaveBeenCalledTimes(1);
+  });
+
+  test("successful agent_end projects idle/cancel state before turn_end", async () => {
+    await _pairForTest("ownerA__1234567890");
+    const onTurnStart = captureEventHandler("turn_start");
+    const onInput = captureEventHandler("input");
+    const onAgentEnd = captureEventHandler("agent_end");
+    const controlBefore = relayRef.current!.sendControl.mock.calls.length;
+
+    onTurnStart({ type: "turn_start", turnIndex: 0, timestamp: 0 });
+    onInput({ type: "input", text: "current turn", source: "interactive" });
+    expect(_getTurnProjectionForTest()).toMatchObject({ working: true, cancelTargetId: expect.any(String) });
+
+    onAgentEnd({ type: "agent_end" });
+    await new Promise<void>((r) => setImmediate(r));
+
+    expect(_getTurnProjectionForTest()).toMatchObject({
+      phase: "done",
+      working: false,
+      activeTurnId: null,
+      cancelTargetId: null,
+      awaitingSyncTurnId: expect.any(String),
+    });
+    expect(sentControlFramesSince(controlBefore).some((f) => f.meta?.working === false)).toBe(true);
+  });
+
+  test("provider error projects working=false and null cancel target through message_end", async () => {
+    await _pairForTest("ownerA__1234567890");
+    const onTurnStart = captureEventHandler("turn_start");
+    const onInput = captureEventHandler("input");
+    const onMsgEnd = captureEventHandler("message_end");
+    onTurnStart({ type: "turn_start", turnIndex: 0, timestamp: 0 });
+    onInput({ type: "input", text: "current turn", source: "interactive" });
+    const controlBefore = relayRef.current!.sendControl.mock.calls.length;
+    const sendsBefore = relayRef.current!.send.mock.calls.length;
+
+    onMsgEnd({
+      type: "message_end",
+      message: {
+        role: "assistant", stopReason: "error",
+        errorMessage: "Provider finish_reason: error", content: [],
+      },
+    });
+
+    expectTurnProjectionConvergedIdle();
+    expect(sentControlFramesSince(controlBefore).some((f) => f.meta?.working === false)).toBe(true);
+    const sent = relayRef.current!.send.mock.calls.slice(sendsBefore)
+      .map((c) => c[0] as string).map(decodeSentCt);
+    expect(sent.find((d) => d.inner.type === "error")?.inner).toMatchObject({
+      type: "error",
+      code: "provider_error",
+      message: "Provider finish_reason: error",
+    });
+  });
+
+  test("cancel acknowledgement projects working=false and null cancel target through router", async () => {
+    await _pairForTestWithCtx("owner-cancel-converge", makeMockCtx("/tmp/remote-pi-cancel-converge"));
+    const sessionId = currentSessionIdFromSends();
+    const onTurnStart = captureEventHandler("turn_start");
+    onTurnStart({ type: "turn_start", turnIndex: 0, timestamp: 0 });
+    const activeTurnId = _getCurrentTurnIdForTest();
+    expect(activeTurnId).toMatch(/^local_/);
+    const controlBefore = relayRef.current!.sendControl.mock.calls.length;
+    const sendsBefore = relayRef.current!.send.mock.calls.length;
+
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "owner-cancel-converge",
+      ct: Buffer.from(JSON.stringify({
+        type: "cancel", id: "cancel-converge", session_id: sessionId, target_id: activeTurnId,
+      })).toString("base64"),
+    }));
+    await new Promise<void>((r) => setImmediate(r));
+
+    expectTurnProjectionConvergedIdle();
+    expect(sentControlFramesSince(controlBefore).some((f) => f.meta?.working === false)).toBe(true);
+    const sent = relayRef.current!.send.mock.calls.slice(sendsBefore)
+      .map((c) => c[0] as string).map(decodeSentCt);
+    expect(sent.find((d) => d.inner.type === "cancelled")?.inner).toMatchObject({
+      type: "cancelled",
+      in_reply_to: "cancel-converge",
+      target_id: activeTurnId,
+    });
   });
 
   test("plan/30: user_message with an image → sendUserMessage gets ImageContent+TextContent; echo carries images", async () => {
@@ -1560,11 +1680,12 @@ describe("multi-channel broadcast (W2D)", () => {
       type: "compaction", summary: "compacted 10 turns", tokens_before: 12345,
     });
 
-    // (3) working=false via room_meta_update
+    // (3) working=false via room_meta_update and the reducer-owned projection.
     const ctrls = relayRef.current!.sendControl.mock.calls.slice(ctrlBefore)
       .map((c) => c[0] as { type: string; meta?: { working?: boolean } })
       .filter((f) => f.type === "room_meta_update");
     expect(ctrls.some((f) => f.meta?.working === false)).toBe(true);
+    expectTurnProjectionConvergedIdle();
 
     // (2) a compaction marker landed in _messageBuffer (survives session_sync)
     const buf = _getMessageBufferForTest() as Array<{ role?: string; content?: unknown; tokensBefore?: number }>;
@@ -1832,6 +1953,7 @@ describe("user_input mirroring", () => {
       .map((c) => c[0] as { type: string; meta?: { working?: boolean } })
       .filter((f) => f.type === "room_meta_update");
     expect(workingUpdates.some((f) => f.meta?.working === false)).toBe(true);
+    expectTurnProjectionConvergedIdle();
   });
 });
 
@@ -3085,6 +3207,38 @@ describe("session_shutdown teardown", () => {
     // the re-evaluated instance starts from a clean slate (one connection).
     expect(relay.close).toHaveBeenCalled();
     expect(_getState()).toBe("idle");
+  });
+
+  test("session_shutdown during an active turn clears working, cancel target, late attach, and queued state", async () => {
+    await _pairForTest("owner-shutdown-converge");
+    const sessionId = currentSessionIdFromSends();
+    const onTurnStart = captureEventHandler("turn_start");
+    onTurnStart({ type: "turn_start", turnIndex: 0, timestamp: 0 });
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "owner-shutdown-converge",
+      ct: Buffer.from(JSON.stringify({
+        type: "queued_message_set", id: "queued-shutdown", session_id: sessionId, text: "should clear",
+      })).toString("base64"),
+    }));
+    await new Promise<void>((r) => setImmediate(r));
+    expect(_getTurnProjectionForTest()).toMatchObject({
+      working: true,
+      activeTurnId: expect.any(String),
+      queuedMessage: { id: "queued-shutdown", text: "should clear" },
+    });
+
+    const shutdown = captureEventHandler("session_shutdown");
+    await shutdown({ type: "session_shutdown", reason: "resume" });
+
+    expect(_getTurnProjectionForTest()).toMatchObject({
+      phase: "idle",
+      working: false,
+      activeTurnId: null,
+      cancelTargetId: null,
+      awaitingSyncTurnId: null,
+      queuedMessage: null,
+      lateAttachSyncTargets: [],
+    });
   });
 
   test("firing session_shutdown while idle is a no-op (no throw)", async () => {

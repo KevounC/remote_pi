@@ -548,6 +548,11 @@ export function _getCurrentTurnIdForTest(): string | null {
   return _turnProjection().activeTurnId;
 }
 
+/** Test-only: inspect the reducer-owned turn projection without exposing internals. */
+export function _getTurnProjectionForTest(): TurnProjection {
+  return _turnProjection();
+}
+
 /** Test-only: override the bound AgentSession so a spy can capture the
  *  content handed to `sendUserMessage` (plan/30 multimodal ingest). */
 export function _setPiForTest(pi: unknown): void {
@@ -3495,6 +3500,7 @@ export function _routeClientMessageFrom(
         }));
         return;
       }
+      _applyTurnAndPublish({ type: "cancelled", turnId: msg.target_id });
       sender.send(_withCurrentSession({ type: "cancelled", in_reply_to: msg.id, target_id: msg.target_id }));
     } catch (err) {
       sender.send(_withCurrentSession({
