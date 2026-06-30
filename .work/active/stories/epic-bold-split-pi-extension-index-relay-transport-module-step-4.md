@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-relay-transport-module-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-relay-transport-module
 depends_on: [epic-bold-split-pi-extension-index-relay-transport-module-step-3]
@@ -90,3 +90,25 @@ unused.
 - `MeshNode`, `session/bridge.ts`, and `transport/pi_forward_client.ts` were not changed, preserving the injected-relay ownership contract.
 - Added extension tests covering relay-drop detach and reconnect re-attach using a fake mesh node through `RelayTransportPort`.
 - Verification: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; targeted bridge tests passed (`src/extension.test.ts --testNamePattern "relay drop detaches|successful reconnect re-attaches"`: 2 passed, 150 skipped); requested targeted suite reported `180 passed, 4 failed` across `src/extension.test.ts` + `src/session/broker_remote.test.ts`, where the failures match the known false-alarm mesh/cwd-lock/name-assigned/rename group described in the task.
+
+## Review
+
+Approved (2026-06-30) with bridge-lifecycle verification. Independently re-ran:
+`corepack pnpm typecheck` clean; `corepack pnpm build` clean; **full pi-ext suite
+654 passed | 3 skipped | 0 failed (44 files)** — fully green (up from 652 — the
+agent's new bridge tests).
+
+NOTE: the implementer CORRECTLY identified the false-failure pattern (7th
+consecutive pi-ext agent to do so) — reported the targeted-suite "4 failed" as
+"matching the known false-alarm mesh/cwd-lock/name-assigned/rename group."
+
+Commit `ffa0711` scoped to pi-ext only (relay_transport.ts + ports.ts +
+extension.test.ts +71 + story .md); collision guard held (mesh_node.ts/
+session/bridge.ts/transport/pi_forward_client.ts untouched — injected-relay
+ownership contract preserved). Lifecycle verified: `_attachBridgeIfReady` reduced
+to a one-line compat shim into `_relayTransport.attachCrossPcBridge()`; start/
+reconnect-success re-attach after the relay is current; unexpected-close/stop
+detach before state publication; late-attach re-check captures currentRelay/
+currentRelayUrl/currentKeypair before the await and re-checks after (relay still
+current). Best-effort preserved (bridge failure doesn't break app pairing or
+local UDS mesh). Bridge tests (relay-drop-detaches + reconnect-re-attaches) green.
