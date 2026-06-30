@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-workspace-document-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-workspace-document
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document-step-3]
@@ -82,3 +82,16 @@ Reintroduce `_trees` and `_focused`, restore `_restoreProject`, `_restoreSession
 - Restored persisted layouts through `WorkspaceDocument.fromPersistedJson`, realized typed `WorkspaceTab` descriptors into live sessions, and sanitized unrestorable tabs with `WorkspaceDocument.filterTabs` plus live empty placeholders.
 - Saved layouts by refreshing document tab descriptors from live `PaneItem` projection before delegating to `WorkspaceDocument.toPersistedJson()`.
 - Added ViewModel tests for document round-trip load/save/expose, focus clamping/accessors, and unrestorable viewer filtering.
+
+## Review (2026-06-30, fast-lane)
+
+**Verdict**: Approve — fast-lane advance; orchestrator independently verified.
+
+**Findings**: none above nit level.
+
+**Verification run (orchestrator)**:
+- `git show --stat 7201976` — only owned files: `cockpit_viewmodel.dart`, `workspace_document.dart`, `cockpit_viewmodel_workspace_document_test.dart` + story. No collision with settings-split agents.
+- Confirmed `_trees`/`_focused` replaced by single `_documents: Map<String, WorkspaceDocument>`; `tree(projectId)`/`focusedPaneId(projectId)` delegate to it; `_setDocument` runs `ensureFocusValid()`; `WorkspaceDocument` has `fromPersistedJson`/`ensureFocusValid`/`filterTabs`.
+- `cd cockpit && flutter test test/ui/cockpit_viewmodel_workspace_document_test.dart` (PUB_CACHE, offline) — 3/3 pass (round-trip load/save/expose; invalid-focus clamping; unrestorable-tab drop + live placeholder insertion).
+- `flutter analyze` (whole cockpit, tree fully clean now) — **No issues found\!** (the earlier transient `_focused`/`_trees` errors were this agent's own in-progress refactor, now resolved).
+- Acceptance criteria satisfied: CockpitViewModel loads/saves/exposes workspace documents via the WorkspaceDocument aggregate.

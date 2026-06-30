@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-projection-consumers-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-turn-state-machine-projection-consumers
 depends_on: [epic-bold-turn-state-machine-projection-consumers-step-1]
@@ -120,3 +120,17 @@ Restore the existing `_working` / `_workingReplyTo` stream and `ChatViewModel` O
 - Verification: `HOME=/tmp/pi-dart-home PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache /home/agent/projects/remote_pi/.tools/flutter/bin/flutter pub get` passed; `flutter test test/data/sync/sync_service_test.dart test/data/transport/connection_manager_test.dart` passed; `flutter test test/data/transport/connection_manager_test.dart` passed separately; `flutter analyze` reports only the known unrelated `axisAlignment` deprecation in `lib/ui/chat/widgets/input_bar.dart:802` and exits non-zero because Flutter treats the info as an issue in this environment.
 - Discrepancies from design: `TranscriptTurnStatus` remains as an alias-only compatibility wrapper over `AppTurnStatus` so older transcript tests/callers continue to compile without creating an independent variant source.
 - Adjacent issues parked: none.
+
+## Review (2026-06-30, fast-lane; HIGH-risk convergence core — orchestrator deeply verified)
+
+**Verdict**: Approve — fast-lane advance; orchestrator independently verified the convergence invariant.
+
+**Findings**: none above nit level.
+
+**Verification run (orchestrator)**:
+- `git show --stat f890c8c` — exactly the 7 owned files (session_state.dart, transcript_projection.dart, sync_service.dart, connection_manager.dart, chat_viewmodel.dart + 2 tests). No collision (ws_transport/protocol.g.dart/reachability_adapter untouched).
+- `cd app && flutter test test/data/sync/sync_service_test.dart test/data/transport/connection_manager_test.dart` (PUB_CACHE set) — **55/55 pass**, incl. full `turn projection convergence` group: agent_done, provider error, cancel/abort, send timeout, compaction, session switch, connection loss/reconnect, dispose → ALL project idle.
+- `flutter analyze` — only the known-unrelated `axisAlignment` info; tree fully clean (all in-flight agents committed).
+- Convergence core verified: `ChatViewModel.isWorking`→`_turnProjection.working` (single projection, NO more `roomWorking || _working || _streaming \!= null` OR logic); `cancelTargetId`→`_turnProjection.cancelTargetId`; `AppTurnProjection`/`AppTurnStatus` in pure domain `session_state.dart`; `deriveChatTurnProjection` extends the existing `transcript_projection.dart` seam.
+- `ConnectionManager` room-level projection: `isRoomWorking`/room projection false when room ended / absent from fresh RoomsSnapshot / connection non-online / reconnect hydration reports working:false (per acceptance criteria; covered in connection_manager_test).
+- Acceptance criteria satisfied: sync_service_test passes; targeted ConnectionManager projection tests pass; ChatViewModel derives from one projection; convergence tests cover ALL terminal causes; app domain projection imports no Flutter widgets/storage/WebSocket/BuildContext.

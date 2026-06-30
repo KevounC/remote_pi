@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-settings-split-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-settings-split
 depends_on: [epic-bold-cockpit-workspace-projection-settings-split-step-4]
@@ -99,3 +99,16 @@ Move the schedule panel and cron dialogs/helpers back into `settings_page.dart`,
   - `cd cockpit && PUB_CACHE=~/projects/remote_pi/.pub-cache ~/projects/remote_pi/.tools/flutter/bin/flutter pub get --offline` — passed.
   - `cd cockpit && PUB_CACHE=~/projects/remote_pi/.pub-cache ~/projects/remote_pi/.tools/flutter/bin/flutter test test/settings/schedule_settings_panel_test.dart test/settings/settings_route_shell_test.dart test/settings/daemon_settings_panel_test.dart` — passed (22 tests).
   - `cd cockpit && PUB_CACHE=~/projects/remote_pi/.pub-cache ~/projects/remote_pi/.tools/flutter/bin/flutter analyze` — passed, no issues.
+
+## Review (2026-06-30, fast-lane)
+
+**Verdict**: Approve — fast-lane advance; orchestrator independently verified.
+
+**Findings**: none above nit level.
+
+**Verification run (orchestrator)**:
+- `git show --stat b0bdaff` — only owned files: `schedule_settings_panel.dart` (new), `cron_editor_dialog.dart`/`cron_formatting.dart`/`cron_log_dialog.dart` (new), `settings_category_panel.dart` (new), `settings_page.dart`, + 2 tests. No collision with workspace-document agent.
+- Confirmed `ScheduleSettingsPanel` + `SettingsCategoryPanel` (the one category→panel switch) extracted; `settings_page.dart` is a pure route shell (0 panel/tile/dialog classes — `grep -c` confirms).
+- `cd cockpit && flutter test test/settings/schedule_settings_panel_test.dart test/settings/settings_route_shell_test.dart test/settings/daemon_settings_panel_test.dart` (PUB_CACHE, offline) — 22/22 pass (schedule panel lifecycle incl. cron log dialog mounted-guard-after-unmount; route shell purity; daemon regression).
+- `flutter analyze` — No issues found.
+- Acceptance criteria satisfied: settings_page is route shell only; SettingsCategoryPanel is the only switch; nav metadata derived from settings_category.dart; schedule polling starts/stops with panel; mounted guards preserved; no settings file imports WorkspaceDocument/WorkspaceLayoutStore/PaneNode/session classes.
