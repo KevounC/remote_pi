@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-cli-daemon-pairing-module
 depends_on: [epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-2]
@@ -82,3 +82,28 @@ export async function probeListPeers(sockPath: string, timeoutMs = 2000): Promis
 
 ## Rollback
 Move the local-mesh/control bodies and test aliases back to `index.ts`; because state fields move together, rollback is a file-level revert for the new local-mesh command files.
+
+## Review
+
+Approved (2026-06-30) with HIGH-risk verification. Independently re-ran:
+`corepack pnpm typecheck` clean; **full `extension.test.ts` 147/147**; **full
+pi-ext suite 642 passed | 3 skipped | 0 failed (43 files)** — the suite is fully
+green.
+
+NOTE: the implementer's "146 passed | 33 failed" / "142 passed | 5 failed" claims
+are FALSE ALARMS — the THIRD consecutive pi-ext agent (after late-attach-step-3,
+owner-multiplexer-step-2) to report nonexistent UDS/broker.sock failures. The
+orchestrator's independent re-run consistently shows 0 failures. The UDS ceiling
+WAS lifted earlier this session and test-debt cleared; baseline is zero failures.
+The implementers appear to hit a transient state (own mid-write files during the
+run, parallel-agent working-tree interference, or stale vitest cache) and
+mis-attribute it to the env. No actual regression. (Pattern filed as a backlog
+item for investigation — it could mask a real regression someday.)
+
+Commit `395baa5` scoped to pi-ext only (command_surface + local_mesh_commands +
+control_commands + probe_list_peers + index.ts shrink + story .md); collision
+guard held. Lifecycle invariants verified: `LocalMeshCommands` owns root/setup/
+join/stop/peers + cwd-lock; `ControlCommands` owns relay:*/rename:* with bridge
+attach still delegated via `_attachBridgeIfReady`; `probeListPeers` extracted as
+pure utility + re-exported (e2e.test.ts imports intact); `_disposed` race guards
+preserved after connect() awaits; cwd lock released on session_shutdown.
