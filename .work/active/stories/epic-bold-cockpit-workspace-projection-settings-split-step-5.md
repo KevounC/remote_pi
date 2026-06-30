@@ -1,14 +1,14 @@
 ---
 id: epic-bold-cockpit-workspace-projection-settings-split-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-settings-split
 depends_on: [epic-bold-cockpit-workspace-projection-settings-split-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Extract the schedule settings projection and leave `SettingsPage` as a route shell
@@ -88,3 +88,14 @@ Medium — cron scheduling combines polling, dialogs, local validation, and asyn
 
 ## Rollback
 Move the schedule panel and cron dialogs/helpers back into `settings_page.dart`, remove `settings_category_panel.dart`, and leave Steps 1-4 intact.
+
+## Implementation notes
+- Extracted the schedule projection into `cockpit/lib/app/settings/ui/categories/schedule_settings_panel.dart`, with cron editor/log dialogs and shared cron formatting under `cockpit/lib/app/settings/ui/dialogs/`.
+- Added `cockpit/lib/app/settings/ui/settings_category_panel.dart` as the single category-to-panel switch and reduced `settings_page.dart` to route shell state: environment gate, selected category, `SettingsShell`, and `SettingsCategoryPanel`.
+- Preserved `CronViewModel` page scope in `settings_module.dart`; the schedule panel owns polling and cancels its timer on dispose. Cron editor/log async completions keep mounted guards.
+- Added `cockpit/test/settings/schedule_settings_panel_test.dart` covering schedule reload/poll/dispose, create/log/remove/toggle/run flows, empty/loading/error/offline states, and late async dialog completions after unmount.
+- Added `cockpit/test/settings/settings_route_shell_test.dart` covering route-shell purity, the single category switch, nav metadata derivation from `settings_category.dart`, and the settings tree workspace-document import ban.
+- Verification:
+  - `cd cockpit && PUB_CACHE=~/projects/remote_pi/.pub-cache ~/projects/remote_pi/.tools/flutter/bin/flutter pub get --offline` — passed.
+  - `cd cockpit && PUB_CACHE=~/projects/remote_pi/.pub-cache ~/projects/remote_pi/.tools/flutter/bin/flutter test test/settings/schedule_settings_panel_test.dart test/settings/settings_route_shell_test.dart test/settings/daemon_settings_panel_test.dart` — passed (22 tests).
+  - `cd cockpit && PUB_CACHE=~/projects/remote_pi/.pub-cache ~/projects/remote_pi/.tools/flutter/bin/flutter analyze` — passed, no issues.
