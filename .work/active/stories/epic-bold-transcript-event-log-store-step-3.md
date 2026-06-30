@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-store-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-transcript-event-log-store
 depends_on: [epic-bold-transcript-event-log-store-step-2]
@@ -91,3 +91,23 @@ pi.on("message_end", (event) => {
 ## Rollback
 
 Restore `_messageBuffer` and `_mapAgentMessagesToEvents` as the `session_history` source. The app Hive event store can remain unused while extension rollback is applied.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran (clean state): `corepack pnpm typecheck`
+clean; `corepack pnpm build` clean; **full pi-ext suite 665 passed | 3 skipped |
+0 failed (44 files)** — fully green (up from 664 — the agent's new transcript-event
+dedupe + session-scoping tests). The 4 failures the agent reported are genuinely the
+environment-flake false-alarm signature — confirmed by clean orchestrator re-run
+(0 failures). The agent CORRECTLY classified them by reading the actual test names.
+
+Migration verified (2× consistent): `_messageBuffer` removed from index.ts (grep
+count 0) — replaced by `TranscriptEventLog` (process-local typed append-only log
+with event-id dedupe + session-scoped reads) owned by `SdkSessionProjection`;
+`_messageBuffer` remains only as a legacy SDK-message test/compat adapter that
+populates transcript events. `session_sync` wire shape + projection behavior preserved
+(limit/truncation, image replay, compaction replay, tool result stringification,
+late-attach sync, reconnect preservation, session-replacement reset — 24 transcript/
+session_sync tests pass). Old-session events do not replay into current session.
+Commit `46af73f` scoped to pi-ext only (extension.test.ts +50 + index.ts +
+sdk_session_projection.ts); collision guard held.
