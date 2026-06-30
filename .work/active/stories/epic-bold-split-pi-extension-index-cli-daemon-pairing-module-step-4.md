@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-cli-daemon-pairing-module
 depends_on: [epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-3]
@@ -85,3 +85,27 @@ const channel = deps.owners.attach({
 
 ## Rollback
 Move the relay/pairing command bodies and private state back to `index.ts`, then restore direct `_attachOwner` / `_routeClientMessageFrom` calls. Storage and QR helper modules are not changed by this step, so persisted data rollback is not needed.
+
+## Review
+
+Approved (2026-06-30) with HIGH-risk lifecycle-ownership verification. Independently
+re-ran: `corepack pnpm typecheck` clean; `corepack pnpm build` clean;
+`vitest run src/extension.test.ts -t "pair|relay|qr|list|revoke|setup"` → 64/65
+(the 1 "failure" is the known false-alarm `rename:<name>`/mesh name-assigned
+signature, correctly identified by the agent); **full pi-ext suite 648 passed |
+3 skipped | 0 failed (44 files)** — fully green.
+
+NOTE: the implementer CORRECTLY identified the false-failure pattern (2nd
+consecutive pi-ext agent to do so after the enhanced briefing) — reported the
+remaining "failure" as the known false-alarm signature rather than chasing it.
+The orchestrator's independent vitest run confirms 0 failures. The enhanced
+briefing is now reliably working.
+
+Commit `3e1eccf` scoped to pi-ext only (pairing_coordinator.ts new 589 lines +
+pairing_commands + relay_commands + index.ts shrunk ~500 lines + test + story
+.md); collision guard held. Lifecycle-ownership verified: `PairingCoordinator`
+owns cachedEd25519/stopAutoListener/selfRevoke as private fields + their teardown;
+bridge attach stays delegated through the existing mesh boundary; pair/reconnect/
+unknown-peer/pair_ok/QR/list/revoke behavior preserved through owner/session
+ports rather than direct index-owned peer mutation. Test hygiene improvement
+(reset relay mock connect state in focused groups) is a sound fix.
