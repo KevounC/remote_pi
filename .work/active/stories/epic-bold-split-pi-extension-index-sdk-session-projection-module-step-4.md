@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-sdk-session-projection-module-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-sdk-session-projection-module
 depends_on: [epic-bold-split-pi-extension-index-sdk-session-projection-module-step-3, epic-bold-turn-state-machine-algebraic-state-step-1]
@@ -82,3 +82,23 @@ Move turn/queue/late-attach fields and helper functions back into `index.ts`; ke
 - False-alarm observation: the four `extension.test.ts` failures match the documented environment/cwd-lock false-failure bucket, not the real turn/working/listener-count bucket: `after a clean reset, connect works again (flag is per-instance, not sticky)`, `join emits remote-pi:name-assigned with requested + assigned + changed`, `rename:<name> renames live (broker re-register + relay swap), process/session survive`, and `a second same-name agent joins as <name>#2 instead of being refused`.
 - Discrepancies from design: hook bodies remain in `index.ts` for this step, but all moved mutable turn/queue/late-attach state is projection-owned and reducer-backed.
 - Adjacent issues parked: none.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran (clean state): `corepack pnpm typecheck`
+clean; `corepack pnpm build` clean; `corepack pnpm exec vitest run src/session/
+turn_state.test.ts` → 16 passed; **full pi-ext suite 660 passed | 3 skipped |
+0 failed (44 files)** — fully green. The 4 failures the agent reported are genuinely
+the environment-flake false-alarm signature (`after a clean reset`, `name-assigned`,
+`rename:<name>`, same-name `#2`) — confirmed by clean orchestrator re-run (0 failures).
+The agent CORRECTLY classified them by reading the actual test names (all 4 are the
+mesh/cwd-lock environment bucket, not behavior assertions).
+
+Migration verified: the 5 globals (`_currentTurnId`/`_turnActive`/
+`_finishedTurnIdAwaitingSync`/`_peersAttachedDuringTurn`/`_queuedMessage`) removed
+from index.ts (grep count 0) — now projection-owned reducer-backed snapshot.
+Working:false convergence preserved for all 7 required paths (success, provider
+error, cancel/abort, compaction, session replacement/shutdown, relay reconnect,
+late-attach recovery) — 33 convergence-related extension tests pass (2× consistent).
+Commit `fbed734` scoped to pi-ext only (sdk_session_projection.ts +110 +
+index.ts -62); collision guard held.
