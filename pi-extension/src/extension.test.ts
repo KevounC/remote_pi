@@ -2859,6 +2859,8 @@ describe("session sync", () => {
     _savedRelayUrl = null;
     _tokenStatus = "ok";
     relayRef.current = null;
+    relayInstances.length = 0;
+    _defaultConnectImpl = async () => undefined;
     const qr = await import("./pairing/qr.js");
     (qr.qrSession.consumeToken as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       (token: string) => {
@@ -3189,6 +3191,8 @@ describe("bye on teardown", () => {
     _savedRelayUrl = null;
     _tokenStatus = "ok";
     relayRef.current = null;
+    relayInstances.length = 0;
+    _defaultConnectImpl = async () => undefined;
     const qr = await import("./pairing/qr.js");
     (qr.qrSession.consumeToken as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       (token: string) => {
@@ -3517,6 +3521,7 @@ describe("remote-pi:name-assigned event", () => {
     relayInstances.length = 0;
     _defaultConnectImpl = async () => undefined;
     _setDisposedForTest(false);
+    _resetCwdLockForTest();
     const stop = captureHandler("remote-pi stop");
     await stop("", makeMockCtx());
   });
@@ -3584,6 +3589,7 @@ describe("relay control channel + relay-state event", () => {
     relayInstances.length = 0;
     _defaultConnectImpl = async () => undefined;
     _setDisposedForTest(false);
+    _resetCwdLockForTest();
     const stop = captureHandler("remote-pi stop");
     await stop("", makeMockCtx());
   });

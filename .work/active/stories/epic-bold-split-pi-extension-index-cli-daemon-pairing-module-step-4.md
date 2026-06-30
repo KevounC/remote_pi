@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-cli-daemon-pairing-module
 depends_on: [epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Move relay-facing command handlers and QR pairing coordinator behind owner/session ports
@@ -70,6 +70,18 @@ const channel = deps.owners.attach({
 - [ ] Pair request success/error/reconnect tests still pass, including `pair_ok` fields `session_name`, `session_started_at`, `session_id`, `room_id`, `harness`, and `hostname`.
 - [ ] The module delegates owner channel attachment/routing through owner/session ports or legacy owner/session adapters.
 - [ ] `corepack pnpm typecheck` and `corepack pnpm test -- src/extension.test.ts src/pairing/qr.test.ts src/pairing/storage.test.ts` pass.
+
+## Implementation
+
+- Extracted relay-facing start/list/revoke/pair behavior into `PairingCoordinator`, with `PairingCommands` and `RelayCommands` as thin command adapters.
+- Moved cached Pi Ed25519 identity, relay auto-listener teardown, and `SelfRevoke` poller ownership out of `index.ts`; `index.ts` now delegates lifecycle through coordinator methods while bridge attach remains delegated through the existing mesh boundary.
+- Pair request, known-peer reconnect, unknown-peer errors, `pair_ok` session/room metadata, QR token issuance, device listing, and revoke bye behavior are preserved through owner/session ports rather than direct index-owned peer mutation.
+- Test hygiene: reset relay mock connect state in focused extension-test groups so a selected `RoomAlreadyOpenError` test cannot poison later pairing/bye tests.
+- Verification:
+  - `corepack pnpm typecheck`: pass (`tsc --noEmit`).
+  - `corepack pnpm build`: pass (`tsc`).
+  - `corepack pnpm exec vitest run src/pairing/qr.test.ts src/pairing/storage.test.ts src/transport/relay_client.test.ts`: 3 files, 31 passed.
+  - `corepack pnpm exec vitest run src/extension.test.ts -t "pair|relay|qr|list|revoke|setup"`: 64 passed, 83 skipped, 1 failed. The remaining failure is the known false-alarm signature: `relay control channel + relay-state event > rename:<name>...` / mesh name-assigned/cwd-lock class; pairing/relay/QR/list/revoke assertions passed.
 
 ## Rollback
 Move the relay/pairing command bodies and private state back to `index.ts`, then restore direct `_attachOwner` / `_routeClientMessageFrom` calls. Storage and QR helper modules are not changed by this step, so persisted data rollback is not needed.
