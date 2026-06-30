@@ -124,6 +124,72 @@ final class WireModel {
       Object.hash(id, provider, name, reasoning, contextWindow, vision);
 }
 
+final class Usage {
+  const Usage({required this.inputTokens, required this.outputTokens});
+
+  final int inputTokens;
+  final int outputTokens;
+
+  factory Usage.fromJson(Map<String, dynamic> json) => Usage(
+        inputTokens: (json['input_tokens'] as num).toInt(),
+        outputTokens: (json['output_tokens'] as num).toInt(),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'input_tokens': inputTokens,
+        'output_tokens': outputTokens,
+      };
+}
+
+final class PiHarness {
+  const PiHarness({required this.name, required this.version});
+
+  final String name;
+  final String version;
+
+  factory PiHarness.fromJson(Map<String, dynamic> json) => PiHarness(
+        name: (json['name'] as String?) ?? 'Pi coding agent',
+        version: (json['version'] as String?) ?? '—',
+      );
+
+  Map<String, dynamic> toJson() => {'name': name, 'version': version};
+}
+
+enum ByeReason {
+  peerStop('peer_stop'),
+  sessionReplaced('session_replaced'),
+  shutdown('shutdown'),
+  unknown('');
+
+  const ByeReason(this.wire);
+  final String wire;
+
+  static ByeReason fromWire(String raw) => switch (raw) {
+        'peer_stop' => ByeReason.peerStop,
+        'session_replaced' => ByeReason.sessionReplaced,
+        'shutdown' => ByeReason.shutdown,
+        _ => ByeReason.unknown,
+      };
+}
+
+String _sessionIdFromJson(Map<String, dynamic> json) {
+  final sessionId = json['session_id'];
+  if (sessionId is String && sessionId.isNotEmpty) return sessionId;
+  throw const FormatException('missing required field session_id');
+}
+
+String _optionalSessionIdFromJson(Map<String, dynamic> json) {
+  final sessionId = json['session_id'];
+  return sessionId is String ? sessionId : '';
+}
+
+WireImage? _firstImage(dynamic raw) {
+  if (raw is! List || raw.isEmpty) return null;
+  final first = raw.first;
+  if (first is! Map) return null;
+  return WireImage.fromJson(first.cast<String, dynamic>());
+}
+
 class UnsupportedTypeException implements Exception {
   const UnsupportedTypeException(this.type);
 
@@ -496,4 +562,836 @@ final class ListModels extends ClientMessage {
         'id': id,
         'session_id': sessionId,
       };
+}
+
+const Set<String> generatedServerMessageTypes = {
+  'pair_ok',
+  'pair_error',
+  'user_input',
+  'user_message',
+  'queued_message_state',
+  'agent_chunk',
+  'agent_done',
+  'agent_message',
+  'compaction',
+  'tool_request',
+  'tool_result',
+  'error',
+  'cancelled',
+  'pong',
+  'bye',
+  'session_history',
+  'action_ok',
+  'action_error',
+  'models_list',
+};
+
+sealed class ServerMessage {
+  const ServerMessage();
+  String get type;
+
+  static ServerMessage fromJson(Map<String, dynamic> json) {
+    final type = json['type'] as String?;
+    return switch (type) {
+      'pair_ok' => PairOk.fromJson(json),
+      'pair_error' => PairError.fromJson(json),
+      'user_input' => UserInput.fromJson(json),
+      'user_message' => UserInput.fromJson(json),
+      'queued_message_state' => QueuedMessageState.fromJson(json),
+      'agent_chunk' => AgentChunk.fromJson(json),
+      'agent_done' => AgentDone.fromJson(json),
+      'agent_message' => AgentMessage.fromJson(json),
+      'compaction' => Compaction.fromJson(json),
+      'tool_request' => ToolRequest.fromJson(json),
+      'tool_result' => ToolResult.fromJson(json),
+      'error' => ErrorMessage.fromJson(json),
+      'cancelled' => Cancelled.fromJson(json),
+      'pong' => Pong.fromJson(json),
+      'bye' => Bye.fromJson(json),
+      'session_history' => SessionHistory.fromJson(json),
+      'action_ok' => ActionOk.fromJson(json),
+      'action_error' => ActionError.fromJson(json),
+      'models_list' => ModelsList.fromJson(json),
+      final unknown => throw UnsupportedTypeException(unknown ?? ''),
+    };
+  }
+
+  Map<String, dynamic> toJson();
+}
+
+final class PairOk extends ServerMessage {
+  const PairOk({required this.inReplyTo, required this.sessionName, required this.sessionStartedAt, required this.roomId, required this.sessionId, this.harness, this.hostname});
+
+  @override
+  String get type => 'pair_ok';
+
+  final String inReplyTo;
+  final String sessionName;
+  final int sessionStartedAt;
+  final String roomId;
+  final String sessionId;
+  final PiHarness? harness;
+  final String? hostname;
+
+  factory PairOk.fromJson(Map<String, dynamic> json) => PairOk(
+        inReplyTo: json['in_reply_to'] as String,
+        sessionName: json['session_name'] as String,
+        sessionStartedAt: (json['session_started_at'] as num?)?.toInt() ?? 0,
+        roomId: (json['room_id'] as String?) ?? 'main',
+        sessionId: _optionalSessionIdFromJson(json),
+        harness: json['harness'] is Map ? PiHarness.fromJson(json['harness'].cast<String, dynamic>()) : null,
+        hostname: json['hostname'] is String && json['hostname'].isNotEmpty ? json['hostname'] : null,
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'in_reply_to': inReplyTo,
+        'session_name': sessionName,
+        'session_started_at': sessionStartedAt,
+        'room_id': roomId,
+        'session_id': sessionId,
+        if (harness case final harness?)
+          'harness': harness.toJson(),
+        if (hostname case final hostname?)
+          'hostname': hostname,
+      };
+}
+
+final class PairError extends ServerMessage {
+  const PairError({required this.inReplyTo, required this.code, required this.message});
+
+  @override
+  String get type => 'pair_error';
+
+  final String inReplyTo;
+  final String code;
+  final String message;
+
+  factory PairError.fromJson(Map<String, dynamic> json) => PairError(
+        inReplyTo: json['in_reply_to'] as String,
+        code: json['code'] as String,
+        message: json['message'] as String,
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'in_reply_to': inReplyTo,
+        'code': code,
+        'message': message,
+      };
+}
+
+final class UserInput extends ServerMessage {
+  const UserInput({required this.id, required this.sessionId, required this.text, this.streamingBehavior, this.image});
+
+  @override
+  String get type => 'user_input';
+
+  final String id;
+  final String sessionId;
+  final String text;
+  final UserMessageStreamingBehavior? streamingBehavior;
+  final WireImage? image;
+
+  factory UserInput.fromJson(Map<String, dynamic> json) => UserInput(
+        id: json['id'] as String,
+        sessionId: _sessionIdFromJson(json),
+        text: json['text'] as String,
+        streamingBehavior: UserMessageStreamingBehavior.fromWire(json['streaming_behavior'] as String?),
+        image: _firstImage(json['images']),
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'id': id,
+        'session_id': sessionId,
+        'text': text,
+        if (streamingBehavior case final streamingBehavior?)
+          'streaming_behavior': streamingBehavior.wireValue,
+        if (image case final image?)
+          'images': [image.toJson()],
+      };
+}
+
+final class QueuedMessageState extends ServerMessage {
+  const QueuedMessageState({required this.sessionId, this.id, this.text});
+
+  @override
+  String get type => 'queued_message_state';
+
+  final String sessionId;
+  final String? id;
+  final String? text;
+
+  factory QueuedMessageState.fromJson(Map<String, dynamic> json) => QueuedMessageState(
+        sessionId: _sessionIdFromJson(json),
+        id: json['id'] as String?,
+        text: json['text'] as String?,
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'session_id': sessionId,
+        if (id case final id?)
+          'id': id,
+        if (text case final text?)
+          'text': text,
+      };
+}
+
+final class AgentChunk extends ServerMessage {
+  const AgentChunk({required this.sessionId, required this.inReplyTo, required this.delta});
+
+  @override
+  String get type => 'agent_chunk';
+
+  final String sessionId;
+  final String inReplyTo;
+  final String delta;
+
+  factory AgentChunk.fromJson(Map<String, dynamic> json) => AgentChunk(
+        sessionId: _sessionIdFromJson(json),
+        inReplyTo: json['in_reply_to'] as String,
+        delta: json['delta'] as String,
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'session_id': sessionId,
+        'in_reply_to': inReplyTo,
+        'delta': delta,
+      };
+}
+
+final class AgentDone extends ServerMessage {
+  const AgentDone({required this.sessionId, required this.inReplyTo, this.usage});
+
+  @override
+  String get type => 'agent_done';
+
+  final String sessionId;
+  final String inReplyTo;
+  final Usage? usage;
+
+  factory AgentDone.fromJson(Map<String, dynamic> json) => AgentDone(
+        sessionId: _sessionIdFromJson(json),
+        inReplyTo: json['in_reply_to'] as String,
+        usage: json['usage'] == null ? null : Usage.fromJson((json['usage'] as Map).cast<String, dynamic>()),
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'session_id': sessionId,
+        'in_reply_to': inReplyTo,
+        if (usage case final usage?)
+          'usage': usage.toJson(),
+      };
+}
+
+final class AgentMessage extends ServerMessage {
+  const AgentMessage({required this.sessionId, required this.inReplyTo, required this.text, this.usage});
+
+  @override
+  String get type => 'agent_message';
+
+  final String sessionId;
+  final String inReplyTo;
+  final String text;
+  final Usage? usage;
+
+  factory AgentMessage.fromJson(Map<String, dynamic> json) => AgentMessage(
+        sessionId: _sessionIdFromJson(json),
+        inReplyTo: json['in_reply_to'] as String,
+        text: json['text'] as String,
+        usage: json['usage'] == null ? null : Usage.fromJson((json['usage'] as Map).cast<String, dynamic>()),
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'session_id': sessionId,
+        'in_reply_to': inReplyTo,
+        'text': text,
+        if (usage case final usage?)
+          'usage': usage.toJson(),
+      };
+}
+
+final class Compaction extends ServerMessage {
+  const Compaction({required this.sessionId, required this.summary, this.tokensBefore, this.ts});
+
+  @override
+  String get type => 'compaction';
+
+  final String sessionId;
+  final String summary;
+  final int? tokensBefore;
+  final int? ts;
+
+  factory Compaction.fromJson(Map<String, dynamic> json) => Compaction(
+        sessionId: _sessionIdFromJson(json),
+        summary: (json['summary'] as String?) ?? '',
+        tokensBefore: (json['tokens_before'] as num?)?.toInt(),
+        ts: (json['ts'] as num?)?.toInt(),
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'session_id': sessionId,
+        'summary': summary,
+        if (tokensBefore case final tokensBefore?)
+          'tokens_before': tokensBefore,
+        if (ts case final ts?)
+          'ts': ts,
+      };
+}
+
+final class ToolRequest extends ServerMessage {
+  const ToolRequest({required this.sessionId, required this.toolCallId, required this.tool, required this.args});
+
+  @override
+  String get type => 'tool_request';
+
+  final String sessionId;
+  final String toolCallId;
+  final String tool;
+  final dynamic args;
+
+  factory ToolRequest.fromJson(Map<String, dynamic> json) => ToolRequest(
+        sessionId: _sessionIdFromJson(json),
+        toolCallId: json['tool_call_id'] as String,
+        tool: json['tool'] as String,
+        args: json['args'],
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'session_id': sessionId,
+        'tool_call_id': toolCallId,
+        'tool': tool,
+        'args': args,
+      };
+}
+
+final class ToolResult extends ServerMessage {
+  const ToolResult({required this.sessionId, required this.toolCallId, this.result, this.error});
+
+  @override
+  String get type => 'tool_result';
+
+  final String sessionId;
+  final String toolCallId;
+  final dynamic result;
+  final String? error;
+
+  factory ToolResult.fromJson(Map<String, dynamic> json) => ToolResult(
+        sessionId: _sessionIdFromJson(json),
+        toolCallId: json['tool_call_id'] as String,
+        result: json['result'],
+        error: json['error'] as String?,
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'session_id': sessionId,
+        'tool_call_id': toolCallId,
+        if (result case final result?)
+          'result': result,
+        if (error case final error?)
+          'error': error,
+      };
+}
+
+final class ErrorMessage extends ServerMessage {
+  const ErrorMessage({required this.sessionId, this.inReplyTo, required this.code, required this.message});
+
+  @override
+  String get type => 'error';
+
+  final String sessionId;
+  final String? inReplyTo;
+  final String code;
+  final String message;
+
+  factory ErrorMessage.fromJson(Map<String, dynamic> json) => ErrorMessage(
+        sessionId: _sessionIdFromJson(json),
+        inReplyTo: json['in_reply_to'] as String?,
+        code: json['code'] as String,
+        message: json['message'] as String,
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'session_id': sessionId,
+        if (inReplyTo case final inReplyTo?)
+          'in_reply_to': inReplyTo,
+        'code': code,
+        'message': message,
+      };
+}
+
+final class Cancelled extends ServerMessage {
+  const Cancelled({required this.sessionId, required this.inReplyTo, required this.targetId});
+
+  @override
+  String get type => 'cancelled';
+
+  final String sessionId;
+  final String inReplyTo;
+  final String targetId;
+
+  factory Cancelled.fromJson(Map<String, dynamic> json) => Cancelled(
+        sessionId: _sessionIdFromJson(json),
+        inReplyTo: json['in_reply_to'] as String,
+        targetId: json['target_id'] as String,
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'session_id': sessionId,
+        'in_reply_to': inReplyTo,
+        'target_id': targetId,
+      };
+}
+
+final class Pong extends ServerMessage {
+  const Pong({required this.inReplyTo});
+
+  @override
+  String get type => 'pong';
+
+  final String inReplyTo;
+
+  factory Pong.fromJson(Map<String, dynamic> json) => Pong(
+        inReplyTo: json['in_reply_to'] as String,
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'in_reply_to': inReplyTo,
+      };
+}
+
+final class Bye extends ServerMessage {
+  const Bye({required this.reason, required this.rawReason});
+
+  @override
+  String get type => 'bye';
+
+  final ByeReason reason;
+  final String rawReason;
+
+  factory Bye.fromJson(Map<String, dynamic> json) => Bye(
+        reason: ByeReason.fromWire((json['reason'] as String?) ?? ''),
+        rawReason: (json['reason'] as String?) ?? '',
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'reason': reason.wire,
+      };
+}
+
+final class SessionHistory extends ServerMessage {
+  const SessionHistory({required this.sessionId, required this.inReplyTo, required this.sessionStartedAt, required this.events, required this.eos, required this.truncated});
+
+  @override
+  String get type => 'session_history';
+
+  final String sessionId;
+  final String inReplyTo;
+  final int sessionStartedAt;
+  final List<SessionHistoryEvent> events;
+  final bool eos;
+  final bool truncated;
+
+  factory SessionHistory.fromJson(Map<String, dynamic> json) => SessionHistory(
+        sessionId: _sessionIdFromJson(json),
+        inReplyTo: json['in_reply_to'] as String,
+        sessionStartedAt: (json['session_started_at'] as num).toInt(),
+        events: (json['events'] as List<dynamic>).map((item) => SessionHistoryEvent.fromJson((item as Map).cast<String, dynamic>())).toList(),
+        eos: json['eos'] as bool,
+        truncated: (json['truncated'] as bool?) ?? false,
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'session_id': sessionId,
+        'in_reply_to': inReplyTo,
+        'session_started_at': sessionStartedAt,
+        'events': events.map((event) => event.toJson()).toList(),
+        'eos': eos,
+        'truncated': truncated,
+      };
+}
+
+final class ActionOk extends ServerMessage {
+  const ActionOk({required this.sessionId, required this.inReplyTo, required this.action, required this.rawAction});
+
+  @override
+  String get type => 'action_ok';
+
+  final String sessionId;
+  final String inReplyTo;
+  final ActionName action;
+  final String rawAction;
+
+  factory ActionOk.fromJson(Map<String, dynamic> json) => ActionOk(
+        sessionId: _sessionIdFromJson(json),
+        inReplyTo: json['in_reply_to'] as String,
+        action: ActionName.fromWire((json['action'] as String?) ?? '') ?? ActionName.sessionCompact,
+        rawAction: (json['action'] as String?) ?? '',
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'session_id': sessionId,
+        'in_reply_to': inReplyTo,
+        'action': action.wire,
+      };
+}
+
+final class ActionError extends ServerMessage {
+  const ActionError({required this.sessionId, required this.inReplyTo, required this.action, required this.rawAction, required this.error});
+
+  @override
+  String get type => 'action_error';
+
+  final String sessionId;
+  final String inReplyTo;
+  final ActionName action;
+  final String rawAction;
+  final String error;
+
+  factory ActionError.fromJson(Map<String, dynamic> json) => ActionError(
+        sessionId: _sessionIdFromJson(json),
+        inReplyTo: json['in_reply_to'] as String,
+        action: ActionName.fromWire((json['action'] as String?) ?? '') ?? ActionName.sessionCompact,
+        rawAction: (json['action'] as String?) ?? '',
+        error: (json['error'] as String?) ?? '',
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'session_id': sessionId,
+        'in_reply_to': inReplyTo,
+        'action': action.wire,
+        'error': error,
+      };
+}
+
+final class ModelsList extends ServerMessage {
+  const ModelsList({required this.sessionId, required this.inReplyTo, required this.models, this.current});
+
+  @override
+  String get type => 'models_list';
+
+  final String sessionId;
+  final String inReplyTo;
+  final List<WireModel> models;
+  final WireModel? current;
+
+  factory ModelsList.fromJson(Map<String, dynamic> json) => ModelsList(
+        sessionId: _sessionIdFromJson(json),
+        inReplyTo: json['in_reply_to'] as String,
+        models: (json['models'] as List<dynamic>? ?? const <dynamic>[]).map((item) => WireModel.fromJson((item as Map).cast<String, dynamic>())).toList(),
+        current: json['current'] is Map ? WireModel.fromJson(json['current'].cast<String, dynamic>()) : null,
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'session_id': sessionId,
+        'in_reply_to': inReplyTo,
+        'models': models.map((model) => model.toJson()).toList(),
+        if (current case final current?)
+          'current': current.toJson(),
+      };
+}
+
+typedef GeneratedServerMessageJsonDecoder<T> = T Function(Map<String, dynamic> json);
+
+final class GeneratedServerMessageDecoders<T> {
+  const GeneratedServerMessageDecoders({
+    required this.pairOk,
+    required this.pairError,
+    required this.userInput,
+    required this.queuedMessageState,
+    required this.agentChunk,
+    required this.agentDone,
+    required this.agentMessage,
+    required this.compaction,
+    required this.toolRequest,
+    required this.toolResult,
+    required this.errorMessage,
+    required this.cancelled,
+    required this.pong,
+    required this.bye,
+    required this.sessionHistory,
+    required this.actionOk,
+    required this.actionError,
+    required this.modelsList,
+  });
+
+  final GeneratedServerMessageJsonDecoder<T> pairOk;
+  final GeneratedServerMessageJsonDecoder<T> pairError;
+  final GeneratedServerMessageJsonDecoder<T> userInput;
+  final GeneratedServerMessageJsonDecoder<T> queuedMessageState;
+  final GeneratedServerMessageJsonDecoder<T> agentChunk;
+  final GeneratedServerMessageJsonDecoder<T> agentDone;
+  final GeneratedServerMessageJsonDecoder<T> agentMessage;
+  final GeneratedServerMessageJsonDecoder<T> compaction;
+  final GeneratedServerMessageJsonDecoder<T> toolRequest;
+  final GeneratedServerMessageJsonDecoder<T> toolResult;
+  final GeneratedServerMessageJsonDecoder<T> errorMessage;
+  final GeneratedServerMessageJsonDecoder<T> cancelled;
+  final GeneratedServerMessageJsonDecoder<T> pong;
+  final GeneratedServerMessageJsonDecoder<T> bye;
+  final GeneratedServerMessageJsonDecoder<T> sessionHistory;
+  final GeneratedServerMessageJsonDecoder<T> actionOk;
+  final GeneratedServerMessageJsonDecoder<T> actionError;
+  final GeneratedServerMessageJsonDecoder<T> modelsList;
+}
+
+T decodeGeneratedServerMessage<T>(
+  Map<String, dynamic> json,
+  GeneratedServerMessageDecoders<T> decoders,
+) {
+  final type = json['type'] as String?;
+  return switch (type) {
+    'pair_ok' => decoders.pairOk(json),
+    'pair_error' => decoders.pairError(json),
+    'user_input' => decoders.userInput(json),
+    'user_message' => decoders.userInput(json),
+    'queued_message_state' => decoders.queuedMessageState(json),
+    'agent_chunk' => decoders.agentChunk(json),
+    'agent_done' => decoders.agentDone(json),
+    'agent_message' => decoders.agentMessage(json),
+    'compaction' => decoders.compaction(json),
+    'tool_request' => decoders.toolRequest(json),
+    'tool_result' => decoders.toolResult(json),
+    'error' => decoders.errorMessage(json),
+    'cancelled' => decoders.cancelled(json),
+    'pong' => decoders.pong(json),
+    'bye' => decoders.bye(json),
+    'session_history' => decoders.sessionHistory(json),
+    'action_ok' => decoders.actionOk(json),
+    'action_error' => decoders.actionError(json),
+    'models_list' => decoders.modelsList(json),
+    final unknown => throw UnsupportedTypeException(unknown ?? ''),
+  };
+}
+
+const Set<String> generatedSessionHistoryEventTypes = {
+  'user_input',
+  'tool_request',
+  'tool_result',
+  'agent_message',
+  'compaction',
+};
+
+sealed class SessionHistoryEvent {
+  const SessionHistoryEvent();
+  String get type;
+
+  static SessionHistoryEvent fromJson(Map<String, dynamic> json) {
+    final type = json['type'] as String?;
+    return switch (type) {
+      'user_input' => UserInputEvt.fromJson(json),
+      'tool_request' => ToolRequestEvt.fromJson(json),
+      'tool_result' => ToolResultEvt.fromJson(json),
+      'agent_message' => AgentMessageEvt.fromJson(json),
+      'compaction' => CompactionEvt.fromJson(json),
+      final unknown => throw UnsupportedTypeException(unknown ?? ''),
+    };
+  }
+
+  Map<String, dynamic> toJson();
+}
+
+final class UserInputEvt extends SessionHistoryEvent {
+  const UserInputEvt({required this.ts, required this.id, required this.text, this.image});
+
+  @override
+  String get type => 'user_input';
+
+  final int ts;
+  final String id;
+  final String text;
+  final WireImage? image;
+
+  factory UserInputEvt.fromJson(Map<String, dynamic> json) => UserInputEvt(
+        ts: (json['ts'] as num).toInt(),
+        id: json['id'] as String,
+        text: json['text'] as String,
+        image: _firstImage(json['images']),
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'ts': ts,
+        'id': id,
+        'text': text,
+        if (image case final image?)
+          'images': [image.toJson()],
+      };
+}
+
+final class ToolRequestEvt extends SessionHistoryEvent {
+  const ToolRequestEvt({required this.ts, required this.toolCallId, required this.tool, required this.args});
+
+  @override
+  String get type => 'tool_request';
+
+  final int ts;
+  final String toolCallId;
+  final String tool;
+  final dynamic args;
+
+  factory ToolRequestEvt.fromJson(Map<String, dynamic> json) => ToolRequestEvt(
+        ts: (json['ts'] as num).toInt(),
+        toolCallId: json['tool_call_id'] as String,
+        tool: json['tool'] as String,
+        args: json['args'],
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'ts': ts,
+        'tool_call_id': toolCallId,
+        'tool': tool,
+        'args': args,
+      };
+}
+
+final class ToolResultEvt extends SessionHistoryEvent {
+  const ToolResultEvt({required this.ts, required this.toolCallId, this.result, this.error});
+
+  @override
+  String get type => 'tool_result';
+
+  final int ts;
+  final String toolCallId;
+  final dynamic result;
+  final String? error;
+
+  factory ToolResultEvt.fromJson(Map<String, dynamic> json) => ToolResultEvt(
+        ts: (json['ts'] as num).toInt(),
+        toolCallId: json['tool_call_id'] as String,
+        result: json['result'],
+        error: json['error'] as String?,
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'ts': ts,
+        'tool_call_id': toolCallId,
+        if (result case final result?)
+          'result': result,
+        if (error case final error?)
+          'error': error,
+      };
+}
+
+final class AgentMessageEvt extends SessionHistoryEvent {
+  const AgentMessageEvt({required this.ts, required this.inReplyTo, required this.text});
+
+  @override
+  String get type => 'agent_message';
+
+  final int ts;
+  final String inReplyTo;
+  final String text;
+
+  factory AgentMessageEvt.fromJson(Map<String, dynamic> json) => AgentMessageEvt(
+        ts: (json['ts'] as num).toInt(),
+        inReplyTo: json['in_reply_to'] as String,
+        text: json['text'] as String,
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'ts': ts,
+        'in_reply_to': inReplyTo,
+        'text': text,
+      };
+}
+
+final class CompactionEvt extends SessionHistoryEvent {
+  const CompactionEvt({required this.ts, required this.summary, this.tokensBefore});
+
+  @override
+  String get type => 'compaction';
+
+  final int ts;
+  final String summary;
+  final int? tokensBefore;
+
+  factory CompactionEvt.fromJson(Map<String, dynamic> json) => CompactionEvt(
+        ts: (json['ts'] as num).toInt(),
+        summary: (json['summary'] as String?) ?? '',
+        tokensBefore: (json['tokens_before'] as num?)?.toInt(),
+      );
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'ts': ts,
+        'summary': summary,
+        if (tokensBefore case final tokensBefore?)
+          'tokens_before': tokensBefore,
+      };
+}
+
+typedef GeneratedSessionHistoryEventJsonDecoder<T> = T Function(Map<String, dynamic> json);
+
+final class GeneratedSessionHistoryEventDecoders<T> {
+  const GeneratedSessionHistoryEventDecoders({
+    required this.userInputEvt,
+    required this.toolRequestEvt,
+    required this.toolResultEvt,
+    required this.agentMessageEvt,
+    required this.compactionEvt,
+  });
+
+  final GeneratedSessionHistoryEventJsonDecoder<T> userInputEvt;
+  final GeneratedSessionHistoryEventJsonDecoder<T> toolRequestEvt;
+  final GeneratedSessionHistoryEventJsonDecoder<T> toolResultEvt;
+  final GeneratedSessionHistoryEventJsonDecoder<T> agentMessageEvt;
+  final GeneratedSessionHistoryEventJsonDecoder<T> compactionEvt;
+}
+
+T decodeGeneratedSessionHistoryEvent<T>(
+  Map<String, dynamic> json,
+  GeneratedSessionHistoryEventDecoders<T> decoders,
+) {
+  final type = json['type'] as String?;
+  return switch (type) {
+    'user_input' => decoders.userInputEvt(json),
+    'tool_request' => decoders.toolRequestEvt(json),
+    'tool_result' => decoders.toolResultEvt(json),
+    'agent_message' => decoders.agentMessageEvt(json),
+    'compaction' => decoders.compactionEvt(json),
+    final unknown => throw UnsupportedTypeException(unknown ?? ''),
+  };
 }

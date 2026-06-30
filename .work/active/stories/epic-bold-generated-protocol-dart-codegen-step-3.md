@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen-step-3
 kind: story
-stage: implementing
+stage: review
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: [epic-bold-generated-protocol-dart-codegen-step-2]
 tags: [refactor]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Generate Dart server messages, history events, and decode narrowing
@@ -122,3 +122,14 @@ sealed class ServerMessage {
 ## Rollback
 
 Revert the generated server output and tests. The hand mirror remains the runtime parser until Step 4.
+
+## Implementation notes
+
+- Files changed: `tools/protocol-codegen/bin/protocol-codegen.mjs`, `tools/protocol-codegen/fixtures/app_pi_client_dart_ir.json`, `app/lib/protocol/generated/protocol.g.dart`, `app/lib/protocol/protocol.dart`, `app/test/protocol_codegen/server_messages_codegen_test.dart`, `.orchestration/contracts/fixtures/{action_error,action_ok,compaction,models_list,queued_message_state}.jsonl`.
+- Generator changes: the Dart emitter now supports schema/IR aliases, generated adapter decoders for existing hand DTOs, server/history field codecs, and generated registries for `ServerMessage` and `SessionHistoryEvent`.
+- Runtime narrowing: `ServerMessage.fromJson` and `SessionHistoryEvent.fromJson` now delegate discriminant narrowing to generated schema-derived dispatch while preserving the existing hand DTO classes until the Step 4 facade swap.
+- Tests added: server/message codegen tests prove registry parity, generated server/history variant narrowing, unknown top-level/nested rejection, hand-protocol generated dispatch delegation, and explicit server/client/control fixture classification.
+- Regen-diff confirmation: reran `node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema tools/protocol-codegen/fixtures/app_pi_client_dart_ir.json --out app/lib/protocol/generated/protocol.g.dart`; `git diff --stat -- app/lib/protocol/generated/protocol.g.dart` reported only `app/lib/protocol/generated/protocol.g.dart | 898 +++++++++++++++++++++++++++++` (`1 file changed, 898 insertions(+)`). No hand edits were made to the generated file.
+- Verification: `PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache /home/agent/projects/remote_pi/.tools/flutter/bin/flutter test test/protocol_codegen/` passed; `PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache /home/agent/projects/remote_pi/.tools/flutter/bin/flutter analyze` reported only the known unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802` and exited 1.
+- Discrepancies from design: none.
+- Adjacent issues parked: none.

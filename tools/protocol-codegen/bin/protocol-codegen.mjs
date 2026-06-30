@@ -55,12 +55,34 @@ function dartLiteral(value) {
 
 function jsonReadExpression(field) {
   const access = `json[${dartLiteral(field.wireName)}]`;
+  switch (field.read) {
+    case 'sessionIdRequired':
+      return '_sessionIdFromJson(json)';
+    case 'sessionIdOptional':
+      return '_optionalSessionIdFromJson(json)';
+    case 'firstImage':
+      return `_firstImage(${access})`;
+    case 'actionNameWithFallback':
+      return `ActionName.fromWire((${access} as String?) ?? '') ?? ActionName.sessionCompact`;
+    case 'byeReason':
+      return `ByeReason.fromWire((${access} as String?) ?? '')`;
+    case 'sessionHistoryEvents':
+      return `(${access} as List<dynamic>).map((item) => SessionHistoryEvent.fromJson((item as Map).cast<String, dynamic>())).toList()`;
+    case 'nonEmptyStringOptional':
+      return `${access} is String && ${access}.isNotEmpty ? ${access} : null`;
+    default:
+      break;
+  }
+
   switch (field.dartType) {
     case 'String':
+      if (field.defaultValue !== undefined) return `(${access} as String?) ?? ${dartLiteral(field.defaultValue)}`;
       return field.required ? `${access} as String` : `${access} as String?`;
     case 'bool':
+      if (field.defaultValue !== undefined) return `(${access} as bool?) ?? ${field.defaultValue ? 'true' : 'false'}`;
       return field.required ? `${access} as bool` : `${access} as bool?`;
     case 'int':
+      if (field.defaultValue !== undefined) return `(${access} as num?)?.toInt() ?? ${Number(field.defaultValue)}`;
       return field.required
         ? `(${access} as num).toInt()`
         : `(${access} as num?)?.toInt()`;
@@ -68,6 +90,8 @@ function jsonReadExpression(field) {
       return field.required
         ? `(${access} as num).toDouble()`
         : `(${access} as num?)?.toDouble()`;
+    case 'dynamic':
+      return access;
     case 'Object?':
     case 'Map<String, dynamic>':
       return field.required
@@ -85,22 +109,59 @@ function jsonReadExpression(field) {
       return field.required
         ? `ThinkingLevel.fromWire(${access} as String)!`
         : `(${access} as String?) == null ? null : ThinkingLevel.fromWire(${access} as String)`;
+    case 'Usage':
+      return field.required
+        ? `Usage.fromJson((${access} as Map).cast<String, dynamic>())`
+        : `${access} == null ? null : Usage.fromJson((${access} as Map).cast<String, dynamic>())`;
+    case 'PiHarness':
+      return `${access} is Map ? PiHarness.fromJson(${access}.cast<String, dynamic>()) : null`;
+    case 'List<WireModel>':
+      return `(${access} as List<dynamic>? ?? const <dynamic>[]).map((item) => WireModel.fromJson((item as Map).cast<String, dynamic>())).toList()`;
+    case 'WireModel':
+      return field.required
+        ? `WireModel.fromJson((${access} as Map).cast<String, dynamic>())`
+        : `${access} is Map ? WireModel.fromJson(${access}.cast<String, dynamic>()) : null`;
+    case 'ActionName':
+      return `ActionName.fromWire((${access} as String?) ?? '')`;
+    case 'ByeReason':
+      return `ByeReason.fromWire((${access} as String?) ?? '')`;
+    case 'List<SessionHistoryEvent>':
+      return `(${access} as List<dynamic>).map((item) => SessionHistoryEvent.fromJson((item as Map).cast<String, dynamic>())).toList()`;
     default:
       throw new Error(`Unsupported Dart field type ${JSON.stringify(field.dartType)} for ${field.name}`);
   }
 }
 
 function dartJsonValueExpression(field, valueName = field.name) {
+  switch (field.write) {
+    case 'firstImageList':
+      return `[${dartJsonValueExpression({ ...field, write: undefined, dartType: 'WireImage' }, valueName)}]`;
+    default:
+      break;
+  }
+
   switch (field.dartType) {
     case 'WireImage':
       return `${valueName}.toJson()`;
     case 'List<WireImage>':
       return `${valueName}.map((image) => image.toJson()).toList()`;
+    case 'Usage':
+      return `${valueName}.toJson()`;
+    case 'PiHarness':
+      return `${valueName}.toJson()`;
+    case 'List<WireModel>':
+      return `${valueName}.map((model) => model.toJson()).toList()`;
+    case 'WireModel':
+      return `${valueName}.toJson()`;
+    case 'List<SessionHistoryEvent>':
+      return `${valueName}.map((event) => event.toJson()).toList()`;
     case 'ApproveDecision':
       return `${valueName}.name`;
     case 'UserMessageStreamingBehavior':
       return `${valueName}.wireValue`;
     case 'ThinkingLevel':
+    case 'ActionName':
+    case 'ByeReason':
       return `${valueName}.wire`;
     default:
       return valueName;
@@ -108,6 +169,7 @@ function dartJsonValueExpression(field, valueName = field.name) {
 }
 
 function toJsonEntry(field) {
+  if (field.includeInJson === false) return null;
   const key = dartLiteral(field.wireName);
   if (field.required) {
     return `        ${key}: ${dartJsonValueExpression(field)},`;
@@ -124,12 +186,22 @@ function toJsonEntry(field) {
   ].join('\n');
 }
 
+function dartFieldType(field) {
+  if (field.required || field.dartType === 'dynamic' || field.dartType.endsWith('?')) return field.dartType;
+  return `${field.dartType}?`;
+}
+
 function pascalCase(value) {
   return String(value)
     .split(/[^A-Za-z0-9]+/)
     .filter(Boolean)
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join('');
+}
+
+function lowerCamel(value) {
+  const text = String(value);
+  return `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
 }
 
 function unionNameForFamily(family) {
@@ -218,14 +290,15 @@ function validateSchema(schema) {
     for (const variant of variants) {
       assertWireName(variant.type, `${union.name}.variant.type`);
       assertIdentifier(variant.className, `${union.name}.variant.className`);
+      if (variant.aliasOf !== undefined) assertIdentifier(variant.aliasOf, `${union.name}.variant.aliasOf`);
       if (seenTypes.has(variant.type)) {
         throw new Error(`Duplicate wire type ${variant.type} in ${union.name}`);
       }
-      if (seenClasses.has(variant.className)) {
+      if (seenClasses.has(variant.className) && variant.aliasOf === undefined) {
         throw new Error(`Duplicate className ${variant.className} in ${union.name}`);
       }
       seenTypes.add(variant.type);
-      seenClasses.add(variant.className);
+      if (variant.aliasOf === undefined) seenClasses.add(variant.className);
       for (const field of requireArray(variant.fields ?? [], `${variant.className}.fields`)) {
         assertIdentifier(field.name, `${variant.className}.field.name`);
         assertWireName(field.wireName, `${variant.className}.field.wireName`);
@@ -238,6 +311,46 @@ function validateSchema(schema) {
       }
     }
   }
+}
+
+function targetClassName(variant) {
+  return variant.aliasOf ?? variant.className;
+}
+
+function emitAdapterDecoder(union) {
+  const decoderName = `Generated${union.name}Decoders`;
+  const functionName = `decodeGenerated${union.name}`;
+  const typedefName = `Generated${union.name}JsonDecoder`;
+  const emittedClasses = union.variants.filter((variant) => variant.aliasOf === undefined).map((variant) => variant.className);
+  const lines = [];
+  lines.push(`typedef ${typedefName}<T> = T Function(Map<String, dynamic> json);`);
+  lines.push('');
+  lines.push(`final class ${decoderName}<T> {`);
+  lines.push(`  const ${decoderName}({`);
+  for (const className of emittedClasses) {
+    lines.push(`    required this.${lowerCamel(className)},`);
+  }
+  lines.push('  });');
+  lines.push('');
+  for (const className of emittedClasses) {
+    lines.push(`  final ${typedefName}<T> ${lowerCamel(className)};`);
+  }
+  lines.push('}');
+  lines.push('');
+  lines.push(`T ${functionName}<T>(`);
+  lines.push('  Map<String, dynamic> json,');
+  lines.push(`  ${decoderName}<T> decoders,`);
+  lines.push(') {');
+  lines.push("  final type = json['type'] as String?;");
+  lines.push('  return switch (type) {');
+  for (const variant of union.variants) {
+    lines.push(`    ${dartLiteral(variant.type)} => decoders.${lowerCamel(targetClassName(variant))}(json),`);
+  }
+  lines.push("    final unknown => throw UnsupportedTypeException(unknown ?? ''),");
+  lines.push('  };');
+  lines.push('}');
+  lines.push('');
+  return lines.join('\n');
 }
 
 function emitUnion(union) {
@@ -257,7 +370,7 @@ function emitUnion(union) {
   lines.push("    final type = json['type'] as String?;");
   lines.push('    return switch (type) {');
   for (const variant of union.variants) {
-    lines.push(`      ${dartLiteral(variant.type)} => ${variant.className}.fromJson(json),`);
+    lines.push(`      ${dartLiteral(variant.type)} => ${targetClassName(variant)}.fromJson(json),`);
   }
   lines.push("      final unknown => throw UnsupportedTypeException(unknown ?? ''),");
   lines.push('    };');
@@ -268,6 +381,7 @@ function emitUnion(union) {
   lines.push('');
 
   for (const variant of union.variants) {
+    if (variant.aliasOf !== undefined) continue;
     const fields = variant.fields ?? [];
     const requiredParams = fields.map((field) => {
       const prefix = field.required ? 'required ' : '';
@@ -282,8 +396,7 @@ function emitUnion(union) {
     lines.push(`  String get type => ${dartLiteral(variant.type)};`);
     lines.push('');
     for (const field of fields) {
-      const nullableSuffix = field.required ? '' : '?';
-      lines.push(`  final ${field.dartType}${nullableSuffix} ${field.name};`);
+      lines.push(`  final ${dartFieldType(field)} ${field.name};`);
     }
     if (fields.length > 0) {
       lines.push('');
@@ -298,10 +411,16 @@ function emitUnion(union) {
     lines.push('  Map<String, dynamic> toJson() => {');
     lines.push("        'type': type,");
     for (const field of fields) {
-      lines.push(toJsonEntry(field));
+      const entry = toJsonEntry(field);
+      if (entry) lines.push(entry);
     }
     lines.push('      };');
     lines.push('}');
+    lines.push('');
+  }
+
+  if (union.emitAdapterDecoder === true) {
+    lines.push(emitAdapterDecoder(union).trimEnd());
     lines.push('');
   }
 
@@ -430,6 +549,72 @@ final class WireModel {
   @override
   int get hashCode =>
       Object.hash(id, provider, name, reasoning, contextWindow, vision);
+}
+
+final class Usage {
+  const Usage({required this.inputTokens, required this.outputTokens});
+
+  final int inputTokens;
+  final int outputTokens;
+
+  factory Usage.fromJson(Map<String, dynamic> json) => Usage(
+        inputTokens: (json['input_tokens'] as num).toInt(),
+        outputTokens: (json['output_tokens'] as num).toInt(),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'input_tokens': inputTokens,
+        'output_tokens': outputTokens,
+      };
+}
+
+final class PiHarness {
+  const PiHarness({required this.name, required this.version});
+
+  final String name;
+  final String version;
+
+  factory PiHarness.fromJson(Map<String, dynamic> json) => PiHarness(
+        name: (json['name'] as String?) ?? 'Pi coding agent',
+        version: (json['version'] as String?) ?? '—',
+      );
+
+  Map<String, dynamic> toJson() => {'name': name, 'version': version};
+}
+
+enum ByeReason {
+  peerStop('peer_stop'),
+  sessionReplaced('session_replaced'),
+  shutdown('shutdown'),
+  unknown('');
+
+  const ByeReason(this.wire);
+  final String wire;
+
+  static ByeReason fromWire(String raw) => switch (raw) {
+        'peer_stop' => ByeReason.peerStop,
+        'session_replaced' => ByeReason.sessionReplaced,
+        'shutdown' => ByeReason.shutdown,
+        _ => ByeReason.unknown,
+      };
+}
+
+String _sessionIdFromJson(Map<String, dynamic> json) {
+  final sessionId = json['session_id'];
+  if (sessionId is String && sessionId.isNotEmpty) return sessionId;
+  throw const FormatException('missing required field session_id');
+}
+
+String _optionalSessionIdFromJson(Map<String, dynamic> json) {
+  final sessionId = json['session_id'];
+  return sessionId is String ? sessionId : '';
+}
+
+WireImage? _firstImage(dynamic raw) {
+  if (raw is! List || raw.isEmpty) return null;
+  final first = raw.first;
+  if (first is! Map) return null;
+  return WireImage.fromJson(first.cast<String, dynamic>());
 }
 `.trim();
 }

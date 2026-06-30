@@ -8,115 +8,1014 @@
           "type": "pair_request",
           "className": "PairRequest",
           "fields": [
-            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
-            { "name": "token", "wireName": "token", "dartType": "String", "required": true },
-            { "name": "deviceName", "wireName": "device_name", "dartType": "String", "required": true }
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "token",
+              "wireName": "token",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "deviceName",
+              "wireName": "device_name",
+              "dartType": "String",
+              "required": true
+            }
           ]
         },
         {
           "type": "user_message",
           "className": "UserMessage",
           "fields": [
-            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
-            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
-            { "name": "text", "wireName": "text", "dartType": "String", "required": true },
-            { "name": "streamingBehavior", "wireName": "streaming_behavior", "dartType": "UserMessageStreamingBehavior", "required": false },
-            { "name": "images", "wireName": "images", "dartType": "List<WireImage>", "required": false }
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "text",
+              "wireName": "text",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "streamingBehavior",
+              "wireName": "streaming_behavior",
+              "dartType": "UserMessageStreamingBehavior",
+              "required": false
+            },
+            {
+              "name": "images",
+              "wireName": "images",
+              "dartType": "List<WireImage>",
+              "required": false
+            }
           ]
         },
         {
           "type": "queued_message_set",
           "className": "QueuedMessageSet",
           "fields": [
-            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
-            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
-            { "name": "text", "wireName": "text", "dartType": "String", "required": true }
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "text",
+              "wireName": "text",
+              "dartType": "String",
+              "required": true
+            }
           ]
         },
         {
           "type": "queued_message_clear",
           "className": "QueuedMessageClear",
           "fields": [
-            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
-            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true }
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true
+            }
           ]
         },
         {
           "type": "approve_tool",
           "className": "ApproveTool",
           "fields": [
-            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
-            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
-            { "name": "toolCallId", "wireName": "tool_call_id", "dartType": "String", "required": true },
-            { "name": "decision", "wireName": "decision", "dartType": "ApproveDecision", "required": true }
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "toolCallId",
+              "wireName": "tool_call_id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "decision",
+              "wireName": "decision",
+              "dartType": "ApproveDecision",
+              "required": true
+            }
           ]
         },
         {
           "type": "cancel",
           "className": "Cancel",
           "fields": [
-            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
-            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
-            { "name": "targetId", "wireName": "target_id", "dartType": "String", "required": true }
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "targetId",
+              "wireName": "target_id",
+              "dartType": "String",
+              "required": true
+            }
           ]
         },
         {
           "type": "ping",
           "className": "Ping",
           "fields": [
-            { "name": "id", "wireName": "id", "dartType": "String", "required": true }
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            }
           ]
         },
         {
           "type": "session_sync",
           "className": "SessionSync",
           "fields": [
-            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
-            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
-            { "name": "limit", "wireName": "limit", "dartType": "int", "required": false }
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "limit",
+              "wireName": "limit",
+              "dartType": "int",
+              "required": false
+            }
           ]
         },
         {
           "type": "session_new",
           "className": "SessionNew",
           "fields": [
-            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
-            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true }
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true
+            }
           ]
         },
         {
           "type": "session_compact",
           "className": "SessionCompact",
           "fields": [
-            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
-            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true }
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true
+            }
           ]
         },
         {
           "type": "model_set",
           "className": "ModelSet",
           "fields": [
-            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
-            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
-            { "name": "provider", "wireName": "provider", "dartType": "String", "required": true },
-            { "name": "modelId", "wireName": "model_id", "dartType": "String", "required": true }
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "provider",
+              "wireName": "provider",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "modelId",
+              "wireName": "model_id",
+              "dartType": "String",
+              "required": true
+            }
           ]
         },
         {
           "type": "thinking_set",
           "className": "ThinkingSet",
           "fields": [
-            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
-            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true },
-            { "name": "level", "wireName": "level", "dartType": "ThinkingLevel", "required": true }
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "level",
+              "wireName": "level",
+              "dartType": "ThinkingLevel",
+              "required": true
+            }
           ]
         },
         {
           "type": "list_models",
           "className": "ListModels",
           "fields": [
-            { "name": "id", "wireName": "id", "dartType": "String", "required": true },
-            { "name": "sessionId", "wireName": "session_id", "dartType": "String", "required": true }
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ServerMessage",
+      "emitAdapterDecoder": true,
+      "variants": [
+        {
+          "type": "pair_ok",
+          "className": "PairOk",
+          "fields": [
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionName",
+              "wireName": "session_name",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionStartedAt",
+              "wireName": "session_started_at",
+              "dartType": "int",
+              "required": true,
+              "defaultValue": 0
+            },
+            {
+              "name": "roomId",
+              "wireName": "room_id",
+              "dartType": "String",
+              "required": true,
+              "defaultValue": "main"
+            },
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdOptional"
+            },
+            {
+              "name": "harness",
+              "wireName": "harness",
+              "dartType": "PiHarness",
+              "required": false
+            },
+            {
+              "name": "hostname",
+              "wireName": "hostname",
+              "dartType": "String",
+              "required": false,
+              "read": "nonEmptyStringOptional"
+            }
+          ]
+        },
+        {
+          "type": "pair_error",
+          "className": "PairError",
+          "fields": [
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "code",
+              "wireName": "code",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "message",
+              "wireName": "message",
+              "dartType": "String",
+              "required": true
+            }
+          ]
+        },
+        {
+          "type": "user_input",
+          "className": "UserInput",
+          "fields": [
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "text",
+              "wireName": "text",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "streamingBehavior",
+              "wireName": "streaming_behavior",
+              "dartType": "UserMessageStreamingBehavior",
+              "required": false
+            },
+            {
+              "name": "image",
+              "wireName": "images",
+              "dartType": "WireImage",
+              "required": false,
+              "read": "firstImage",
+              "write": "firstImageList"
+            }
+          ]
+        },
+        {
+          "type": "user_message",
+          "className": "UserMessageAlias",
+          "aliasOf": "UserInput",
+          "fields": []
+        },
+        {
+          "type": "queued_message_state",
+          "className": "QueuedMessageState",
+          "fields": [
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": false
+            },
+            {
+              "name": "text",
+              "wireName": "text",
+              "dartType": "String",
+              "required": false
+            }
+          ]
+        },
+        {
+          "type": "agent_chunk",
+          "className": "AgentChunk",
+          "fields": [
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "delta",
+              "wireName": "delta",
+              "dartType": "String",
+              "required": true
+            }
+          ]
+        },
+        {
+          "type": "agent_done",
+          "className": "AgentDone",
+          "fields": [
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "usage",
+              "wireName": "usage",
+              "dartType": "Usage",
+              "required": false
+            }
+          ]
+        },
+        {
+          "type": "agent_message",
+          "className": "AgentMessage",
+          "fields": [
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "text",
+              "wireName": "text",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "usage",
+              "wireName": "usage",
+              "dartType": "Usage",
+              "required": false
+            }
+          ]
+        },
+        {
+          "type": "compaction",
+          "className": "Compaction",
+          "fields": [
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "summary",
+              "wireName": "summary",
+              "dartType": "String",
+              "required": true,
+              "defaultValue": ""
+            },
+            {
+              "name": "tokensBefore",
+              "wireName": "tokens_before",
+              "dartType": "int",
+              "required": false
+            },
+            {
+              "name": "ts",
+              "wireName": "ts",
+              "dartType": "int",
+              "required": false
+            }
+          ]
+        },
+        {
+          "type": "tool_request",
+          "className": "ToolRequest",
+          "fields": [
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "toolCallId",
+              "wireName": "tool_call_id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "tool",
+              "wireName": "tool",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "args",
+              "wireName": "args",
+              "dartType": "dynamic",
+              "required": true
+            }
+          ]
+        },
+        {
+          "type": "tool_result",
+          "className": "ToolResult",
+          "fields": [
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "toolCallId",
+              "wireName": "tool_call_id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "result",
+              "wireName": "result",
+              "dartType": "dynamic",
+              "required": false
+            },
+            {
+              "name": "error",
+              "wireName": "error",
+              "dartType": "String",
+              "required": false
+            }
+          ]
+        },
+        {
+          "type": "error",
+          "className": "ErrorMessage",
+          "fields": [
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": false
+            },
+            {
+              "name": "code",
+              "wireName": "code",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "message",
+              "wireName": "message",
+              "dartType": "String",
+              "required": true
+            }
+          ]
+        },
+        {
+          "type": "cancelled",
+          "className": "Cancelled",
+          "fields": [
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "targetId",
+              "wireName": "target_id",
+              "dartType": "String",
+              "required": true
+            }
+          ]
+        },
+        {
+          "type": "pong",
+          "className": "Pong",
+          "fields": [
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": true
+            }
+          ]
+        },
+        {
+          "type": "bye",
+          "className": "Bye",
+          "fields": [
+            {
+              "name": "reason",
+              "wireName": "reason",
+              "dartType": "ByeReason",
+              "required": true,
+              "read": "byeReason"
+            },
+            {
+              "name": "rawReason",
+              "wireName": "reason",
+              "dartType": "String",
+              "required": true,
+              "defaultValue": "",
+              "includeInJson": false
+            }
+          ]
+        },
+        {
+          "type": "session_history",
+          "className": "SessionHistory",
+          "fields": [
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "sessionStartedAt",
+              "wireName": "session_started_at",
+              "dartType": "int",
+              "required": true
+            },
+            {
+              "name": "events",
+              "wireName": "events",
+              "dartType": "List<SessionHistoryEvent>",
+              "required": true,
+              "read": "sessionHistoryEvents"
+            },
+            {
+              "name": "eos",
+              "wireName": "eos",
+              "dartType": "bool",
+              "required": true
+            },
+            {
+              "name": "truncated",
+              "wireName": "truncated",
+              "dartType": "bool",
+              "required": true,
+              "defaultValue": false
+            }
+          ]
+        },
+        {
+          "type": "action_ok",
+          "className": "ActionOk",
+          "fields": [
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "action",
+              "wireName": "action",
+              "dartType": "ActionName",
+              "required": true,
+              "read": "actionNameWithFallback"
+            },
+            {
+              "name": "rawAction",
+              "wireName": "action",
+              "dartType": "String",
+              "required": true,
+              "defaultValue": "",
+              "includeInJson": false
+            }
+          ]
+        },
+        {
+          "type": "action_error",
+          "className": "ActionError",
+          "fields": [
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "action",
+              "wireName": "action",
+              "dartType": "ActionName",
+              "required": true,
+              "read": "actionNameWithFallback"
+            },
+            {
+              "name": "rawAction",
+              "wireName": "action",
+              "dartType": "String",
+              "required": true,
+              "defaultValue": "",
+              "includeInJson": false
+            },
+            {
+              "name": "error",
+              "wireName": "error",
+              "dartType": "String",
+              "required": true,
+              "defaultValue": ""
+            }
+          ]
+        },
+        {
+          "type": "models_list",
+          "className": "ModelsList",
+          "fields": [
+            {
+              "name": "sessionId",
+              "wireName": "session_id",
+              "dartType": "String",
+              "required": true,
+              "read": "sessionIdRequired"
+            },
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "models",
+              "wireName": "models",
+              "dartType": "List<WireModel>",
+              "required": true
+            },
+            {
+              "name": "current",
+              "wireName": "current",
+              "dartType": "WireModel",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SessionHistoryEvent",
+      "emitAdapterDecoder": true,
+      "variants": [
+        {
+          "type": "user_input",
+          "className": "UserInputEvt",
+          "fields": [
+            {
+              "name": "ts",
+              "wireName": "ts",
+              "dartType": "int",
+              "required": true
+            },
+            {
+              "name": "id",
+              "wireName": "id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "text",
+              "wireName": "text",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "image",
+              "wireName": "images",
+              "dartType": "WireImage",
+              "required": false,
+              "read": "firstImage",
+              "write": "firstImageList"
+            }
+          ]
+        },
+        {
+          "type": "tool_request",
+          "className": "ToolRequestEvt",
+          "fields": [
+            {
+              "name": "ts",
+              "wireName": "ts",
+              "dartType": "int",
+              "required": true
+            },
+            {
+              "name": "toolCallId",
+              "wireName": "tool_call_id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "tool",
+              "wireName": "tool",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "args",
+              "wireName": "args",
+              "dartType": "dynamic",
+              "required": true
+            }
+          ]
+        },
+        {
+          "type": "tool_result",
+          "className": "ToolResultEvt",
+          "fields": [
+            {
+              "name": "ts",
+              "wireName": "ts",
+              "dartType": "int",
+              "required": true
+            },
+            {
+              "name": "toolCallId",
+              "wireName": "tool_call_id",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "result",
+              "wireName": "result",
+              "dartType": "dynamic",
+              "required": false
+            },
+            {
+              "name": "error",
+              "wireName": "error",
+              "dartType": "String",
+              "required": false
+            }
+          ]
+        },
+        {
+          "type": "agent_message",
+          "className": "AgentMessageEvt",
+          "fields": [
+            {
+              "name": "ts",
+              "wireName": "ts",
+              "dartType": "int",
+              "required": true
+            },
+            {
+              "name": "inReplyTo",
+              "wireName": "in_reply_to",
+              "dartType": "String",
+              "required": true
+            },
+            {
+              "name": "text",
+              "wireName": "text",
+              "dartType": "String",
+              "required": true
+            }
+          ]
+        },
+        {
+          "type": "compaction",
+          "className": "CompactionEvt",
+          "fields": [
+            {
+              "name": "ts",
+              "wireName": "ts",
+              "dartType": "int",
+              "required": true
+            },
+            {
+              "name": "summary",
+              "wireName": "summary",
+              "dartType": "String",
+              "required": true,
+              "defaultValue": ""
+            },
+            {
+              "name": "tokensBefore",
+              "wireName": "tokens_before",
+              "dartType": "int",
+              "required": false
+            }
           ]
         }
       ]

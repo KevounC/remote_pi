@@ -1,5 +1,7 @@
 // ignore_for_file: lines_longer_than_80_chars
 
+import 'generated/protocol.g.dart' as generated_protocol;
+
 // ---------------------------------------------------------------------------
 // Control frames (plano 12 — presence)
 //
@@ -918,42 +920,45 @@ class ListModels extends ClientMessage {
 sealed class ServerMessage {
   const ServerMessage();
 
-  factory ServerMessage.fromJson(Map<String, dynamic> json) {
-    final type = json['type'] as String?;
-    return switch (type) {
-      'agent_chunk' => AgentChunk.fromJson(json),
-      'agent_done' => AgentDone.fromJson(json),
-      'tool_request' => ToolRequest.fromJson(json),
-      'tool_result' => ToolResult.fromJson(json),
-      'error' => ErrorMessage.fromJson(json),
-      'cancelled' => Cancelled.fromJson(json),
-      'pong' => Pong.fromJson(json),
-      'pair_ok' => PairOk.fromJson(json),
-      'pair_error' => PairError.fromJson(json),
-      // Plan/24-fix-app-source-of-truth + follow-up: Pi rebroadcasts
-      // every accepted user_message via this stream. Some Pi-extension
-      // versions emit `type: "user_input"` (mirror of a terminal-side
-      // input), others reuse the original `user_message` type when
-      // echoing back. Treat both as the same payload — `UserInput`
-      // here is the "user-text-arrived" event regardless of origin.
-      'user_input' || 'user_message' => UserInput.fromJson(json),
-      'queued_message_state' => QueuedMessageState.fromJson(json),
-      'agent_message' => AgentMessage.fromJson(json),
-      // Plan/32 — Pi-extension emits this when a context compaction finishes.
-      'compaction' => Compaction.fromJson(json),
-      'session_history' => SessionHistory.fromJson(json),
-      'bye' => Bye.fromJson(json),
-      'action_ok' => ActionOk.fromJson(json),
-      'action_error' => ActionError.fromJson(json),
-      'models_list' => ModelsList.fromJson(json),
-      // forward-compat: unknown types are not fatal — callers catch and log
-      _ => throw UnsupportedTypeException(type ?? ''),
-    };
-  }
+  factory ServerMessage.fromJson(Map<String, dynamic> json) =>
+      _decodeGeneratedServerMessage(json);
 }
 
 mixin SessionScopedServerMessage {
   String get sessionId;
+}
+
+final _generatedServerMessageDecoders =
+    generated_protocol.GeneratedServerMessageDecoders<ServerMessage>(
+      pairOk: PairOk.fromJson,
+      pairError: PairError.fromJson,
+      userInput: UserInput.fromJson,
+      queuedMessageState: QueuedMessageState.fromJson,
+      agentChunk: AgentChunk.fromJson,
+      agentDone: AgentDone.fromJson,
+      agentMessage: AgentMessage.fromJson,
+      compaction: Compaction.fromJson,
+      toolRequest: ToolRequest.fromJson,
+      toolResult: ToolResult.fromJson,
+      errorMessage: ErrorMessage.fromJson,
+      cancelled: Cancelled.fromJson,
+      pong: Pong.fromJson,
+      bye: Bye.fromJson,
+      sessionHistory: SessionHistory.fromJson,
+      actionOk: ActionOk.fromJson,
+      actionError: ActionError.fromJson,
+      modelsList: ModelsList.fromJson,
+    );
+
+ServerMessage _decodeGeneratedServerMessage(Map<String, dynamic> json) {
+  try {
+    return generated_protocol.decodeGeneratedServerMessage(
+      json,
+      _generatedServerMessageDecoders,
+    );
+  } on generated_protocol.UnsupportedTypeException catch (error) {
+    throw UnsupportedTypeException(error.type);
+  }
 }
 
 class AgentChunk extends ServerMessage with SessionScopedServerMessage {
@@ -1329,41 +1334,52 @@ sealed class SessionHistoryEvent {
   final int ts;
   const SessionHistoryEvent({required this.ts});
 
-  factory SessionHistoryEvent.fromJson(Map<String, dynamic> j) {
-    final ts = (j['ts'] as num).toInt();
-    return switch (j['type'] as String?) {
-      'user_input' => UserInputEvt(
-        ts: ts,
+  factory SessionHistoryEvent.fromJson(Map<String, dynamic> j) =>
+      _decodeGeneratedSessionHistoryEvent(j);
+}
+
+final _generatedSessionHistoryEventDecoders =
+    generated_protocol.GeneratedSessionHistoryEventDecoders<
+      SessionHistoryEvent
+    >(
+      userInputEvt: (j) => UserInputEvt(
+        ts: (j['ts'] as num).toInt(),
         id: j['id'] as String,
         text: j['text'] as String,
         image: _firstImage(j['images']),
       ),
-      'tool_request' => ToolRequestEvt(
-        ts: ts,
+      toolRequestEvt: (j) => ToolRequestEvt(
+        ts: (j['ts'] as num).toInt(),
         toolCallId: j['tool_call_id'] as String,
         tool: j['tool'] as String,
         args: j['args'],
       ),
-      'tool_result' => ToolResultEvt(
-        ts: ts,
+      toolResultEvt: (j) => ToolResultEvt(
+        ts: (j['ts'] as num).toInt(),
         toolCallId: j['tool_call_id'] as String,
         result: j['result'],
         error: j['error'] as String?,
       ),
-      'agent_message' => AgentMessageEvt(
-        ts: ts,
+      agentMessageEvt: (j) => AgentMessageEvt(
+        ts: (j['ts'] as num).toInt(),
         inReplyTo: j['in_reply_to'] as String,
         text: j['text'] as String,
       ),
-      // Plan/32 — compaction replayed from history so the system bubble
-      // survives a re-sync.
-      'compaction' => CompactionEvt(
-        ts: ts,
+      compactionEvt: (j) => CompactionEvt(
+        ts: (j['ts'] as num).toInt(),
         summary: (j['summary'] as String?) ?? '',
         tokensBefore: (j['tokens_before'] as num?)?.toInt(),
       ),
-      final t => throw UnsupportedTypeException(t ?? ''),
-    };
+    );
+
+SessionHistoryEvent _decodeGeneratedSessionHistoryEvent(Map<String, dynamic> json) {
+  try {
+    return generated_protocol.decodeGeneratedSessionHistoryEvent(
+      json,
+      _generatedSessionHistoryEventDecoders,
+    );
+  } on generated_protocol.UnsupportedTypeException catch (error) {
+    throw UnsupportedTypeException(error.type);
   }
 }
 
