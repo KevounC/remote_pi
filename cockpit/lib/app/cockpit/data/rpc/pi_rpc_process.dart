@@ -381,7 +381,7 @@ class PiRpcProcess implements RpcProcessGateway {
     return _dataMapper.transcriptEvents(response['data'], sessionId: sessionId);
   });
 
-  static const _ctrlPrefix = '\x00remote-pi-ctrl:';
+  static const _controlEnvelopeType = 'remote_pi_control';
 
   @override
   Future<Result<void, RpcError>> sendControl(PiControlCommand command) async {
@@ -389,7 +389,7 @@ class PiRpcProcess implements RpcProcessGateway {
       return const Failure(RpcError('No agent running.'));
     }
     try {
-      await _writeLine('${jsonEncode(_compatControlPrompt(command))}\n');
+      await _writeLine('${jsonEncode(_schemaControlPrompt(command))}\n');
       return const Success(null);
     } catch (error, stackTrace) {
       return Failure(
@@ -402,24 +402,25 @@ class PiRpcProcess implements RpcProcessGateway {
     }
   }
 
-  Map<String, dynamic> _compatControlPrompt(PiControlCommand command) => {
-    'type': 'prompt',
-    'message': '$_ctrlPrefix${_compatControlVerb(command)}',
-  };
+  static Map<String, dynamic> _schemaControlPrompt(PiControlCommand command) =>
+      {
+        'type': 'prompt',
+        'message': jsonEncode(_schemaControlEnvelope(command)),
+      };
 
-  String _compatControlVerb(PiControlCommand command) {
-    switch (command.command) {
-      case PiControlCommandName.relayOn:
-        return 'relay:on';
-      case PiControlCommandName.relayOff:
-        return 'relay:off';
-      case PiControlCommandName.relayToggle:
-        return 'relay:toggle';
-      case PiControlCommandName.relayStatus:
-        return 'relay:status';
-      case PiControlCommandName.rename:
-        return 'rename:${command.name}';
+  static Map<String, dynamic> _schemaControlEnvelope(PiControlCommand command) {
+    final envelope = <String, dynamic>{
+      'type': _controlEnvelopeType,
+      'command': command.command.wire,
+    };
+    if (command.isRename) {
+      final name = command.name;
+      if (name == null || name.isEmpty) {
+        throw const RpcError('Control rename requires a non-empty name.');
+      }
+      envelope['name'] = name;
     }
+    return envelope;
   }
 
   void _onStderrLine(String line) {
@@ -454,3 +455,7 @@ class PiRpcProcess implements RpcProcessGateway {
     if (!_events.isClosed) _events.add(event);
   }
 }
+
+@visibleForTesting
+Map<String, dynamic> schemaControlPromptForTesting(PiControlCommand command) =>
+    PiRpcProcess._schemaControlPrompt(command);

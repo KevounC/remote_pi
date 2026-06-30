@@ -71,12 +71,14 @@ void main() {
       expect(pairedEvent.peerId, 'owner-peer');
       expect(pairedEvent.pairedAt, 1760000000001);
 
-      final pairedWithoutOptionalFields = mapper.fromJson(
+      final pairedWithoutSchemaDetails = mapper.fromJson(
         _customMessage('remote-pi:paired', <String, Object?>{}),
       );
-      expect(pairedWithoutOptionalFields, isA<RpcPaired>());
-      expect((pairedWithoutOptionalFields as RpcPaired).name, isNull);
-      expect(pairedWithoutOptionalFields.peerId, isNull);
+      expect(pairedWithoutSchemaDetails, isA<RpcUnknown>());
+      expect(
+        (pairedWithoutSchemaDetails as RpcUnknown).type,
+        'message_start:paired:invalid-details',
+      );
 
       final meshRevoked = mapper.fromJson(
         _customMessage('remote-pi:mesh-revoked', null),

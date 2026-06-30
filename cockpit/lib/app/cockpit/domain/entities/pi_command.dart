@@ -10,9 +10,8 @@ class PiCommand {
 
 /// Canonical command names from `protocol/schema/cockpit-control.schema.json`.
 ///
-/// Cockpit keeps this as a domain value and lets the RPC process adapter choose
-/// the active transport encoding (currently the compatibility NUL-prefixed
-/// prompt frame).
+/// Cockpit keeps this as a domain value and lets the RPC process adapter emit
+/// the schema command envelope on the `prompt` transport.
 enum PiControlCommandName {
   relayOn('relay_on'),
   relayOff('relay_off'),
@@ -42,7 +41,7 @@ enum PiRelayControlAction {
 ///
 /// This replaces raw `relay:on` / `rename:...` strings at the domain boundary.
 /// The gateway implementation remains the only layer that serializes this value
-/// to the current compatibility transport frame.
+/// to the active wire frame.
 final class PiControlCommand {
   PiControlCommand.relay(PiRelayControlAction relay)
     : command = relay.commandName,

@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-cockpit-control-rpc-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, cockpit]
 parent: epic-bold-generated-protocol-cockpit-control-rpc
 depends_on: [epic-bold-generated-protocol-cockpit-control-rpc-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Emit schema-compatible control commands from Cockpit and align custom-event parsing with protocol map
@@ -54,11 +54,11 @@ live protocol messages in extension flows.
 
 ## Acceptance Criteria
 
-- [ ] Control commands from Cockpit are emitted as schema command envelopes.
-- [ ] Custom overlay events used by relay/pairing flows are all recognized in the
+- [x] Control commands from Cockpit are emitted as schema command envelopes.
+- [x] Custom overlay events used by relay/pairing flows are all recognized in the
   adapter map.
-- [ ] Existing relay and pairing UX behavior is preserved.
-- [ ] Test fixture/docs are updated so protocol validation references include the
+- [x] Existing relay and pairing UX behavior is preserved.
+- [x] Test fixture/docs are updated so protocol validation references include the
   schema-controlled control overlay.
 
 ## Rollback
@@ -66,3 +66,12 @@ live protocol messages in extension flows.
 Revert Cockpit control sender to legacy `_ctrlPrefix + verb` formatting and
 retain only the two current custom event handlers; restore prior docs if parser
 coverage changed.
+
+## Implementation
+
+- Schema-envelope emission: `PiRpcProcess.sendControl` now writes a `prompt` frame whose `message` is a JSON `remote_pi_control` envelope (`relay_on/off/toggle/status`, `rename` with non-empty `name`), rather than the legacy NUL-prefixed verb string.
+- Event-mapping alignment: `RpcControlOverlayEventType` remains the schema-backed custom-event registry; `RpcEventMapper` continues mapping `relay-state`, `name-assigned`, `pair-code`, `paired`, and `mesh-revoked`, and now rejects malformed `paired` details as `RpcUnknown` instead of creating a partial schema event.
+- UX preservation: `agent_session.dart` behavior was left unchanged; relay-state still updates `relayStatus`, name-assigned still renames only when `changed`, and pair/paired/revoked session events remain typed-but-ignored by the session UI.
+- Docs/tests: `cockpit/docs/rpc-protocol.md` documents the structured overlay on the `prompt` transport and the full custom-event map; added `cockpit/test/data/pi_rpc_process_control_test.dart` for schema-envelope serialization and updated mapper tests for schema-aligned event details.
+- Verification: `PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache /home/agent/projects/remote_pi/.tools/flutter/bin/flutter pub get --offline` passed; `flutter analyze` passed with 0 issues; `flutter test` passed with 228/228 tests. A first full-suite run timed out at the harness limit after reaching 222 passing tests; the rerun completed green.
+- Discrepancies from design: `cockpit/lib/app/cockpit/domain/entities/pi_command.dart` comments were updated to avoid stale NUL-prefix documentation; no UI behavior changes were needed in `agent_session.dart`.

@@ -251,11 +251,15 @@ final class RpcPairCode extends RpcEvent {
 
 /// `message_start` com `customType:"remote-pi:paired"`.
 final class RpcPaired extends RpcEvent {
-  const RpcPaired({this.name, this.peerId, this.pairedAt});
+  const RpcPaired({
+    required this.name,
+    required this.peerId,
+    required this.pairedAt,
+  });
 
-  final String? name;
-  final String? peerId;
-  final int? pairedAt;
+  final String name;
+  final String peerId;
+  final int pairedAt;
 }
 
 /// `message_start` com `customType:"remote-pi:mesh-revoked"`.

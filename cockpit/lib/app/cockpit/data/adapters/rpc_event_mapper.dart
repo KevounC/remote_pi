@@ -145,11 +145,13 @@ class RpcEventMapper {
         if (details == null) {
           return const RpcUnknown('message_start:paired:no-details');
         }
-        return RpcPaired(
-          name: _nonEmptyString(details['name']),
-          peerId: _nonEmptyString(details['peerId']),
-          pairedAt: _int(details['pairedAt']),
-        );
+        final name = _nonEmptyString(details['name']);
+        final peerId = _nonEmptyString(details['peerId']);
+        final pairedAt = _int(details['pairedAt']);
+        if (name == null || peerId == null || pairedAt == null) {
+          return const RpcUnknown('message_start:paired:invalid-details');
+        }
+        return RpcPaired(name: name, peerId: peerId, pairedAt: pairedAt);
       case RpcControlOverlayEventType.meshRevoked:
         return RpcMeshRevoked(details: details);
       case null:

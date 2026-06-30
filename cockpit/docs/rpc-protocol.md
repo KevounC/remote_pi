@@ -28,8 +28,11 @@ em `\n` (em vez do `LineSplitter` do Dart).
 
 ## Comandos que o Cockpit envia (stdin)
 
-No MVP o Cockpit só precisa de **um** comando. Os demais existem no protocolo e
-podem ser usados em waves futuras.
+O Cockpit usa o protocolo RPC JSONL do Pi e, para o overlay Remote Pi, o schema
+`protocol/schema/cockpit-control.schema.json`. O schema cobre a família
+`remote_pi_control` e os eventos customizados `remote-pi:*`; o transporte RPC
+continua sendo uma linha `prompt` quando o comando precisa passar pelo hook de
+input da extensão Remote Pi.
 
 ### `prompt` — manda um prompt do usuário  ✅ usado
 
@@ -57,6 +60,23 @@ que se passe `streamingBehavior`:
 
 O MVP **desabilita o composer enquanto ocupado** (mais simples que enfileirar),
 então não passa `streamingBehavior`. O gateway suporta `steerIfBusy` para o futuro.
+
+### Overlay `remote_pi_control` — controle Remote Pi  ✅ usado
+
+Relay/rename não são prompts para o LLM. O Cockpit serializa um envelope de
+controle schema-compatible e o carrega como string no mesmo comando `prompt` que
+o Pi RPC já expõe; a extensão Remote Pi intercepta o texto, executa a ação e
+engole o input para não poluir o transcript.
+
+```json
+{"type":"prompt","message":"{\"type\":\"remote_pi_control\",\"command\":\"relay_status\"}"}
+{"type":"prompt","message":"{\"type\":\"remote_pi_control\",\"command\":\"rename\",\"name\":\"desk-agent\"}"}
+```
+
+O receptor ainda aceita o legado `\u0000remote-pi-ctrl:<verb>` como shim de
+compatibilidade, mas o Cockpit não emite esse formato como caminho primário. Os
+comandos válidos são os definidos no schema `cockpit-control`: `relay_on`,
+`relay_off`, `relay_toggle`, `relay_status`, e `rename` com `name` não vazio.
 
 ### Comandos request/response (correlacionados por `id`)  ✅ usados
 
@@ -136,17 +156,23 @@ O `RpcEventMapper` (`lib/data/adapters/`) traduz cada linha em um
 | `{"type":"tool_execution_start","toolCallId":"…","toolName":"bash","args":{…}}` | `RpcToolStart` | card da tool (spinner) |
 | `{"type":"tool_execution_end","toolCallId":"…","toolName":"…","isError":false,"result":{"content":[{"type":"text","text":"…"}]}}` | `RpcToolEnd` | resultado da tool |
 | `{"type":"response","command":"prompt","success":true}` | `RpcCommandResponse` | ACK; mostra erro se `success:false` |
+| `message_start` com `role:"custom"` + `customType:"remote-pi:relay-state"` | `RpcRelayState` | status do botão/indicador do relay |
+| `message_start` com `role:"custom"` + `customType:"remote-pi:name-assigned"` | `RpcNameAssigned` | renomeia a aba quando o broker resolve colisão |
+| `message_start` com `role:"custom"` + `customType:"remote-pi:pair-code"` | `RpcPairCode` | evento schema-mapeado; a UI de sessão ignora por enquanto |
+| `message_start` com `role:"custom"` + `customType:"remote-pi:paired"` | `RpcPaired` | evento schema-mapeado; a UI de sessão ignora por enquanto |
+| `message_start` com `role:"custom"` + `customType:"remote-pi:mesh-revoked"` | `RpcMeshRevoked` | evento schema-mapeado; a UI de sessão ignora por enquanto |
 | `{"type":"message_end","message":{"stopReason":"error","errorMessage":"Connection error."}}` | `RpcStreamError` | mostra o erro do turno (provider fora do ar etc.) |
 | `{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":2000,"errorMessage":"…"}` | `RpcAutoRetry` | linha "retentando (1/3…)" |
 | *(stderr, não-JSON)* | `RpcDiagnostic` | linha de diagnóstico |
 | *(processo saiu)* | `RpcProcessExit` | banner "encerrado (code=N)" |
 | qualquer outro `type` | `RpcUnknown` | **ignorado** (nunca crasha) |
 
-Tipos emitidos mas **ignorados** no MVP (viram `RpcUnknown`): `message_start`,
-`message_end`, `tool_execution_update`, e os deltas `text_start`,
-`thinking_start`/`thinking_end`, `toolcall_start`/`toolcall_delta`/`toolcall_end`,
-`done`/`error`. Também: `queue_update`, `compaction_*`, `auto_retry_*`,
-`extension_error`. Mapear conforme as waves precisarem.
+Tipos emitidos mas **ignorados** no MVP (viram `RpcUnknown`): outros
+`message_start`, `message_end`, `tool_execution_update`, e os deltas
+`text_start`, `thinking_start`/`thinking_end`,
+`toolcall_start`/`toolcall_delta`/`toolcall_end`, `done`/`error`. Também:
+`queue_update`, `compaction_*`, `auto_retry_*`, `extension_error`. Mapear
+conforme as waves precisarem.
 
 ### Exemplos de linha reais (capturados)
 
