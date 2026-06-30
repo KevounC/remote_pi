@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-3
 kind: story
-stage: review
+stage: implementing
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-2]
@@ -96,4 +96,17 @@ Revert `SyncService` to direct `_upsert` / `_applyHistory` mutation. Projection 
 - Discrepancies from design: none; this re-fix adds the missing acceptance coverage only.
 - Adjacent issues parked: none.
 - Verification: `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze test/data/sync/sync_service_test.dart lib/data/sync/sync_service.dart` passed. `dart test test/data/sync/sync_service_test.dart` could not run because pub network access failed with `403 Forbidden`; `flutter analyze`/`flutter test` cannot start because `/opt/flutter/bin/cache` is read-only.
+
+## Review bounce (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blockers**:
+- `app/test/data/sync/sync_service_test.dart:297` / `app/test/data/sync/sync_service_test.dart:323`: the existing steer tests now fail because `workingReplyTo` is overwritten with the steer message id instead of preserving the active turn target `u1`. This violates the existing-suite-green acceptance criterion and the working-state convergence invariant.
+- `app/lib/data/sync/sync_service.dart:643` and `app/lib/data/sync/sync_service.dart:958`: tool-request projection paths pass protocol `args` directly into `ToolRequested`, causing runtime type errors for `Map<dynamic, dynamic>` live args and null history args. This breaks existing sequential/history replay tests, so `app/test/data/sync/sync_service_test.dart` is not green.
+- `app/lib/data/sync/sync_service.dart:434` with the in-memory projection buffer at `app/lib/data/sync/sync_service.dart:60`: `clearActiveSession()` clears Hive rows but leaves prior transcript events in `_transcriptEvents`, so later replays resurrect pre-clear rows (`stale`/`base`/`baseline`). This violates the session-clear/replay invariants and keeps sync state from being a clean projection of the active event log.
+
+**Verification run**:
+- `cd /home/agent/forks/remote_pi/app && HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter analyze` exited 1 with only the known-unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802`.
+- `cd /home/agent/forks/remote_pi/app && HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter test test/data/sync/sync_service_test.dart` exited 1: 29 tests passed, 7 failed. The three new efb2fea7 coverage tests ran and passed, so the prior bounce's missing-coverage blocker is addressed, but the required file-level regression suite is still red.
 
