@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-relay-transport-module-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-relay-transport-module
 depends_on: [epic-bold-split-pi-extension-index-relay-transport-module-step-1]
@@ -113,3 +113,21 @@ is localized to `index.ts` plus the new adapter module.
 - Kept SelfRevoke outside the transport module; index still starts it after a successful relay start.
 - Verification: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; `corepack pnpm exec vitest run src/extension.test.ts -t "relay reconnect|reconnect replays"` passed `6 passed | 143 skipped | 0 failed`.
 - Full requested targeted expression `relay reconnect|relay control channel|reconnect replays` produced the known false-alarm signature in the `relay control channel` group (`rename:<name>` / mesh-node setup), while the reconnect subset passed.
+
+## Review
+
+Approved (2026-06-30) with HIGH-risk reconnect-migration verification. Independently
+re-ran: `corepack pnpm typecheck` clean; `corepack pnpm build` clean; **full pi-ext
+suite 651 passed | 3 skipped | 0 failed (44 files)** — fully green.
+
+Commit `40802b6` scoped to pi-ext only (relay_transport.ts +81 + index.ts ±354 +
+story .md); collision guard held. Migration verified: `index.ts` no longer owns any
+of the 5 relay globals (`_relay`/`_relayUrl`/`_reconnectTimer`/`_reconnectAttempt`/
+`_lastRelayStatus` — grep count 0); they moved into `relay_transport.ts`. Reconnect
+behavior preserved: backoff ladder `1s, 2s, 5s, 10s, 30s, 30s...`; `stop()` cancels
+pending timer so `/remote-pi stop` wins; reconnect success resets attempt counter;
+reconnect replays same `roomId` + current `roomMeta`. Startup/shutdown disposed
+guard preserved (post-`connect()` relay after shutdown is closed, not current).
+`remote-pi:relay-state` event shape unchanged (`details.status`/`details.connected`/
+`details.relayUrl`/`details.room`). SelfRevoke kept outside transport module. The
+reconnect subset tests (`6 passed | 143 skipped | 0 failed`) prove no regression.
