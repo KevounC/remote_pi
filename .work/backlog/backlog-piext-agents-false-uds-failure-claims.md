@@ -114,3 +114,37 @@ dismiss everything. The agent's own added tests were the proof it was wrong.
 **Lesson**: the false-failure briefing trades false-negatives (real bugs shipped)
 for fewer false-positives (time wasted chasing env flakes). The orchestrator's
 independent re-run is the load-bearing safety net, not the agent's self-classification.
+
+## 2026-06-30 update #2 — runtime instrumentation beat agent static-analysis (2nd revert)
+
+The SECOND step-5 attempt (`fecaa66`, also reverted in `d75a7fe`) ALSO failed the 2
+owner-ingress tests AND ALSO misclassified them as false-alarms. Worse, both agents
+**guessed the root cause wrong**: they theorized `onOuterMessage` eager-registration
+was the duplicate-listener source. The second agent even "fixed" that (removed the
+eager `relay?.on`) — but the tests still failed with `listenerCount` 3 instead of 1.
+
+**What actually found the bug**: I added a temporary `on()` override to the test's
+`MockRelay` that logged `new Error().stack` for every `"message"` registration, plus
+a log in `attachCrossPcBridge`. Runtime output showed the 3 listeners came from:
+1. `bindRelay` (legitimate outer handler — 1 listener, correct)
+2. `new PiForwardClient` via `attachCrossPcBridge` ← `LocalMeshCommands.join`
+3. `new PiForwardClient` via `attachCrossPcBridge` ← `start()` auto-attach AND
+   `_startRelayViaTransport` ← `_attachBridgeIfReady`
+
+i.e. `attachCrossPcBridge` is called THREE times on connect, each constructing a
+fresh `PiForwardClient` that attaches its own `relay.on("message")`. The real fix
+is making `attachCrossPcBridge` idempotent (dedupe at the relay_transport boundary),
+NOT touching `onOuterMessage`.
+
+**Lesson #2**: when an agent's claimed root cause + fix doesn't move the failure
+count, the orchestrator must NOT trust the agent's theory — instrument the actual
+runtime call paths (stack traces on the relevant MockX.on / constructor) and read
+them directly. Agent static reasoning about listener-lifecycle duplication across
+3 call sites is unreliable; runtime stack traces are authoritative. The v3
+re-dispatch hands the agent the CORRECT root cause (triple `attachCrossPcBridge`)
+and the exact 3 call sites, so it fixes the real cause this time.
+
+**Broader lesson**: the false-failure briefing's dismissal license + agent
+root-cause guessing is a compound hazard on HIGH-risk lifecycle stories. The
+orchestrator's independent re-run + runtime instrumentation is the only
+trustworthy gate on owner-ingress / listener-lifecycle / message-delivery changes.
