@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-rust-codegen-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-generated-protocol-rust-codegen
 depends_on: [epic-bold-generated-protocol-rust-codegen-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Generate `RoomMeta` / `RoomMetaPatch` and swap room state consumers
@@ -97,3 +97,18 @@ High. `RoomMetaPatch` tri-state behavior is subtle and drives app UI convergence
 ## Rollback
 
 Restore the handwritten `RoomMeta`/`RoomMetaPatch` definitions in `rooms.rs` and revert consumers to those types. Generated room types can remain unused until corrected.
+
+## Implementation
+
+Generated `relay/src/protocol/generated/room.rs` from the shared relay-control schema via `tools/protocol-codegen`, expanding generated `RoomMeta` to the room snapshot fields (`room_id`, optional `name`/`cwd`/`model`/`thinking`, defaulted `working`, and relay-local `started_at`) and generating `RoomMetaPatch` with explicit nullable-string merge-patch decoding plus non-nullable `working` bool decoding. `rooms.rs` now re-exports the generated room types and owns only `RoomManager` plus the handwritten `RoomMetaPatch::is_empty()` helper; registry and peer-handler consumers continue through that single re-export rather than duplicate structs.
+
+Regen-diff verdict: clean and deterministic. The canonical Rust generator `--check` passed. Two fresh generations to temp dirs were byte-identical (`diff -r` empty), and a fresh generation matched `relay/src/protocol/generated` exactly (`diff -r` empty), confirming no hand-edits under generated output.
+
+Verification:
+
+- `cargo fmt --check` — passed.
+- `cargo clippy -- -D warnings` — passed.
+- `cargo test` — passed: 126 tests total (72 lib unit, 3 integration, 13 mesh, 9 pi_forward, 10 presence, 19 rooms; 0 main/doc tests).
+- `cargo build` — passed.
+
+Deferred scope: `relay/src/protocol/generated/control.rs` still owns the generated control-frame-local `RoomMetaPatch` from Step 3 and was intentionally left untouched for the serialized `relay-typed-actor-control-handlers-step-5` wave. The live peer handler maps that generated control patch into the generated room patch re-export without changing observable merge-patch behavior.

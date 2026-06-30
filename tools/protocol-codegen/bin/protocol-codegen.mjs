@@ -1073,23 +1073,121 @@ function emitRustOuter(schema, schemaPath) {
   return `${lines.join('\n')}\n`;
 }
 
-function emitRustRoom() {
+function relayControlRootSchemaFromCatalog(entries, schemaPath) {
+  const relayEntry = entries.find(
+    (entry) =>
+      entry &&
+      entry.family === 'relayControl' &&
+      typeof entry.schemaRef === 'string' &&
+      entry.schemaRef.includes('relay-control.schema.json'),
+  );
+  if (!relayEntry) {
+    throw new Error('Rust room generation requires a relayControl entry from relay-control.schema.json');
+  }
+  const relaySchemaPath = relayEntry.schemaRef.split('#')[0];
+  return requireObject(readJsonSchemaRef(relaySchemaPath, schemaPath), 'relay control schema');
+}
+
+function relayRoomDef(rootSchema, defName) {
+  return requireObject(
+    requireObject(rootSchema.$defs ?? {}, 'relay control schema.$defs')[defName],
+    `relay control schema.$defs.${defName}`,
+  );
+}
+
+function rustTypeForRoomMetaField(fieldName, fieldSchema) {
+  const field = requireObject(fieldSchema, `RoomMeta.${fieldName}`);
+  if (field.type === 'string') return 'String';
+  if (field.type === 'boolean') return 'bool';
+  if (field.type === 'integer') return 'i64';
+  if (typeof field.$ref === 'string') {
+    if (field.$ref.endsWith('/epochMillis')) return 'i64';
+    if (field.$ref.endsWith('/roomId') || field.$ref.endsWith('/sessionId')) return 'String';
+  }
+  throw new Error(`Unsupported RoomMeta.${fieldName} schema ${JSON.stringify(field)}`);
+}
+
+function nullableStringPatchFields(patchSchema) {
+  const metadata = requireObject(patchSchema['x-remote-pi'] ?? {}, 'roomMetaPatch.x-remote-pi');
+  const semantics = requireObject(metadata.mergePatchSemantics ?? {}, 'roomMetaPatch.mergePatchSemantics');
+  return new Set(requireArray(semantics.nullableStrings ?? [], 'roomMetaPatch.nullableStrings').map(String));
+}
+
+function nonNullableBoolPatchFields(patchSchema) {
+  const metadata = requireObject(patchSchema['x-remote-pi'] ?? {}, 'roomMetaPatch.x-remote-pi');
+  const semantics = requireObject(metadata.mergePatchSemantics ?? {}, 'roomMetaPatch.mergePatchSemantics');
+  return new Set(requireArray(semantics.nonNullableBooleans ?? [], 'roomMetaPatch.nonNullableBooleans').map(String));
+}
+
+function emitRustRoom(entries, schemaPath) {
+  const rootSchema = relayControlRootSchemaFromCatalog(entries, schemaPath);
+  const roomMeta = relayRoomDef(rootSchema, 'roomMeta');
+  const roomMetaPatch = relayRoomDef(rootSchema, 'roomMetaPatch');
+  const roomRequired = new Set(requireArray(roomMeta.required ?? [], 'roomMeta.required').map(String));
+  const roomProperties = requireObject(roomMeta.properties, 'roomMeta.properties');
+  const patchProperties = requireObject(roomMetaPatch.properties, 'roomMetaPatch.properties');
+  const nullableStrings = nullableStringPatchFields(roomMetaPatch);
+  const nonNullableBooleans = nonNullableBoolPatchFields(roomMetaPatch);
+
   const lines = rustHeader('room');
-  lines.push('use serde::{Deserialize, Serialize};');
+  lines.push('use serde::{Deserialize, Deserializer, Serialize};');
   lines.push('');
-  lines.push('#[derive(Debug, Default, Clone, Serialize, Deserialize)]');
+  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
   lines.push('pub struct RoomMeta {');
-  lines.push('    pub model: Option<String>,');
-  lines.push('    pub thinking: Option<String>,');
-  lines.push('    #[serde(default)]');
-  lines.push('    pub working: bool,');
+  for (const [fieldName, fieldSchema] of Object.entries(roomProperties)) {
+    assertRustFieldIdentifier(fieldName, `RoomMeta field ${fieldName}`);
+    // `session_id` is endpoint-owned, carried-only metadata. The relay room
+    // registry remains session-blind and preserves the pre-generated room
+    // snapshot shape by not storing or announcing it from relay-owned state.
+    if (fieldName === 'session_id') continue;
+    const rustType = rustTypeForRoomMetaField(fieldName, fieldSchema);
+    if (roomRequired.has(fieldName)) {
+      if (fieldName === 'working') lines.push('    #[serde(default)]');
+      lines.push(`    pub ${fieldName}: ${rustType},`);
+    } else {
+      lines.push('    #[serde(skip_serializing_if = "Option::is_none")]');
+      lines.push(`    pub ${fieldName}: Option<${rustType}>,`);
+    }
+  }
   lines.push('}');
   lines.push('');
-  lines.push('#[derive(Debug, Default, Clone, Serialize, Deserialize)]');
+  lines.push('#[derive(Debug, Default, Clone, Deserialize)]');
   lines.push('pub struct RoomMetaPatch {');
-  lines.push('    pub model: Option<Option<String>>,');
-  lines.push('    pub thinking: Option<Option<String>>,');
-  lines.push('    pub working: Option<bool>,');
+  for (const [fieldName, fieldSchema] of Object.entries(patchProperties)) {
+    assertRustFieldIdentifier(fieldName, `RoomMetaPatch field ${fieldName}`);
+    if (fieldName === 'session_id') continue;
+    if (nullableStrings.has(fieldName)) {
+      lines.push('    #[serde(default, deserialize_with = "deserialize_nullable_string_patch")]');
+      lines.push(`    pub ${fieldName}: Option<Option<String>>,`);
+      continue;
+    }
+    if (nonNullableBooleans.has(fieldName)) {
+      const field = requireObject(fieldSchema, `RoomMetaPatch.${fieldName}`);
+      if (field.type !== 'boolean') {
+        throw new Error(`RoomMetaPatch.${fieldName} must be a boolean schema for non-nullable bool patches`);
+      }
+      lines.push('    #[serde(default, deserialize_with = "deserialize_non_null_bool_patch")]');
+      lines.push(`    pub ${fieldName}: Option<bool>,`);
+      continue;
+    }
+    throw new Error(`Unsupported RoomMetaPatch.${fieldName} schema ${JSON.stringify(fieldSchema)}`);
+  }
+  lines.push('}');
+  lines.push('');
+  lines.push('fn deserialize_nullable_string_patch<\'de, D>(');
+  lines.push('    deserializer: D,');
+  lines.push(') -> Result<Option<Option<String>>, D::Error>');
+  lines.push('where');
+  lines.push('    D: Deserializer<\'de>,');
+  lines.push('{');
+  lines.push('    Option::<String>::deserialize(deserializer).map(Some)');
+  lines.push('}');
+  lines.push('');
+  lines.push('fn deserialize_non_null_bool_patch<\'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>');
+  lines.push('where');
+  lines.push('    D: Deserializer<\'de>,');
+  lines.push('{');
+  lines.push('    bool::deserialize(deserializer).map(Some)');
   lines.push('}');
   lines.push('');
   return `${lines.join('\n')}\n`;
@@ -1143,7 +1241,7 @@ function emitRust(schema, schemaPath) {
   return new Map([
     ['mod.rs', emitRustMod()],
     ['outer.rs', emitRustOuter(schema, schemaPath)],
-    ['room.rs', emitRustRoom()],
+    ['room.rs', emitRustRoom(entries, schemaPath)],
     ['control.rs', emitRustControl((byModule.get('control') ?? []).sort((a, b) => a.type.localeCompare(b.type)), schemaPath)],
     ['cross_pc.rs', emitRustCrossPc((byModule.get('cross_pc') ?? []).sort((a, b) => a.type.localeCompare(b.type)))],
     ['mesh.rs', emitRustMesh()],

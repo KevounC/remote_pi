@@ -2,56 +2,28 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
+use crate::protocol::generated::room;
 use crate::subscriptions::SubscriptionIndex;
 
 /// Metadata about one active Pi room (sub-channel of a peer_id).
 ///
+/// Wire fields are generated from `protocol/schema/relay-control.schema.json`.
 /// `working` is a compatibility projection cached by the relay. The
 /// pi-extension is the only authority for turn lifecycle; the relay stores and
 /// forwards the latest projected boolean for room subscribers and `rooms`
 /// snapshots. Do not derive turn phase, reply target, or cancel target here.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct RoomMeta {
-    pub room_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-    /// Active Claude model for this room (plano 18). None = not reported yet.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    /// Active thinking level for this room (plano 28). Opaque string from the
-    /// Pi's perspective (e.g. `"high"`, `"medium"`, `"none"`) — the relay
-    /// never interprets it. None = not reported yet.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking: Option<String>,
-    /// Latest projected turn-working boolean (plano 32). A
-    /// `room_meta_update` that omits `working` leaves it unchanged; an explicit
-    /// `false` is the terminal/idle projection. Defaults to `false` until the
-    /// Pi reports otherwise, and is always serialized so subscribers can rely
-    /// on its presence.
-    pub working: bool,
-    pub started_at: i64,
-}
+pub use room::RoomMeta;
 
-/// Patch over the mutable `RoomMeta` fields. Each entry distinguishes
+/// Patch over the mutable generated `RoomMeta` fields. Each entry distinguishes
 /// "field absent in the update" (outer `None`, meaning "leave current") from
 /// "field present in the update" (outer `Some(_)`, whose inner `None` means
 /// "clear to null" and whose inner `Some(s)` means "set to s").
 ///
 /// Built by the `room_meta_update` handler from the `meta` JSON object; the
 /// relay never inspects the inner values beyond JSON-shape (they're forwarded
-/// opaquely to subscribers).
-#[derive(Debug, Default, Clone)]
-pub struct RoomMetaPatch {
-    pub model: Option<Option<String>>,
-    pub thinking: Option<Option<String>>,
-    /// `working` is a non-nullable projection bool, so the patch is a single
-    /// `Option`: `None` = field absent (leave current), `Some(false)` =
-    /// terminal/idle projection, `Some(true)` = active projection. There is no
-    /// "clear to null" — `false` *is* the cleared state.
-    pub working: Option<bool>,
-}
+/// opaquely to subscribers). `working` is non-nullable: absence preserves,
+/// `Some(false)` is terminal/idle, and `Some(true)` is active.
+pub use room::RoomMetaPatch;
 
 impl RoomMetaPatch {
     /// `true` when at least one field is present (i.e. the patch is a no-op
@@ -108,6 +80,35 @@ impl RoomManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_room_meta_patch_preserves_absent_null_and_bool_states() {
+        let absent: RoomMetaPatch = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(absent.is_empty());
+
+        let patch: RoomMetaPatch = serde_json::from_value(serde_json::json!({
+            "model": null,
+            "thinking": "high",
+            "working": false,
+        }))
+        .unwrap();
+        assert_eq!(patch.model, Some(None));
+        assert_eq!(patch.thinking, Some(Some("high".to_string())));
+        assert_eq!(patch.working, Some(false));
+        assert!(!patch.is_empty());
+    }
+
+    #[test]
+    fn generated_room_meta_patch_rejects_nullable_working() {
+        let err = serde_json::from_value::<RoomMetaPatch>(serde_json::json!({
+            "working": null,
+        }))
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("invalid type"),
+            "unexpected error: {err}"
+        );
+    }
 
     #[tokio::test]
     async fn subscribe_replaces_list() {
