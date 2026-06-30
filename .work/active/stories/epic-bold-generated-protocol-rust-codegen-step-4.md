@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-rust-codegen-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-generated-protocol-rust-codegen
 depends_on: [epic-bold-generated-protocol-rust-codegen-step-3]
@@ -112,3 +112,19 @@ Verification:
 - `cargo build` — passed.
 
 Deferred scope: `relay/src/protocol/generated/control.rs` still owns the generated control-frame-local `RoomMetaPatch` from Step 3 and was intentionally left untouched for the serialized `relay-typed-actor-control-handlers-step-5` wave. The live peer handler maps that generated control patch into the generated room patch re-export without changing observable merge-patch behavior.
+
+## Review
+
+Approved (2026-06-30) with generated-contract verification. Independently ran
+the canonical regen-check from `protocol/`: `--check` pass (no drift);
+determinism double-run byte-identical; committed `generated/room.rs` matches
+fresh generator output exactly (no hand-edits). Relay: `cargo fmt --check`
+clean; `cargo clippy -- -D warnings` clean; `cargo test` 126 passed / 0 failed
+(72 lib + 3 integ + 13 mesh + 9 pi_forward + 10 presence + 19 rooms; +2 new
+room-snapshot tests). Commit `54ca60b` scoped to generated/room.rs + rooms.rs +
+generator + story .md; collision guard held (did NOT touch control.rs /
+connection_actor / auth). `rooms.rs` re-exports generated room types and owns
+only RoomManager + the is_empty() helper — registry/peer-handler consumers go
+through the single re-export (cleaner than the Files list implied, not
+scope-shrinking). Deferred scope (control.rs's own RoomMetaPatch awaits
+control-handlers-step-5) is a legitimate sequencing decision, documented.
