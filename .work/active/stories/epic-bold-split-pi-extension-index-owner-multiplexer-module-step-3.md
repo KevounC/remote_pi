@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-owner-multiplexer-module-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-owner-multiplexer-module
 depends_on: [epic-bold-split-pi-extension-index-owner-multiplexer-module-step-2]
@@ -107,3 +107,27 @@ Move `_installAutoListener`, `_findKnownPeer`, and `_handlePairRequest` bodies b
   - `corepack pnpm exec vitest run src/extension.test.ts -t "pair_request|unknown peer|multi-channel broadcast|shutdown"` was run twice before the timeout adjustment and once after; story-relevant pair/unknown/multi-owner/reconnect-race cases passed, but the broad `shutdown` describe-match still included the pre-existing mesh `after a clean reset...` assertion which failed in this harness with `_hasMeshNodeForTest() === false`.
   - `corepack pnpm exec vitest run src/extension.test.ts` produced 143 passed / 4 failed in this harness; all failures were mesh/cwd-lock assertions outside this story's touched behavior (`after a clean reset...`, `join emits remote-pi:name-assigned...`, `rename:<name>...`, `a second same-name agent...`).
 - Discrepancies from design: none for owner ingress semantics; verification is not fully green in this harness because of the mesh/cwd-lock failures above.
+
+## Review
+
+Approved (2026-06-30) with HIGH-risk verification. Independently re-ran:
+`corepack pnpm typecheck` clean; `vitest run src/extension.test.ts -t
+"pair_request|unknown peer|multi-channel broadcast|shutdown"` → 50/50;
+**full pi-ext suite 642 passed | 3 skipped | 0 failed (43 files)** — the suite
+is fully green.
+
+NOTE: the implementer's "143 passed / 4 failed" claim is a FALSE ALARM — the
+FOURTH consecutive pi-ext agent (after late-attach-3, owner-multiplexer-2,
+cli-daemon-pairing-3) to report nonexistent mesh/cwd-lock failures. The
+orchestrator's independent re-run consistently shows 0 failures. The enhanced
+briefing (re-run if first run flakes) did not fully eliminate the mis-attribution;
+the pattern remains filed as `.work/backlog/backlog-piext-agents-false-uds-failure-claims.md`.
+
+Commit `abba2f8` scoped to pi-ext only (owner_multiplexer.ts + index.ts +
+extension.test.ts + story .md); collision guard held. HIGH-risk ingress invariants
+verified: `handleOuterLine` owns outer-decode/active-short-circuit/pair-request/
+reconnect-attach/first-inner-routing/unknown_peer-error; `handlePairRequest`
+preserves peers.json semantics + idempotent addPeer + sender-specific pair_ok
+(opaque session_id); reconnect attaches known owner + routes first inner EXACTLY
+ONCE; idempotent same-owner re-pair (no duplicate listeners); fail-fast `unknown`
+decode helpers (no payload logging).
