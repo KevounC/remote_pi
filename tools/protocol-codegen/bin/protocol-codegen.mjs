@@ -299,6 +299,9 @@ function validateSchema(schema) {
       }
       seenTypes.add(variant.type);
       if (variant.aliasOf === undefined) seenClasses.add(variant.className);
+      if (variant.sessionScoped !== undefined && typeof variant.sessionScoped !== 'boolean') {
+        throw new Error(`${variant.className}.sessionScoped must be a boolean when present`);
+      }
       for (const field of requireArray(variant.fields ?? [], `${variant.className}.fields`)) {
         assertIdentifier(field.name, `${variant.className}.field.name`);
         assertWireName(field.wireName, `${variant.className}.field.wireName`);
@@ -353,6 +356,59 @@ function emitAdapterDecoder(union) {
   return lines.join('\n');
 }
 
+function dartDefaultLiteral(value) {
+  if (typeof value === 'string') return dartLiteral(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value === null) return 'null';
+  throw new Error(`Unsupported Dart constructor default ${JSON.stringify(value)}`);
+}
+
+function constructorParam(field) {
+  if (field.constructorDefault !== undefined) {
+    return `this.${field.name} = ${dartDefaultLiteral(field.constructorDefault)}`;
+  }
+  const prefix = field.required ? 'required ' : '';
+  return `${prefix}this.${field.name}`;
+}
+
+function emitSessionScopedRegistry(union) {
+  const sessionScoped = union.variants.filter((variant) => variant.sessionScoped === true);
+  if (sessionScoped.length === 0) return '';
+  const lines = [];
+  const registryName = `generatedSessionScoped${union.name}Types`;
+  lines.push(`const Set<String> ${registryName} = {`);
+  for (const variant of sessionScoped) {
+    lines.push(`  ${dartLiteral(variant.type)},`);
+  }
+  lines.push('};');
+  lines.push('');
+  lines.push(`bool isGeneratedSessionScoped${union.name}Type(String type) =>`);
+  lines.push(`    ${registryName}.contains(type);`);
+  return lines.join('\n');
+}
+
+function emitServerMessageHelpers(union) {
+  if (union.name !== 'ServerMessage') return '';
+  if (!union.variants.some((variant) => variant.sessionScoped === true)) return '';
+  const emittedWithSessionId = union.variants
+    .filter((variant) => variant.aliasOf === undefined)
+    .filter((variant) => (variant.fields ?? []).some((field) => field.name === 'sessionId'));
+  const lines = [];
+  lines.push('String typeOfServerMessage(ServerMessage message) => message.type;');
+  lines.push('');
+  lines.push('String? sessionIdOfServerMessage(ServerMessage message) => switch (message) {');
+  for (const variant of emittedWithSessionId) {
+    if (variant.className === 'PairOk') {
+      lines.push('      PairOk(:final sessionId) => sessionId.isEmpty ? null : sessionId,');
+    } else {
+      lines.push(`      ${variant.className}(:final sessionId) => sessionId,`);
+    }
+  }
+  lines.push('      _ => null,');
+  lines.push('    };');
+  return lines.join('\n');
+}
+
 function emitUnion(union) {
   const registryName = `generated${union.name}Types`;
   const lines = [];
@@ -362,9 +418,17 @@ function emitUnion(union) {
   }
   lines.push('};');
   lines.push('');
+  const sessionScopedRegistry = emitSessionScopedRegistry(union);
+  if (sessionScopedRegistry.length > 0) {
+    lines.push(sessionScopedRegistry);
+    lines.push('');
+  }
   lines.push(`sealed class ${union.name} {`);
   lines.push(`  const ${union.name}();`);
   lines.push('  String get type;');
+  if (union.name === 'SessionHistoryEvent') {
+    lines.push('  int get ts;');
+  }
   lines.push('');
   lines.push(`  static ${union.name} fromJson(Map<String, dynamic> json) {`);
   lines.push("    final type = json['type'] as String?;");
@@ -383,10 +447,7 @@ function emitUnion(union) {
   for (const variant of union.variants) {
     if (variant.aliasOf !== undefined) continue;
     const fields = variant.fields ?? [];
-    const requiredParams = fields.map((field) => {
-      const prefix = field.required ? 'required ' : '';
-      return `${prefix}this.${field.name}`;
-    });
+    const requiredParams = fields.map((field) => constructorParam(field));
     const params = requiredParams.length > 0 ? `{${requiredParams.join(', ')}}` : '';
 
     lines.push(`final class ${variant.className} extends ${union.name} {`);
@@ -396,6 +457,9 @@ function emitUnion(union) {
     lines.push(`  String get type => ${dartLiteral(variant.type)};`);
     lines.push('');
     for (const field of fields) {
+      if (union.name === 'SessionHistoryEvent' && field.name === 'ts') {
+        lines.push('  @override');
+      }
       lines.push(`  final ${dartFieldType(field)} ${field.name};`);
     }
     if (fields.length > 0) {
@@ -421,6 +485,12 @@ function emitUnion(union) {
 
   if (union.emitAdapterDecoder === true) {
     lines.push(emitAdapterDecoder(union).trimEnd());
+    lines.push('');
+  }
+
+  const helpers = emitServerMessageHelpers(union);
+  if (helpers.length > 0) {
+    lines.push(helpers);
     lines.push('');
   }
 
@@ -574,12 +644,24 @@ final class PiHarness {
   final String name;
   final String version;
 
+  static const PiHarness piCodingAgentUnknown = PiHarness(
+    name: 'Pi coding agent',
+    version: '—',
+  );
+
   factory PiHarness.fromJson(Map<String, dynamic> json) => PiHarness(
-        name: (json['name'] as String?) ?? 'Pi coding agent',
-        version: (json['version'] as String?) ?? '—',
+        name: (json['name'] as String?) ?? piCodingAgentUnknown.name,
+        version: (json['version'] as String?) ?? piCodingAgentUnknown.version,
       );
 
   Map<String, dynamic> toJson() => {'name': name, 'version': version};
+
+  @override
+  bool operator ==(Object other) =>
+      other is PiHarness && other.name == name && other.version == version;
+
+  @override
+  int get hashCode => Object.hash(name, version);
 }
 
 enum ByeReason {

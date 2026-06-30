@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen-step-4
 kind: story
-stage: implementing
+stage: review
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: [epic-bold-generated-protocol-dart-codegen-step-3]
 tags: [refactor]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Swap app codec/import surface to generated protocol and retire the hand mirror
@@ -75,3 +75,16 @@ If the sibling schema-source feature explicitly defers relay control frames, spl
 ## Rollback
 
 Revert `protocol.dart`, `codec.dart`, generated outputs, and protocol tests to the pre-swap hand mirror. Since Steps 1-3 generated beside the hand code, rollback should be a single commit revert of this swap step.
+
+## Implementation notes
+
+- Files changed: `app/lib/protocol/protocol.dart`, `app/lib/protocol/control_frames.dart`, `app/lib/protocol/generated/protocol.g.dart`, `app/test/protocol_test.dart`, `tools/protocol-codegen/bin/protocol-codegen.mjs`, `tools/protocol-codegen/fixtures/app_pi_client_dart_ir.json`.
+- Retired the 1313-line handwritten inner protocol mirror: `protocol.dart` is now a small public facade exporting generated DTOs plus a temporary `control_frames.dart` island for relay presence/rooms frames that are deferred from the schema IR.
+- Generator-first changes: the Dart emitter now generates session-scoped registries, `typeOfServerMessage`, `sessionIdOfServerMessage`, `SessionHistoryEvent.ts`, constructor defaults needed to preserve app/test call sites, and the `PiHarness.piCodingAgentUnknown` compatibility constant/equality. The app IR marks session-scoped variants and compatibility defaults explicitly; `protocol.g.dart` was regenerated only via `node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema tools/protocol-codegen/fixtures/app_pi_client_dart_ir.json --out app/lib/protocol/generated/protocol.g.dart`.
+- `codec.dart` required no code change: its stable `package:app/protocol/protocol.dart` import now resolves `ClientMessage`/`ServerMessage` to generated classes through the facade, preserving JSONL `encodeClient`/`decodeServer` behavior.
+- Strengthened `app/test/protocol_test.dart`: fixture files are explicitly classified into server/client/relay-control allowlists; server fixtures must decode; client and control fixtures must throw `UnsupportedTypeException` when decoded as server messages.
+- Regen-diff confirmation: `git diff --stat -- app/lib/protocol/generated/protocol.g.dart` reports `app/lib/protocol/generated/protocol.g.dart | 117 ++++++++++++++++++++++++-----` (`1 file changed, 97 insertions(+), 20 deletions(-)`).
+- Determinism confirmation: generated twice with the command above; the two generated-file diffs were byte-identical and `sha256sum app/lib/protocol/generated/protocol.g.dart` remained `48445629e75c267189b3762fe838169da5757e013f36733f4bcd0fe73c00cc10`.
+- Verification: `PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache /home/agent/projects/remote_pi/.tools/flutter/bin/flutter test test/protocol_test.dart test/protocol/ test/protocol_codegen/` passed (`105` tests). Scoped analyze of `lib test/protocol_test.dart test/protocol test/protocol_codegen` reported only the known `axisAlignment` deprecation info. Full `flutter analyze` is blocked by concurrent/unowned test edits outside this story's file ownership (`test/data/sync/sync_service_test.dart`, `test/ui/chat/chat_viewmodel_test.dart`) plus the same known `axisAlignment` info.
+- Discrepancies from design: relay control frames are deferred from the schema IR and remain in the temporary `control_frames.dart` island as allowed by the story.
+- Adjacent issues parked: none.

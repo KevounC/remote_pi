@@ -147,12 +147,24 @@ final class PiHarness {
   final String name;
   final String version;
 
+  static const PiHarness piCodingAgentUnknown = PiHarness(
+    name: 'Pi coding agent',
+    version: '—',
+  );
+
   factory PiHarness.fromJson(Map<String, dynamic> json) => PiHarness(
-        name: (json['name'] as String?) ?? 'Pi coding agent',
-        version: (json['version'] as String?) ?? '—',
+        name: (json['name'] as String?) ?? piCodingAgentUnknown.name,
+        version: (json['version'] as String?) ?? piCodingAgentUnknown.version,
       );
 
   Map<String, dynamic> toJson() => {'name': name, 'version': version};
+
+  @override
+  bool operator ==(Object other) =>
+      other is PiHarness && other.name == name && other.version == version;
+
+  @override
+  int get hashCode => Object.hash(name, version);
 }
 
 enum ByeReason {
@@ -214,6 +226,23 @@ const Set<String> generatedClientMessageTypes = {
   'thinking_set',
   'list_models',
 };
+
+const Set<String> generatedSessionScopedClientMessageTypes = {
+  'user_message',
+  'queued_message_set',
+  'queued_message_clear',
+  'approve_tool',
+  'cancel',
+  'session_sync',
+  'session_new',
+  'session_compact',
+  'model_set',
+  'thinking_set',
+  'list_models',
+};
+
+bool isGeneratedSessionScopedClientMessageType(String type) =>
+    generatedSessionScopedClientMessageTypes.contains(type);
 
 sealed class ClientMessage {
   const ClientMessage();
@@ -586,6 +615,27 @@ const Set<String> generatedServerMessageTypes = {
   'models_list',
 };
 
+const Set<String> generatedSessionScopedServerMessageTypes = {
+  'user_input',
+  'user_message',
+  'queued_message_state',
+  'agent_chunk',
+  'agent_done',
+  'agent_message',
+  'compaction',
+  'tool_request',
+  'tool_result',
+  'error',
+  'cancelled',
+  'session_history',
+  'action_ok',
+  'action_error',
+  'models_list',
+};
+
+bool isGeneratedSessionScopedServerMessageType(String type) =>
+    generatedSessionScopedServerMessageTypes.contains(type);
+
 sealed class ServerMessage {
   const ServerMessage();
   String get type;
@@ -620,7 +670,7 @@ sealed class ServerMessage {
 }
 
 final class PairOk extends ServerMessage {
-  const PairOk({required this.inReplyTo, required this.sessionName, required this.sessionStartedAt, required this.roomId, required this.sessionId, this.harness, this.hostname});
+  const PairOk({required this.inReplyTo, required this.sessionName, required this.sessionStartedAt, required this.roomId, this.sessionId = '', this.harness, this.hostname});
 
   @override
   String get type => 'pair_ok';
@@ -684,7 +734,7 @@ final class PairError extends ServerMessage {
 }
 
 final class UserInput extends ServerMessage {
-  const UserInput({required this.id, required this.sessionId, required this.text, this.streamingBehavior, this.image});
+  const UserInput({required this.id, this.sessionId = '', required this.text, this.streamingBehavior, this.image});
 
   @override
   String get type => 'user_input';
@@ -697,7 +747,7 @@ final class UserInput extends ServerMessage {
 
   factory UserInput.fromJson(Map<String, dynamic> json) => UserInput(
         id: json['id'] as String,
-        sessionId: _sessionIdFromJson(json),
+        sessionId: _optionalSessionIdFromJson(json),
         text: json['text'] as String,
         streamingBehavior: UserMessageStreamingBehavior.fromWire(json['streaming_behavior'] as String?),
         image: _firstImage(json['images']),
@@ -717,7 +767,7 @@ final class UserInput extends ServerMessage {
 }
 
 final class QueuedMessageState extends ServerMessage {
-  const QueuedMessageState({required this.sessionId, this.id, this.text});
+  const QueuedMessageState({this.sessionId = '', this.id, this.text});
 
   @override
   String get type => 'queued_message_state';
@@ -744,7 +794,7 @@ final class QueuedMessageState extends ServerMessage {
 }
 
 final class AgentChunk extends ServerMessage {
-  const AgentChunk({required this.sessionId, required this.inReplyTo, required this.delta});
+  const AgentChunk({this.sessionId = '', required this.inReplyTo, required this.delta});
 
   @override
   String get type => 'agent_chunk';
@@ -769,7 +819,7 @@ final class AgentChunk extends ServerMessage {
 }
 
 final class AgentDone extends ServerMessage {
-  const AgentDone({required this.sessionId, required this.inReplyTo, this.usage});
+  const AgentDone({this.sessionId = '', required this.inReplyTo, this.usage});
 
   @override
   String get type => 'agent_done';
@@ -795,7 +845,7 @@ final class AgentDone extends ServerMessage {
 }
 
 final class AgentMessage extends ServerMessage {
-  const AgentMessage({required this.sessionId, required this.inReplyTo, required this.text, this.usage});
+  const AgentMessage({this.sessionId = '', required this.inReplyTo, required this.text, this.usage});
 
   @override
   String get type => 'agent_message';
@@ -824,7 +874,7 @@ final class AgentMessage extends ServerMessage {
 }
 
 final class Compaction extends ServerMessage {
-  const Compaction({required this.sessionId, required this.summary, this.tokensBefore, this.ts});
+  const Compaction({this.sessionId = '', required this.summary, this.tokensBefore, this.ts});
 
   @override
   String get type => 'compaction';
@@ -835,7 +885,7 @@ final class Compaction extends ServerMessage {
   final int? ts;
 
   factory Compaction.fromJson(Map<String, dynamic> json) => Compaction(
-        sessionId: _sessionIdFromJson(json),
+        sessionId: _optionalSessionIdFromJson(json),
         summary: (json['summary'] as String?) ?? '',
         tokensBefore: (json['tokens_before'] as num?)?.toInt(),
         ts: (json['ts'] as num?)?.toInt(),
@@ -854,7 +904,7 @@ final class Compaction extends ServerMessage {
 }
 
 final class ToolRequest extends ServerMessage {
-  const ToolRequest({required this.sessionId, required this.toolCallId, required this.tool, required this.args});
+  const ToolRequest({this.sessionId = '', required this.toolCallId, required this.tool, required this.args});
 
   @override
   String get type => 'tool_request';
@@ -882,7 +932,7 @@ final class ToolRequest extends ServerMessage {
 }
 
 final class ToolResult extends ServerMessage {
-  const ToolResult({required this.sessionId, required this.toolCallId, this.result, this.error});
+  const ToolResult({this.sessionId = '', required this.toolCallId, this.result, this.error});
 
   @override
   String get type => 'tool_result';
@@ -912,7 +962,7 @@ final class ToolResult extends ServerMessage {
 }
 
 final class ErrorMessage extends ServerMessage {
-  const ErrorMessage({required this.sessionId, this.inReplyTo, required this.code, required this.message});
+  const ErrorMessage({this.sessionId = '', this.inReplyTo, required this.code, required this.message});
 
   @override
   String get type => 'error';
@@ -941,7 +991,7 @@ final class ErrorMessage extends ServerMessage {
 }
 
 final class Cancelled extends ServerMessage {
-  const Cancelled({required this.sessionId, required this.inReplyTo, required this.targetId});
+  const Cancelled({this.sessionId = '', required this.inReplyTo, required this.targetId});
 
   @override
   String get type => 'cancelled';
@@ -1006,7 +1056,7 @@ final class Bye extends ServerMessage {
 }
 
 final class SessionHistory extends ServerMessage {
-  const SessionHistory({required this.sessionId, required this.inReplyTo, required this.sessionStartedAt, required this.events, required this.eos, required this.truncated});
+  const SessionHistory({this.sessionId = '', required this.inReplyTo, required this.sessionStartedAt, required this.events, required this.eos, this.truncated = false});
 
   @override
   String get type => 'session_history';
@@ -1019,7 +1069,7 @@ final class SessionHistory extends ServerMessage {
   final bool truncated;
 
   factory SessionHistory.fromJson(Map<String, dynamic> json) => SessionHistory(
-        sessionId: _sessionIdFromJson(json),
+        sessionId: _optionalSessionIdFromJson(json),
         inReplyTo: json['in_reply_to'] as String,
         sessionStartedAt: (json['session_started_at'] as num).toInt(),
         events: (json['events'] as List<dynamic>).map((item) => SessionHistoryEvent.fromJson((item as Map).cast<String, dynamic>())).toList(),
@@ -1040,7 +1090,7 @@ final class SessionHistory extends ServerMessage {
 }
 
 final class ActionOk extends ServerMessage {
-  const ActionOk({required this.sessionId, required this.inReplyTo, required this.action, required this.rawAction});
+  const ActionOk({this.sessionId = '', required this.inReplyTo, required this.action, required this.rawAction});
 
   @override
   String get type => 'action_ok';
@@ -1067,7 +1117,7 @@ final class ActionOk extends ServerMessage {
 }
 
 final class ActionError extends ServerMessage {
-  const ActionError({required this.sessionId, required this.inReplyTo, required this.action, required this.rawAction, required this.error});
+  const ActionError({this.sessionId = '', required this.inReplyTo, required this.action, required this.rawAction, required this.error});
 
   @override
   String get type => 'action_error';
@@ -1097,7 +1147,7 @@ final class ActionError extends ServerMessage {
 }
 
 final class ModelsList extends ServerMessage {
-  const ModelsList({required this.sessionId, required this.inReplyTo, required this.models, this.current});
+  const ModelsList({this.sessionId = '', required this.inReplyTo, required this.models, this.current});
 
   @override
   String get type => 'models_list';
@@ -1198,6 +1248,27 @@ T decodeGeneratedServerMessage<T>(
   };
 }
 
+String typeOfServerMessage(ServerMessage message) => message.type;
+
+String? sessionIdOfServerMessage(ServerMessage message) => switch (message) {
+      PairOk(:final sessionId) => sessionId.isEmpty ? null : sessionId,
+      UserInput(:final sessionId) => sessionId,
+      QueuedMessageState(:final sessionId) => sessionId,
+      AgentChunk(:final sessionId) => sessionId,
+      AgentDone(:final sessionId) => sessionId,
+      AgentMessage(:final sessionId) => sessionId,
+      Compaction(:final sessionId) => sessionId,
+      ToolRequest(:final sessionId) => sessionId,
+      ToolResult(:final sessionId) => sessionId,
+      ErrorMessage(:final sessionId) => sessionId,
+      Cancelled(:final sessionId) => sessionId,
+      SessionHistory(:final sessionId) => sessionId,
+      ActionOk(:final sessionId) => sessionId,
+      ActionError(:final sessionId) => sessionId,
+      ModelsList(:final sessionId) => sessionId,
+      _ => null,
+    };
+
 const Set<String> generatedSessionHistoryEventTypes = {
   'user_input',
   'tool_request',
@@ -1209,6 +1280,7 @@ const Set<String> generatedSessionHistoryEventTypes = {
 sealed class SessionHistoryEvent {
   const SessionHistoryEvent();
   String get type;
+  int get ts;
 
   static SessionHistoryEvent fromJson(Map<String, dynamic> json) {
     final type = json['type'] as String?;
@@ -1231,6 +1303,7 @@ final class UserInputEvt extends SessionHistoryEvent {
   @override
   String get type => 'user_input';
 
+  @override
   final int ts;
   final String id;
   final String text;
@@ -1260,6 +1333,7 @@ final class ToolRequestEvt extends SessionHistoryEvent {
   @override
   String get type => 'tool_request';
 
+  @override
   final int ts;
   final String toolCallId;
   final String tool;
@@ -1288,6 +1362,7 @@ final class ToolResultEvt extends SessionHistoryEvent {
   @override
   String get type => 'tool_result';
 
+  @override
   final int ts;
   final String toolCallId;
   final dynamic result;
@@ -1318,6 +1393,7 @@ final class AgentMessageEvt extends SessionHistoryEvent {
   @override
   String get type => 'agent_message';
 
+  @override
   final int ts;
   final String inReplyTo;
   final String text;
@@ -1343,6 +1419,7 @@ final class CompactionEvt extends SessionHistoryEvent {
   @override
   String get type => 'compaction';
 
+  @override
   final int ts;
   final String summary;
   final int? tokensBefore;

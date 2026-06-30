@@ -62,7 +62,8 @@
               "dartType": "List<WireImage>",
               "required": false
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "queued_message_set",
@@ -86,7 +87,8 @@
               "dartType": "String",
               "required": true
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "queued_message_clear",
@@ -104,7 +106,8 @@
               "dartType": "String",
               "required": true
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "approve_tool",
@@ -134,7 +137,8 @@
               "dartType": "ApproveDecision",
               "required": true
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "cancel",
@@ -158,7 +162,8 @@
               "dartType": "String",
               "required": true
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "ping",
@@ -194,7 +199,8 @@
               "dartType": "int",
               "required": false
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "session_new",
@@ -212,7 +218,8 @@
               "dartType": "String",
               "required": true
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "session_compact",
@@ -230,7 +237,8 @@
               "dartType": "String",
               "required": true
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "model_set",
@@ -260,7 +268,8 @@
               "dartType": "String",
               "required": true
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "thinking_set",
@@ -284,7 +293,8 @@
               "dartType": "ThinkingLevel",
               "required": true
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "list_models",
@@ -302,7 +312,8 @@
               "dartType": "String",
               "required": true
             }
-          ]
+          ],
+          "sessionScoped": true
         }
       ]
     },
@@ -345,7 +356,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdOptional"
+              "read": "sessionIdOptional",
+              "constructorDefault": ""
             },
             {
               "name": "harness",
@@ -401,7 +413,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdOptional",
+              "constructorDefault": ""
             },
             {
               "name": "text",
@@ -423,13 +436,15 @@
               "read": "firstImage",
               "write": "firstImageList"
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "user_message",
           "className": "UserMessageAlias",
           "aliasOf": "UserInput",
-          "fields": []
+          "fields": [],
+          "sessionScoped": true
         },
         {
           "type": "queued_message_state",
@@ -440,7 +455,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdRequired",
+              "constructorDefault": ""
             },
             {
               "name": "id",
@@ -454,7 +470,8 @@
               "dartType": "String",
               "required": false
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "agent_chunk",
@@ -465,7 +482,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdRequired",
+              "constructorDefault": ""
             },
             {
               "name": "inReplyTo",
@@ -479,7 +497,8 @@
               "dartType": "String",
               "required": true
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "agent_done",
@@ -490,7 +509,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdRequired",
+              "constructorDefault": ""
             },
             {
               "name": "inReplyTo",
@@ -504,7 +524,8 @@
               "dartType": "Usage",
               "required": false
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "agent_message",
@@ -515,7 +536,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdRequired",
+              "constructorDefault": ""
             },
             {
               "name": "inReplyTo",
@@ -535,7 +557,8 @@
               "dartType": "Usage",
               "required": false
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "compaction",
@@ -546,7 +569,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdOptional",
+              "constructorDefault": ""
             },
             {
               "name": "summary",
@@ -567,7 +591,8 @@
               "dartType": "int",
               "required": false
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "tool_request",
@@ -578,7 +603,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdRequired",
+              "constructorDefault": ""
             },
             {
               "name": "toolCallId",
@@ -598,7 +624,8 @@
               "dartType": "dynamic",
               "required": true
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "tool_result",
@@ -609,7 +636,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdRequired",
+              "constructorDefault": ""
             },
             {
               "name": "toolCallId",
@@ -629,7 +657,8 @@
               "dartType": "String",
               "required": false
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "error",
@@ -640,7 +669,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdRequired",
+              "constructorDefault": ""
             },
             {
               "name": "inReplyTo",
@@ -660,7 +690,8 @@
               "dartType": "String",
               "required": true
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "cancelled",
@@ -671,7 +702,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdRequired",
+              "constructorDefault": ""
             },
             {
               "name": "inReplyTo",
@@ -685,7 +717,8 @@
               "dartType": "String",
               "required": true
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "pong",
@@ -729,7 +762,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdOptional",
+              "constructorDefault": ""
             },
             {
               "name": "inReplyTo",
@@ -761,9 +795,11 @@
               "wireName": "truncated",
               "dartType": "bool",
               "required": true,
-              "defaultValue": false
+              "defaultValue": false,
+              "constructorDefault": false
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "action_ok",
@@ -774,7 +810,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdRequired",
+              "constructorDefault": ""
             },
             {
               "name": "inReplyTo",
@@ -797,7 +834,8 @@
               "defaultValue": "",
               "includeInJson": false
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "action_error",
@@ -808,7 +846,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdRequired",
+              "constructorDefault": ""
             },
             {
               "name": "inReplyTo",
@@ -838,7 +877,8 @@
               "required": true,
               "defaultValue": ""
             }
-          ]
+          ],
+          "sessionScoped": true
         },
         {
           "type": "models_list",
@@ -849,7 +889,8 @@
               "wireName": "session_id",
               "dartType": "String",
               "required": true,
-              "read": "sessionIdRequired"
+              "read": "sessionIdRequired",
+              "constructorDefault": ""
             },
             {
               "name": "inReplyTo",
@@ -869,7 +910,8 @@
               "dartType": "WireModel",
               "required": false
             }
-          ]
+          ],
+          "sessionScoped": true
         }
       ]
     },

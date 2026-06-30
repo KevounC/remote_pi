@@ -5,6 +5,51 @@ import 'package:app/protocol/codec.dart';
 import 'package:app/protocol/protocol.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+const _serverFixtureFiles = <String>{
+  'action_error.jsonl',
+  'action_ok.jsonl',
+  'agent_message.jsonl',
+  'agent_stream.jsonl',
+  'bye.jsonl',
+  'cancelled.jsonl',
+  'compaction.jsonl',
+  'error.jsonl',
+  'models_list.jsonl',
+  'pair_error.jsonl',
+  'pair_ok.jsonl',
+  'pong.jsonl',
+  'queued_message_state.jsonl',
+  'session_history.jsonl',
+  'tool_request.jsonl',
+  'tool_result.jsonl',
+  'user_input.jsonl',
+  'user_message.jsonl',
+};
+
+const _clientOnlyFixtureFiles = <String>{
+  'approve_tool.jsonl',
+  'cancel.jsonl',
+  'pair_request.jsonl',
+  'ping.jsonl',
+  'session_sync.jsonl',
+};
+
+const _relayControlFixtureFiles = <String>{
+  'peer_offline.jsonl',
+  'peer_online.jsonl',
+  'presence.jsonl',
+  'presence_check.jsonl',
+  'room_announced.jsonl',
+  'room_ended.jsonl',
+  'room_meta_updated.jsonl',
+  'rooms.jsonl',
+  'rooms_check.jsonl',
+  'subscribe_presence.jsonl',
+  'subscribe_rooms.jsonl',
+  'unsubscribe_presence.jsonl',
+  'unsubscribe_rooms.jsonl',
+};
+
 void main() {
   group('decode fixtures', () {
     final fixtureDir = Directory('../.orchestration/contracts/fixtures');
@@ -17,19 +62,64 @@ void main() {
       );
     });
 
-    test('all fixture lines parse or throw UnsupportedTypeException', () {
-      final files = fixtureDir.listSync().whereType<File>().toList();
-      expect(files, isNotEmpty, reason: 'no fixture files found');
+    test('fixture files are explicitly classified', () {
+      final fixtureFiles = fixtureDir
+          .listSync()
+          .whereType<File>()
+          .map((file) => file.uri.pathSegments.last)
+          .where((name) => name.endsWith('.jsonl'))
+          .toSet();
 
-      for (final file in files) {
-        final lines = file.readAsLinesSync().where((l) => l.trim().isNotEmpty);
-        for (final line in lines) {
-          try {
-            final msg = decodeServer(line);
-            expect(msg, isNotNull);
-          } on UnsupportedTypeException {
-            // client-only types (user_message, approve_tool, etc.) — expected
-          }
+      expect(fixtureFiles, isNotEmpty, reason: 'no fixture files found');
+      expect({
+        ..._serverFixtureFiles,
+        ..._clientOnlyFixtureFiles,
+        ..._relayControlFixtureFiles,
+      }, fixtureFiles);
+    });
+
+    test('server fixture lines parse through decodeServer', () {
+      final observedTypes = <String>{};
+      for (final fileName in _serverFixtureFiles) {
+        for (final payload in _fixturePayloads(fileName)) {
+          observedTypes.add(payload['type'] as String);
+          expect(
+            decodeServer(jsonEncode(payload)),
+            isA<ServerMessage>(),
+            reason: '$fileName should be generated server protocol',
+          );
+        }
+      }
+
+      expect(observedTypes, generatedServerMessageTypes);
+    });
+
+    test('client fixture lines are client-only', () {
+      for (final fileName in _clientOnlyFixtureFiles) {
+        for (final payload in _fixturePayloads(fileName)) {
+          expect(ClientMessage.fromJson(payload), isA<ClientMessage>());
+          expect(
+            () => decodeServer(jsonEncode(payload)),
+            throwsA(isA<UnsupportedTypeException>()),
+            reason: '$fileName is intentionally client-only',
+          );
+        }
+      }
+    });
+
+    test('relay control fixture lines are not inner protocol messages', () {
+      for (final fileName in _relayControlFixtureFiles) {
+        for (final payload in _fixturePayloads(fileName)) {
+          expect(
+            () => ServerMessage.fromJson(payload),
+            throwsA(isA<UnsupportedTypeException>()),
+            reason: '$fileName is relay control, not a server message',
+          );
+          expect(
+            () => ClientMessage.fromJson(payload),
+            throwsA(isA<UnsupportedTypeException>()),
+            reason: '$fileName is relay control, not a client message',
+          );
         }
       }
     });
@@ -476,4 +566,13 @@ void main() {
       expect(noVision.vision, isFalse);
     });
   });
+}
+
+Iterable<Map<String, dynamic>> _fixturePayloads(String fileName) sync* {
+  final file = File('../.orchestration/contracts/fixtures/$fileName');
+  for (final line in file.readAsLinesSync()) {
+    final trimmed = line.trim();
+    if (trimmed.isEmpty) continue;
+    yield jsonDecode(trimmed) as Map<String, dynamic>;
+  }
 }
