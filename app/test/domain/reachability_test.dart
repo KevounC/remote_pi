@@ -88,20 +88,22 @@ void main() {
 
       expect(projected, transitions);
       expect(
-        projected,
-        contains({
-          'from': 'online',
-          'event': 'app_protocol_silence',
-          'to': 'degraded',
-        }),
+        projected.any(
+          (transition) =>
+              transition['from'] == 'online' &&
+              transition['event'] == 'app_protocol_silence' &&
+              transition['to'] == 'degraded',
+        ),
+        isTrue,
       );
       expect(
-        projected,
-        contains({
-          'from': 'degraded',
-          'event': 'fresh_app_frame_or_room_snapshot',
-          'to': 'online',
-        }),
+        projected.any(
+          (transition) =>
+              transition['from'] == 'degraded' &&
+              transition['event'] == 'fresh_app_frame_or_room_snapshot' &&
+              transition['to'] == 'online',
+        ),
+        isTrue,
       );
     });
   });

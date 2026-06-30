@@ -1,14 +1,14 @@
 ---
 id: epic-bold-reachability-contract-app-adapter-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-reachability-contract-app-adapter
 depends_on: [epic-bold-reachability-contract-app-adapter-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Lock adapter behavior with transport + domain tests
@@ -74,3 +74,10 @@ core.
 
 Remove new adapter tests and revert temporary transport assertion reshapes while
 keeping the feature behavior intact.
+
+## Implementation
+
+- `app/test/domain/reachability_test.dart` now validates the Dart projection against `protocol/schema/reachability.json` for state names/display names, backoff ladder and clamp behavior, heartbeat constants, and transition table membership. The transition membership assertions now compare map fields directly instead of relying on Dart `Map` identity.
+- `app/test/transport/reachability_adapter_test.dart` covers deterministic adapter transitions: relay connection success preserves retry backoff, retry attempts advance only when the retry timer fires, repeated attempts clamp the next delay at the 30s contract ceiling, three missed app pongs degrade reachability, app-frame ingress restores online and resets retry/missed counters, and stop/reset returns offline.
+- Re-checked the step-2 bounce invariant: `onRelayConnectionEstablished()` still does not reset `retryAttempt`; the existing `ConnectionManager` regression test preserves the public `0→1→2` retry ladder with `1s→2s→5s` delays when relay reconnects succeed without inbound app/Pi traffic.
+- Verification: `flutter pub get` completed. `flutter analyze` reported only the known unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802` and no issues in this story's files. `flutter test test/domain/reachability_test.dart test/transport/reachability_adapter_test.dart test/transport/connection_manager_test.dart` passed `52/52`.

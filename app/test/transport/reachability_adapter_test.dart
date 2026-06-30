@@ -34,7 +34,7 @@ void main() {
     );
 
     test(
-      'retryable failures preserve current attempt until the retry timer fires',
+      'retries advance only when timer fires and delay clamps to the contract ladder',
       () {
         final adapter = ReachabilityAdapter();
 
@@ -45,14 +45,30 @@ void main() {
         expect(adapter.nextRetryDelay, reachabilityBackoffForAttempt(0));
         expect(adapter.waitingForRetry, isTrue);
 
-        adapter.onRetryTimerFired();
-        expect(adapter.state, ReachabilityState.connecting);
-        expect(adapter.connectInFlight, isTrue);
-        expect(adapter.retryAttempt, 1);
+        final expectedDelays = <Duration>[
+          const Duration(seconds: 2),
+          const Duration(seconds: 5),
+          const Duration(seconds: 10),
+          const Duration(seconds: 30),
+          const Duration(seconds: 30),
+          const Duration(seconds: 30),
+        ];
 
-        adapter.onConnectFailedRetryable();
-        expect(adapter.retryAttempt, 1);
-        expect(adapter.nextRetryDelay, reachabilityBackoffForAttempt(1));
+        for (var i = 0; i < expectedDelays.length; i++) {
+          adapter.onRetryTimerFired();
+          expect(adapter.state, ReachabilityState.connecting);
+          expect(adapter.connectInFlight, isTrue);
+          expect(adapter.retryAttempt, i + 1);
+
+          adapter.onConnectFailedRetryable();
+          expect(adapter.state, ReachabilityState.retrying);
+          expect(
+            adapter.retryAttempt,
+            i + 1,
+            reason: 'failure emission must not double-increment attempts',
+          );
+          expect(adapter.nextRetryDelay, expectedDelays[i]);
+        }
       },
     );
 
