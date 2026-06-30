@@ -13,13 +13,8 @@ use crate::AppState;
 use crate::auth::challenge::{
     HELLO_TIMEOUT_MS, challenge_line, gen_nonce, parse_hello_bootstrap, verify_auth,
 };
-#[path = "connection_actor.rs"]
-pub(crate) mod connection_actor;
-
-use crate::handlers::peer::connection_actor::{ActorDispatch, ConnectionActor};
-use crate::protocol::frame::{
-    DecodedRelayFrame, FrameDecodeError, OuterEnvelope, decode_relay_frame,
-};
+use crate::handlers::connection_actor::{ActorDispatch, ConnectionActor, ConnectionActorServices};
+use crate::protocol::frame::{FrameDecodeError, decode_relay_frame};
 use crate::reachability::RELAY_WS_PING_INTERVAL;
 
 /// Maximum number of peer IDs accepted in one presence/rooms control frame.
@@ -104,11 +99,7 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
     info!(peer = %peer_short, room = %room_id, addr = %peer_addr, "authenticated");
 
     let registry = state.registry.clone();
-    let presence = state.presence.clone();
     let rooms = state.rooms.clone();
-    let mesh = state.mesh.clone();
-    let mesh_auth = state.mesh_auth.clone();
-    let metrics = state.metrics.clone();
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     let conn_id = registry.register(peer_id.clone(), room_meta, tx).await;
@@ -117,10 +108,15 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
         peer_id.clone(),
         peer_short.clone(),
         room_id.clone(),
-        registry.clone(),
-        presence,
-        rooms.clone(),
-        metrics,
+        conn_id,
+        ConnectionActorServices {
+            registry: registry.clone(),
+            presence: state.presence.clone(),
+            rooms: rooms.clone(),
+            mesh: state.mesh.clone(),
+            mesh_auth: state.mesh_auth.clone(),
+            metrics: state.metrics.clone(),
+        },
     );
 
     // ── 4. Routing loop ───────────────────────────────────────────────────
@@ -162,101 +158,19 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
                             }
                         };
 
-                        match frame {
-                            DecodedRelayFrame::Control(control_frame) => {
-                                match actor.dispatch_control(control_frame).await {
-                                    ActorDispatch::Continue => {}
-                                    ActorDispatch::Send(msg) => {
-                                        if sink.send(msg).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    ActorDispatch::SendMany(messages) => {
-                                        for msg in messages {
-                                            if sink.send(msg).await.is_err() {
-                                                break 'routing;
-                                            }
-                                        }
-                                    }
+                        match actor.dispatch(frame).await {
+                            ActorDispatch::Continue => {}
+                            ActorDispatch::Close => break,
+                            ActorDispatch::Send(text) => {
+                                if sink.send(Message::Text(text)).await.is_err() {
+                                    break;
                                 }
                             }
-                            DecodedRelayFrame::PiEnvelope(pi_frame) => {
-                                use crate::handlers::pi_forward::{
-                                    PiForwardResult, handle_pi_envelope,
-                                };
-                                let pi_frame = serde_json::to_value(
-                                    crate::protocol::generated::cross_pc::CrossPcFrame::PiEnvelope(
-                                        pi_frame,
-                                    ),
-                                )
-                                .expect("generated pi_envelope serialisation is infallible");
-                                match handle_pi_envelope(
-                                    &peer_id,
-                                    &pi_frame,
-                                    &registry,
-                                    &mesh,
-                                    &mesh_auth,
-                                )
-                                .await
-                                {
-                                    PiForwardResult::Forwarded => {}
-                                    PiForwardResult::TransportError(err_msg) => {
-                                        if sink.send(err_msg).await.is_err() {
-                                            break;
-                                        }
+                            ActorDispatch::SendMany(messages) => {
+                                for text in messages {
+                                    if sink.send(Message::Text(text)).await.is_err() {
+                                        break 'routing;
                                     }
-                                }
-                            }
-                            DecodedRelayFrame::MalformedPiEnvelope(pi_frame) => {
-                                use crate::handlers::pi_forward::{
-                                    PiForwardResult, handle_pi_envelope,
-                                };
-                                match handle_pi_envelope(
-                                    &peer_id,
-                                    &pi_frame,
-                                    &registry,
-                                    &mesh,
-                                    &mesh_auth,
-                                )
-                                .await
-                                {
-                                    PiForwardResult::Forwarded => {}
-                                    PiForwardResult::TransportError(err_msg) => {
-                                        if sink.send(err_msg).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            DecodedRelayFrame::Outer(env) => {
-                                let ct_len = env.ct.len();
-                                let dest_peer = env.peer;
-                                let dest_room = env.room;
-                                let dest_tail =
-                                    dest_peer[dest_peer.len().saturating_sub(8)..].to_string();
-                                // Rewrite: recipient sees sender's peer_id + sender's room_id.
-                                let rewritten = OuterEnvelope {
-                                    peer: peer_id.clone(),
-                                    room: room_id.clone(),
-                                    ct: env.ct,
-                                };
-                                let fwd_line = serde_json::to_string(&rewritten)
-                                    .expect("OuterEnvelope serialisation is infallible");
-                                // Skip-sender: pass our own conn_id so multi-device
-                                // Owners don't echo their own outbound messages.
-                                if !registry.forward(
-                                    &dest_peer,
-                                    &dest_room,
-                                    Message::Text(fwd_line),
-                                    conn_id,
-                                ) {
-                                    warn!(
-                                        from = %peer_short,
-                                        dest = %dest_tail,
-                                        room = %dest_room,
-                                        bytes = ct_len,
-                                        "dest (peer, room) not found, dropping",
-                                    );
                                 }
                             }
                         }

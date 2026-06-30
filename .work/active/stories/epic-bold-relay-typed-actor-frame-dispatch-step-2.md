@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-frame-dispatch-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-frame-dispatch
 depends_on: [epic-bold-relay-typed-actor-frame-dispatch-step-1]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 2: Extract the authenticated connection actor shell
@@ -102,3 +102,11 @@ Medium. The highest risk is moving cleanup or sink-break behavior incorrectly; a
 ## Rollback
 
 Inline the actor state back into `handle_peer` and remove `connection_actor.rs`. Because registration/cleanup remains in `handle_peer`, rollback is mechanical.
+
+## Implementation
+
+- Extracted `ConnectionActor` as the authenticated per-connection dispatch owner for control, outer envelope, and `pi_envelope` frames; per-connection rate-limit and dedup caches now live on the actor.
+- Kept `handle_peer` as the transport/lifecycle loop: handshake/auth, register, decode inbound text, call `actor.dispatch()`, send actor text output, relay registry messages, heartbeat, and final unregister/rooms cleanup.
+- Preserved cleanup-once and sink-break behavior: any failed send from actor output, registry output, or heartbeat exits the routing loop and reaches the existing single unregister/unsubscribe tail.
+- Preserved wire behavior: existing outer forwarding rewrite, skip-sender `conn_id`, control dedup/rate-limit emissions, and cross-PC transport-error handling remain unchanged.
+- Verification: `cargo fmt --check && cargo clippy -- -D warnings`; `cargo test` (82 lib + 3 integration + 13 mesh + 8 pi_forward + 10 presence + 2 parity + 19 rooms; all passed); `cargo build`.

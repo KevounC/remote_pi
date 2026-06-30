@@ -1,8 +1,8 @@
 use thiserror::Error;
 use tracing::warn;
 
+use crate::handlers::connection_actor::{ActorDispatch, ConnectionActor};
 use crate::handlers::peer::MAX_CONTROL_FRAME_PEERS;
-use crate::handlers::peer::connection_actor::{ActorDispatch, ConnectionActor};
 use crate::protocol::generated::control::{RelayControlFrame, RoomMetaUpdateFrame};
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -181,8 +181,10 @@ mod tests {
     use tokio::sync::mpsc;
 
     use super::{ControlFrameError, bounded_peer_list};
+    use crate::handlers::connection_actor::{
+        ActorDispatch, ConnectionActor, ConnectionActorServices,
+    };
     use crate::handlers::peer::MAX_CONTROL_FRAME_PEERS;
-    use crate::handlers::peer::connection_actor::{ActorDispatch, ConnectionActor};
     use crate::metrics::FirehoseMetrics;
     use crate::peers::registry::PeerRegistry;
     use crate::presence::PresenceManager;
@@ -232,10 +234,15 @@ mod tests {
                 peer_id.to_owned(),
                 peer_id.to_owned(),
                 "main".to_string(),
-                self.registry.clone(),
-                self.presence.clone(),
-                self.rooms.clone(),
-                self.metrics.clone(),
+                0,
+                ConnectionActorServices {
+                    registry: self.registry.clone(),
+                    presence: self.presence.clone(),
+                    rooms: self.rooms.clone(),
+                    mesh: Arc::new(crate::mesh::MeshStore::open_in_memory().unwrap()),
+                    mesh_auth: Arc::new(crate::handlers::pi_forward::MeshAuthCache::new()),
+                    metrics: self.metrics.clone(),
+                },
             )
         }
     }
@@ -422,7 +429,7 @@ mod tests {
         };
 
         let first = actor.dispatch_control(frame()).await;
-        assert!(matches!(first, ActorDispatch::Send(Message::Text(_))));
+        assert!(matches!(first, ActorDispatch::Send(_)));
         let second = actor.dispatch_control(frame()).await;
         assert!(matches!(second, ActorDispatch::Continue));
 

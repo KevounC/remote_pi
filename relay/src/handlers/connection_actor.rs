@@ -1,24 +1,29 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::extract::ws::Message;
 use tokio::time::{self, Duration};
 use tracing::warn;
 
+use crate::handlers::pi_forward::{MeshAuthCache, PiForwardResult, handle_pi_envelope};
+use crate::mesh::MeshStore;
 use crate::metrics::FirehoseMetrics;
 use crate::peers::registry::PeerRegistry;
 use crate::presence::{PeerPresence, PresenceManager};
+use crate::protocol::frame::{DecodedRelayFrame, OuterEnvelope, PiEnvelopeFrame};
+use crate::protocol::generated::cross_pc::CrossPcFrame;
 use crate::rooms::RoomManager;
 
-use super::{MAX_CONTROL_CHECK_PEER_COST_PER_WINDOW, MAX_CONTROL_FRAME_PEERS};
+use crate::handlers::peer::{MAX_CONTROL_CHECK_PEER_COST_PER_WINDOW, MAX_CONTROL_FRAME_PEERS};
 
 const CONTROL_CHECK_PEER_COST_WINDOW: Duration = Duration::from_secs(60);
 
 #[derive(Debug)]
 pub(crate) enum ActorDispatch {
     Continue,
-    Send(Message),
-    SendMany(Vec<Message>),
+    #[allow(dead_code)]
+    Close,
+    Send(String),
+    SendMany(Vec<String>),
 }
 
 #[derive(Debug)]
@@ -57,13 +62,26 @@ pub(crate) fn control_check_cost(peers: &[String]) -> usize {
     peers.len().max(1)
 }
 
+#[derive(Clone)]
+pub(crate) struct ConnectionActorServices {
+    pub(crate) registry: Arc<PeerRegistry>,
+    pub(crate) presence: Arc<PresenceManager>,
+    pub(crate) rooms: Arc<RoomManager>,
+    pub(crate) mesh: Arc<MeshStore>,
+    pub(crate) mesh_auth: Arc<MeshAuthCache>,
+    pub(crate) metrics: Arc<FirehoseMetrics>,
+}
+
 pub(crate) struct ConnectionActor {
     pub(crate) peer_id: String,
     pub(crate) peer_short: String,
     pub(crate) room_id: String,
+    conn_id: u64,
     pub(crate) registry: Arc<PeerRegistry>,
     pub(crate) presence: Arc<PresenceManager>,
     pub(crate) rooms: Arc<RoomManager>,
+    mesh: Arc<MeshStore>,
+    mesh_auth: Arc<MeshAuthCache>,
     metrics: Arc<FirehoseMetrics>,
     last_presence_resp: Option<String>,
     last_rooms_resp: HashMap<String, String>,
@@ -75,22 +93,97 @@ impl ConnectionActor {
         peer_id: String,
         peer_short: String,
         room_id: String,
-        registry: Arc<PeerRegistry>,
-        presence: Arc<PresenceManager>,
-        rooms: Arc<RoomManager>,
-        metrics: Arc<FirehoseMetrics>,
+        conn_id: u64,
+        services: ConnectionActorServices,
     ) -> Self {
         Self {
             peer_id,
             peer_short,
             room_id,
-            registry,
-            presence,
-            rooms,
-            metrics,
+            conn_id,
+            registry: services.registry,
+            presence: services.presence,
+            rooms: services.rooms,
+            mesh: services.mesh,
+            mesh_auth: services.mesh_auth,
+            metrics: services.metrics,
             last_presence_resp: None,
             last_rooms_resp: HashMap::new(),
             control_check_limiter: ControlCheckLimiter::new(),
+        }
+    }
+
+    pub(crate) async fn dispatch(&mut self, frame: DecodedRelayFrame) -> ActorDispatch {
+        match frame {
+            DecodedRelayFrame::Outer(frame) => self.dispatch_outer(frame).await,
+            DecodedRelayFrame::Control(frame) => self.dispatch_control(frame).await,
+            DecodedRelayFrame::PiEnvelope(frame) => self.dispatch_pi_envelope(frame).await,
+            DecodedRelayFrame::MalformedPiEnvelope(frame) => {
+                self.dispatch_malformed_pi_envelope(frame).await
+            }
+        }
+    }
+
+    async fn dispatch_outer(&mut self, env: OuterEnvelope) -> ActorDispatch {
+        let ct_len = env.ct.len();
+        let dest_peer = env.peer;
+        let dest_room = env.room;
+        let dest_tail = dest_peer[dest_peer.len().saturating_sub(8)..].to_string();
+
+        // Rewrite: recipient sees sender's authenticated peer_id + sender's room_id.
+        let rewritten = OuterEnvelope {
+            peer: self.peer_id.clone(),
+            room: self.room_id.clone(),
+            ct: env.ct,
+        };
+        let fwd_line =
+            serde_json::to_string(&rewritten).expect("OuterEnvelope serialisation is infallible");
+
+        // Skip-sender: pass this connection's conn_id so multi-device Owners
+        // don't echo their own outbound messages.
+        if !self.registry.forward(
+            &dest_peer,
+            &dest_room,
+            axum::extract::ws::Message::Text(fwd_line),
+            self.conn_id,
+        ) {
+            warn!(
+                from = %self.peer_short,
+                dest = %dest_tail,
+                room = %dest_room,
+                bytes = ct_len,
+                "dest (peer, room) not found, dropping",
+            );
+        }
+
+        ActorDispatch::Continue
+    }
+
+    async fn dispatch_pi_envelope(&mut self, frame: PiEnvelopeFrame) -> ActorDispatch {
+        let frame = serde_json::to_value(CrossPcFrame::PiEnvelope(frame))
+            .expect("generated pi_envelope serialisation is infallible");
+        self.dispatch_pi_envelope_value(&frame).await
+    }
+
+    async fn dispatch_malformed_pi_envelope(&mut self, frame: serde_json::Value) -> ActorDispatch {
+        self.dispatch_pi_envelope_value(&frame).await
+    }
+
+    async fn dispatch_pi_envelope_value(&mut self, frame: &serde_json::Value) -> ActorDispatch {
+        match handle_pi_envelope(
+            &self.peer_id,
+            frame,
+            &self.registry,
+            &self.mesh,
+            &self.mesh_auth,
+        )
+        .await
+        {
+            PiForwardResult::Forwarded => ActorDispatch::Continue,
+            PiForwardResult::TransportError(message) => match message {
+                axum::extract::ws::Message::Text(text) => ActorDispatch::Send(text),
+                _ => ActorDispatch::Continue,
+            },
         }
     }
 
@@ -125,7 +218,7 @@ impl ConnectionActor {
         } else {
             self.last_presence_resp = Some(resp.clone());
             self.metrics.inc_presence_emitted(1);
-            ActorDispatch::Send(Message::Text(resp))
+            ActorDispatch::Send(resp)
         }
     }
 
@@ -147,7 +240,7 @@ impl ConnectionActor {
 
             self.last_rooms_resp.insert(target_peer, resp.clone());
             self.metrics.inc_rooms_emitted(1);
-            messages.push(Message::Text(resp));
+            messages.push(resp);
         }
 
         if messages.is_empty() {
@@ -161,6 +254,48 @@ impl ConnectionActor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metrics::FirehoseMetrics;
+    use crate::peers::registry::PeerRegistry;
+    use crate::presence::PresenceManager;
+    use crate::rooms::RoomManager;
+
+    fn actor_services() -> ConnectionActorServices {
+        let presence = Arc::new(PresenceManager::new());
+        let rooms = Arc::new(RoomManager::new());
+        let metrics = Arc::new(FirehoseMetrics::new());
+        let registry = Arc::new(PeerRegistry::new(
+            presence.clone(),
+            rooms.clone(),
+            metrics.clone(),
+        ));
+        ConnectionActorServices {
+            registry,
+            presence,
+            rooms,
+            mesh: Arc::new(MeshStore::open_in_memory().unwrap()),
+            mesh_auth: Arc::new(MeshAuthCache::new()),
+            metrics,
+        }
+    }
+
+    #[test]
+    fn constructs_with_per_connection_state_empty() {
+        let actor = ConnectionActor::new(
+            "peer-12345678".to_string(),
+            "12345678".to_string(),
+            "main".to_string(),
+            42,
+            actor_services(),
+        );
+
+        assert_eq!(actor.peer_id, "peer-12345678");
+        assert_eq!(actor.peer_short, "12345678");
+        assert_eq!(actor.room_id, "main");
+        assert_eq!(actor.conn_id, 42);
+        assert!(actor.last_presence_resp.is_none());
+        assert!(actor.last_rooms_resp.is_empty());
+        assert_eq!(actor.control_check_limiter.peer_cost_used, 0);
+    }
 
     #[test]
     fn control_check_limiter_counts_peer_cost_and_rejects_over_budget() {
