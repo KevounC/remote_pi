@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-store-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, app, pi-extension]
 parent: epic-bold-transcript-event-log-store
 depends_on: [epic-bold-transcript-event-log-store-step-4]
@@ -77,3 +77,18 @@ message rows are disposable projections.
 ## Rollback
 
 Remove the new tests/fixtures only if the event-store implementation is also rolled back. Do not weaken existing row/session-sync tests to make the refactor pass.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: **app tests 600 passed (up from 597 —
+the agent's new store/replay + sync regressions)**; pi-ext `corepack pnpm typecheck`
+clean; **full pi-ext suite 666 passed | 3 skipped | 0 failed (44 files)** — fully green
+(up from 665 — the agent's new mirrored transcript-event fixture). Commit `1b26423`
+scoped to app + pi-ext only; collision guard held.
+
+Regression coverage verified: app event-store (append idempotence, stable order,
+canonical-session isolation, projection rebuild, late-confirmation-over-timeout);
+app sync (replay after msgs deletion, duplicate-replay no-churn, idle convergence on
+success/error/cancel/compaction, session-replacement partitioning); pi-ext
+(`session_sync` projects from `TranscriptEventLog`, ignores foreign-session events,
+preserves `session_history` wire shape). **transcript-event-log-store arc complete (5/5).**
