@@ -106,7 +106,7 @@ class _AgentEditDialogState extends State<_AgentEditDialog> {
               const SizedBox(height: 8),
               _InfoRow('Folder', session.workingDirectory),
               _InfoRow('Model', session.model?.name ?? '—'),
-              _InfoRow('State', _statusLabel(session.status)),
+              _InfoRow('State', _statusLabel(session)),
               _InfoRow(
                 'Context',
                 ctx?.percent != null
@@ -127,13 +127,15 @@ class _AgentEditDialogState extends State<_AgentEditDialog> {
     );
   }
 
-  String _statusLabel(AgentStatus status) => switch (status) {
-    AgentStatus.empty => 'empty',
-    AgentStatus.booting => 'starting',
-    AgentStatus.idle => 'ready',
-    AgentStatus.streaming => 'streaming',
-    AgentStatus.crashed => 'ended',
-  };
+  String _statusLabel(AgentSession session) {
+    if (session.turn.working) return 'working';
+    return switch (session.status) {
+      AgentStatus.empty => 'empty',
+      AgentStatus.booting => 'starting',
+      AgentStatus.idle => 'ready',
+      AgentStatus.crashed => 'ended',
+    };
+  }
 }
 
 class _SectionTitle extends StatelessWidget {

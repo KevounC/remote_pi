@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:cockpit/app/cockpit/domain/contracts/rpc_gateway_factory.dart';
 import 'package:cockpit/app/cockpit/domain/contracts/rpc_process_gateway.dart';
+import 'package:cockpit/app/cockpit/domain/entities/agent_turn_projection.dart';
 import 'package:cockpit/app/cockpit/domain/entities/context_usage.dart';
 import 'package:cockpit/app/cockpit/domain/entities/pi_command.dart';
 import 'package:cockpit/app/cockpit/domain/entities/pi_model.dart';
@@ -15,7 +16,7 @@ import 'package:cockpit/app/cockpit/ui/session/agent_entry.dart';
 import 'package:cockpit/app/cockpit/ui/session/pane_item.dart';
 import 'package:flutter/foundation.dart';
 
-enum AgentStatus { empty, booting, idle, streaming, crashed }
+enum AgentStatus { empty, booting, idle, crashed }
 
 /// Controlador de UM agente (uma aba do multiplexador). Dono de um
 /// [RpcProcessGateway] próprio (criado pela fábrica), do transcript e dos
@@ -94,9 +95,7 @@ class AgentSession extends PaneItem {
   /// Mensagens do app/mesh não passam por aqui → viram bolha normalmente.
   final List<String> _awaitingUserEcho = <String>[];
 
-  /// Quando o turno atual começou (streaming). `null` quando ocioso — a UI usa
-  /// pra mostrar o cronômetro de "trabalhando".
-  DateTime? _turnStartedAt;
+  AgentTurnProjection _turn = AgentTurnProjection.idle;
   final List<AgentEntry> _entries = <AgentEntry>[];
   final List<CockpitTranscriptEvent> _transcriptEvents =
       <CockpitTranscriptEvent>[];
@@ -137,12 +136,13 @@ class AgentSession extends PaneItem {
   String get title => _title;
   AgentStatus get status => _status;
 
+  AgentTurnProjection get turn => _turn;
+
   /// Início do turno em andamento (`null` se ocioso).
-  DateTime? get turnStartedAt => _turnStartedAt;
-  bool get isStreaming => _status == AgentStatus.streaming;
-  bool get isBusy => _status == AgentStatus.streaming || _pendingSend;
-  bool get isAlive =>
-      _status == AgentStatus.idle || _status == AgentStatus.streaming;
+  DateTime? get turnStartedAt => _turn.startedAt;
+  bool get isStreaming => _turn.status == AgentTurnStatus.streaming;
+  bool get isBusy => _turn.working || _pendingSend;
+  bool get isAlive => _status == AgentStatus.idle;
   List<AgentEntry> get entries => List<AgentEntry>.unmodifiable(_entries);
   List<PiModel> get models => _models;
   List<PiCommand> get commands => _commands;
@@ -168,6 +168,8 @@ class AgentSession extends PaneItem {
     if (_status == AgentStatus.booting || isAlive) return;
     debugPrint('[agent-boot] boot() id=$id cwd=$workingDirectory');
     _status = AgentStatus.booting;
+    _turn = AgentTurnProjection.idle;
+    _pendingSend = false;
     _entries.clear();
     _awaitingUserEcho.clear();
     _transcriptEvents.clear();
@@ -240,7 +242,21 @@ class AgentSession extends PaneItem {
 
   /// Interrompe o turno atual (não mata o processo).
   Future<void> stop() async {
-    await _gateway?.abort();
+    final result = await _gateway?.abort();
+    result?.fold(
+      (_) {
+        _pendingSend = false;
+        _closeTranscriptTurn();
+        _reduceTurn(AgentTurnTransition.idle);
+        notifyListeners();
+      },
+      (error) {
+        _pendingSend = false;
+        _addInfo('failed to stop: ${error.message}', isError: true);
+        _reduceTurn(AgentTurnTransition.error, error: error.message);
+        notifyListeners();
+      },
+    );
   }
 
   /// `/new` — começa uma sessão nova: zera a conversa. O `sessionPath` é
@@ -251,6 +267,8 @@ class AgentSession extends PaneItem {
     final result = await gateway.newSession();
     result.fold(
       (_) {
+        _pendingSend = false;
+        _reduceTurn(AgentTurnTransition.idle);
         _entries.clear();
         _transcriptEvents.clear();
         _ctx = null;
@@ -350,6 +368,8 @@ class AgentSession extends PaneItem {
           ..addAll(_eventsFromProjectedMessages(messages));
         _replaceProjectedTranscript();
         _status = AgentStatus.idle;
+        _pendingSend = false;
+        _reduceTurn(AgentTurnTransition.idle);
         notifyListeners();
         onPreferenceChanged?.call();
       },
@@ -378,6 +398,11 @@ class AgentSession extends PaneItem {
       await gateway.kill();
       gateway.dispose();
     }
+    _pendingSend = false;
+    _reduceTurn(
+      AgentTurnTransition.stale,
+      error: 'restarting with new configuration',
+    );
     // _onExit não será recebido (sub cancelado) — forçamos o status.
     if (_status == AgentStatus.booting || isAlive) {
       _status = AgentStatus.crashed;
@@ -424,6 +449,11 @@ class AgentSession extends PaneItem {
     stateResult.fold((snapshot) {
       _model = snapshot.model;
       _thinking = snapshot.thinkingLevel;
+      // `get_state` is a boot-time snapshot; do not let a stale idle snapshot
+      // erase a live turn that has already arrived on the event stream.
+      if (!_turn.working || snapshot.turn.working) {
+        _turn = snapshot.turn;
+      }
     }, (_) {});
     notifyListeners();
     unawaited(_refreshStats());
@@ -469,25 +499,24 @@ class AgentSession extends PaneItem {
     switch (event) {
       case RpcAgentStart():
         _pendingSend = false;
-        _status = AgentStatus.streaming;
-        _turnStartedAt = DateTime.now();
+        _reduceTurn(AgentTurnTransition.started, now: DateTime.now());
       case RpcAgentEnd():
-        final wasStreaming = _status == AgentStatus.streaming;
-        if (wasStreaming) _status = AgentStatus.idle;
-        final startedAt = _turnStartedAt;
-        _turnStartedAt = null;
+        final wasWorking = _turn.working;
+        final startedAt = _turn.startedAt;
+        _reduceTurn(AgentTurnTransition.idle);
         _closeTranscriptTurn();
         // Registra quanto tempo o turno levou no fim da conversa.
-        if (wasStreaming && startedAt != null) {
+        if (wasWorking && startedAt != null) {
           _add(WorkedEntry(DateTime.now().difference(startedAt)));
         }
         unawaited(_refreshStats());
-        if (wasStreaming) onTurnEnd?.call();
+        if (wasWorking) onTurnEnd?.call();
       case RpcTurnStart():
         _closeTranscriptTurn();
       case RpcTurnEnd():
         _closeTranscriptTurn();
       case RpcThinkingDelta(:final delta):
+        _reduceTurn(AgentTurnTransition.contentDelta, now: DateTime.now());
         _appendTranscriptEvent(
           CockpitThinkingDeltaReceived(
             eventId: _nextTranscriptEventId(),
@@ -498,6 +527,7 @@ class AgentSession extends PaneItem {
           ),
         );
       case RpcTextDelta(:final delta):
+        _reduceTurn(AgentTurnTransition.contentDelta, now: DateTime.now());
         _appendTranscriptEvent(
           CockpitAssistantDeltaReceived(
             eventId: _nextTranscriptEventId(),
@@ -559,8 +589,7 @@ class AgentSession extends PaneItem {
         }
       case RpcStreamError(:final message):
         _pendingSend = false;
-        if (_status == AgentStatus.streaming) _status = AgentStatus.idle;
-        _turnStartedAt = null;
+        _reduceTurn(AgentTurnTransition.error, error: message);
         _addInfo('agent error: $message', isError: true, dedup: true);
       case RpcAutoRetry(
         :final attempt,
@@ -574,6 +603,10 @@ class AgentSession extends PaneItem {
       case RpcProcessExit(:final code):
         _pendingSend = false;
         _status = AgentStatus.crashed;
+        _reduceTurn(
+          AgentTurnTransition.stale,
+          error: 'process exited (code=$code)',
+        );
         _closeTranscriptTurn();
         _addInfo('process exited (code=$code)', isError: code != 0);
       case RpcNotice(:final message, :final level):
@@ -626,6 +659,19 @@ class AgentSession extends PaneItem {
   }
 
   // ---- helpers --------------------------------------------------------------
+
+  void _reduceTurn(
+    AgentTurnTransition transition, {
+    DateTime? now,
+    String? error,
+  }) {
+    _turn = reduceAgentTurnProjection(
+      _turn,
+      transition,
+      now: now,
+      error: error,
+    );
+  }
 
   T _add<T extends AgentEntry>(T entry) {
     _entries.add(entry);

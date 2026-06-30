@@ -1,14 +1,14 @@
 ---
 id: epic-bold-turn-state-machine-projection-consumers-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-turn-state-machine-projection-consumers
 depends_on: [epic-bold-turn-state-machine-projection-consumers-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Project Cockpit agent status from turn state instead of `streaming` flags
@@ -99,6 +99,13 @@ DateTime? get turnStartedAt => _turn.startedAt;
 - [ ] `AgentSession.isBusy`, composer stop affordance, elapsed timer, and tab indicators derive from `AgentTurnProjection`.
 - [ ] `flutter test` targeted cockpit tests pass from `cockpit/`, or a tooling blocker is recorded in the implementing story.
 - [ ] No Cockpit code imports mobile app `ConnectionManager`, relay room metadata, or mobile transcript storage.
+
+## Implementation
+
+- Added `AgentTurnProjection`/`AgentTurnStatus` plus a single reducer for Cockpit turn state; `AgentStatus` now tracks process lifecycle only (`empty`, `booting`, `idle`, `crashed`).
+- `AgentSession` now derives `isBusy`, `isStreaming`, `turnStartedAt`, stop affordance, elapsed timer state, and tab activity from the turn projection. Terminal paths (`agent_end`, stream error, abort/stop acknowledgement, process exit, history restore, new session, restart) converge to `working:false` and clear `startedAt`.
+- `RpcDataMapper.state()` maps legacy `isStreaming` into `AgentTurnProjection.streaming` and accepts a richer `turn` object when the RPC grows one; `AgentSnapshot.isStreaming` remains as a temporary compatibility getter.
+- Added/updated targeted tests: 7 `AgentSession` turn-convergence tests plus 2 `RpcDataMapper.state()` projection tests; full cockpit suite passed (203 tests).
 
 ## Rollback
 

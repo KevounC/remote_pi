@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cockpit/app/cockpit/data/adapters/rpc_data_mapper.dart';
+import 'package:cockpit/app/cockpit/domain/entities/agent_turn_projection.dart';
 import 'package:cockpit/app/cockpit/domain/entities/transcript_event.dart';
 import 'package:cockpit/app/cockpit/domain/entities/transcript_message.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -110,6 +111,41 @@ void main() {
       expect(tool.status, ToolProjectionStatus.running);
       expect(tool.args['path'], 'README.md');
       expect(() => tool.args['path'] = 'changed.md', throwsUnsupportedError);
+    });
+  });
+
+  group('RpcDataMapper state', () {
+    test('maps legacy isStreaming into a turn projection', () {
+      final snapshot = const RpcDataMapper().state({
+        'thinkingLevel': 'off',
+        'isStreaming': true,
+      });
+
+      expect(snapshot.turn.status, AgentTurnStatus.streaming);
+      expect(snapshot.turn.working, isTrue);
+      expect(snapshot.isStreaming, isTrue);
+    });
+
+    test('maps richer turn projection when present', () {
+      final startedAt = DateTime.utc(2026, 6, 30, 12);
+      final snapshot = const RpcDataMapper().state({
+        'thinkingLevel': 'off',
+        'isStreaming': false,
+        'turn': {
+          'status': 'error',
+          'turnId': 'turn-1',
+          'replyTo': 'message-1',
+          'startedAt': startedAt.toIso8601String(),
+          'error': 'provider failed',
+        },
+      });
+
+      expect(snapshot.turn.status, AgentTurnStatus.error);
+      expect(snapshot.turn.turnId, 'turn-1');
+      expect(snapshot.turn.replyTo, 'message-1');
+      expect(snapshot.turn.startedAt, startedAt);
+      expect(snapshot.turn.error, 'provider failed');
+      expect(snapshot.turn.working, isFalse);
     });
   });
 

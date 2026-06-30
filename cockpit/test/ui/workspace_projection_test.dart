@@ -8,6 +8,7 @@ import 'package:cockpit/app/cockpit/domain/contracts/session_history.dart';
 import 'package:cockpit/app/cockpit/domain/contracts/terminal_gateway.dart';
 import 'package:cockpit/app/cockpit/domain/contracts/terminal_gateway_factory.dart';
 import 'package:cockpit/app/cockpit/domain/entities/agent_snapshot.dart';
+import 'package:cockpit/app/cockpit/domain/entities/agent_turn_projection.dart';
 import 'package:cockpit/app/cockpit/domain/entities/context_usage.dart';
 import 'package:cockpit/app/cockpit/domain/entities/file_view.dart';
 import 'package:cockpit/app/cockpit/domain/entities/pi_command.dart';
@@ -295,7 +296,7 @@ final class _RpcGateway implements RpcProcessGateway {
     AgentSnapshot(
       model: null,
       thinkingLevel: ThinkingLevel.off,
-      isStreaming: false,
+      turn: AgentTurnProjection.idle,
     ),
   );
 

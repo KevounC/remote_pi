@@ -586,7 +586,7 @@ class _TabState extends State<_Tab> {
         final isFocusedActive = widget.active && widget.focused;
         final agent = s is AgentSession ? s : null;
         final isEmpty = agent?.status == AgentStatus.empty;
-        final streaming = agent?.isStreaming ?? false;
+        final streaming = agent?.turn.working ?? false;
         final dirty = s is FileViewerSession && s.dirty;
 
         final icon = _tabIcon(s);

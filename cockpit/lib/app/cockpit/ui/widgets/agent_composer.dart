@@ -451,7 +451,7 @@ class _AgentComposerState extends State<AgentComposer> {
 
   Future<void> _submit() async {
     final session = widget.session;
-    if (session.isStreaming) {
+    if (session.turn.canStop) {
       session.stop();
       return;
     }
@@ -540,8 +540,9 @@ class _AgentComposerState extends State<AgentComposer> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final session = widget.session;
-    final streaming = session.isStreaming;
-    final controlsEnabled = session.isAlive && !streaming;
+    final turn = session.turn;
+    final canStop = turn.canStop;
+    final controlsEnabled = session.isAlive && !turn.working;
 
     // Drop **nativo** do SO (Finder/Explorer/…) → anexa imagem / vira `@`. O
     // drag-drop **interno** (do painel Files) é o DragTarget<String> filho.
@@ -675,7 +676,7 @@ class _AgentComposerState extends State<AgentComposer> {
                       // Spinner + cronômetro do turno (só enquanto trabalha).
                       _TurnIndicator(session: session),
                       _SendButton(
-                        streaming: streaming,
+                        streaming: canStop,
                         ready: _hasText || _attachments.isNotEmpty,
                         onTap: _submit,
                       ),
@@ -959,7 +960,7 @@ class _TurnIndicatorState extends State<_TurnIndicator> {
   /// Liga/desliga o tick de 1s conforme o turno está rodando.
   void _sync() {
     final active =
-        widget.session.isStreaming && widget.session.turnStartedAt != null;
+        widget.session.turn.working && widget.session.turnStartedAt != null;
     if (active && _ticker == null) {
       _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
         if (mounted) setState(() {});
@@ -984,7 +985,7 @@ class _TurnIndicatorState extends State<_TurnIndicator> {
   Widget build(BuildContext context) {
     final session = widget.session;
     final start = session.turnStartedAt;
-    if (!session.isStreaming || start == null) return const SizedBox.shrink();
+    if (!session.turn.working || start == null) return const SizedBox.shrink();
     final colors = context.colors;
     final elapsed = DateTime.now().difference(start);
     return Padding(

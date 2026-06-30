@@ -1,4 +1,5 @@
 import 'package:cockpit/app/cockpit/domain/entities/agent_snapshot.dart';
+import 'package:cockpit/app/cockpit/domain/entities/agent_turn_projection.dart';
 import 'package:cockpit/app/cockpit/domain/entities/context_usage.dart';
 import 'package:cockpit/app/cockpit/domain/entities/pi_command.dart';
 import 'package:cockpit/app/cockpit/domain/entities/pi_model.dart';
@@ -67,8 +68,46 @@ class RpcDataMapper {
     return AgentSnapshot(
       model: model(map['model']),
       thinkingLevel: ThinkingLevel.fromWire(map['thinkingLevel'] as String?),
-      isStreaming: map['isStreaming'] == true,
+      turn: _turnProjection(
+        map['turn'],
+        legacyIsStreaming: map['isStreaming'] == true,
+      ),
     );
+  }
+
+  AgentTurnProjection _turnProjection(
+    Object? value, {
+    required bool legacyIsStreaming,
+  }) {
+    if (value is Map) {
+      final status = _turnStatus(value['status']);
+      if (status != null) {
+        return AgentTurnProjection(
+          status: status,
+          turnId: value['turnId'] as String?,
+          replyTo: value['replyTo'] as String?,
+          startedAt: _dateTime(value['startedAt']),
+          error: value['error'] as String?,
+        );
+      }
+    }
+    return legacyIsStreaming
+        ? const AgentTurnProjection(status: AgentTurnStatus.streaming)
+        : AgentTurnProjection.idle;
+  }
+
+  AgentTurnStatus? _turnStatus(Object? value) => switch (value) {
+    'idle' => AgentTurnStatus.idle,
+    'working' => AgentTurnStatus.working,
+    'streaming' => AgentTurnStatus.streaming,
+    'error' => AgentTurnStatus.error,
+    'stale' => AgentTurnStatus.stale,
+    _ => null,
+  };
+
+  DateTime? _dateTime(Object? value) {
+    if (value is! String || value.isEmpty) return null;
+    return DateTime.tryParse(value);
   }
 
   ContextUsage? contextUsage(Object? data) {
