@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-cli-daemon-pairing-module
 depends_on: [epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Move daemon, cron, service-install, and supervisor-restart command handlers out of index
@@ -67,6 +67,16 @@ export function restartSupervisor(): void { /* existing side-effect body */ }
 - [ ] `/remote-pi create/remove/daemons/daemon */cron/install/uninstall` preserve outputs and error handling.
 - [ ] `_restartSupervisorCommand` remains exported compatibly (alias or testing harness) for existing tests.
 - [ ] `corepack pnpm typecheck`, `corepack pnpm test -- src/extension.test.ts src/daemon`, and `corepack pnpm build` pass.
+
+## Implementation
+- Extracted daemon registry/fleet command handling to `pi-extension/src/extension/command_surface/daemon_commands.ts`; `index.ts` now wires slash/CLI command entries to `DaemonCommands` instead of owning `_cmdCreate`, `_cmdRemove`, daemon fleet methods, offline hints, or daemon table formatting.
+- Extracted cron command parsing/dispatch to `pi-extension/src/extension/command_surface/cron_commands.ts`; `daemon/` remains the runtime source of truth via `callSupervisor` and `ControlRequest` DTOs.
+- Extracted service install/uninstall notifications to `pi-extension/src/extension/command_surface/service_commands.ts`, preserving `installService`, `uninstallService`, CLI linking, and unlinking behavior.
+- Extracted supervisor restart planning/execution to `pi-extension/src/extension/command_surface/supervisor_restart.ts`; `index.ts` keeps the existing `_restartSupervisorCommand` test export as an alias.
+- Lifecycle ownership preserved: process spawning, service install/uninstall, supervisor UDS control, and daemon registry mutation still live in existing `daemon/` modules; command-surface classes are thin UI/CLI orchestration adapters only.
+- Verification: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; targeted `corepack pnpm exec vitest run src/extension.test.ts -t "daemon|cron|service|install|supervisor|create|remove"` passed 9 tests / 139 skipped in 1 file. `corepack pnpm exec vitest run src/daemon` passed 99 tests / 3 skipped across 7 files, with 23 `src/daemon/supervisor.test.ts` failures all at supervisor UDS bind setup (`listen EPERM ... supervisor.sock`), matching the known environment/UDS false-failure class rather than behavior assertions in this refactor.
+- Discrepancies from design: none.
+- Adjacent issues parked: none.
 
 ## Rollback
 Move the command wrapper classes back into `index.ts` and restore direct imports from `daemon/`. Because daemon runtime modules are not structurally changed, no supervisor state migration is involved.

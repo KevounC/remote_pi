@@ -63,11 +63,17 @@ import type { OwnerMultiplexerTestHarness } from "./extension/testing.js";
 import { createCommandSurface } from "./extension/command_surface.js";
 import { registerRemotePiCommands, type RemotePiCommandSpec } from "./extension/command_surface/commands.js";
 import { LocalMeshCommands } from "./extension/command_surface/local_mesh_commands.js";
+import { DaemonCommands } from "./extension/command_surface/daemon_commands.js";
+import { CronCommands } from "./extension/command_surface/cron_commands.js";
 import { PairingCommands } from "./extension/command_surface/pairing_commands.js";
 import { PairingCoordinator } from "./extension/command_surface/pairing_coordinator.js";
 import { RelayCommands } from "./extension/command_surface/relay_commands.js";
+import { ServiceCommands } from "./extension/command_surface/service_commands.js";
+import { restartSupervisor } from "./extension/command_surface/supervisor_restart.js";
 import { probeListPeers } from "./extension/probe_list_peers.js";
 export { probeListPeers } from "./extension/probe_list_peers.js";
+export { restartSupervisorCommand as _restartSupervisorCommand } from "./extension/command_surface/supervisor_restart.js";
+export type { RestartStep } from "./extension/command_surface/supervisor_restart.js";
 import { createRemotePiExtensionRuntime } from "./extension/composition_root.js";
 import { createLegacyIndexPorts, type LegacyIndexDeps } from "./extension/legacy_ports.js";
 import type { CommandSurfacePort } from "./extension/ports.js";
@@ -103,11 +109,7 @@ import {
   sessionSockPath,
   skillsDir,
 } from "./session/global_config.js";
-import { addDaemon, listDaemons, removeDaemon } from "./daemon/registry.js";
-import { callSupervisor, supervisorOnline, SupervisorOfflineError } from "./daemon/client.js";
-import type { ControlRequest, DaemonInfo } from "./daemon/control_protocol.js";
 import { EXIT_DAEMON_FRESH_SESSION } from "./daemon/rpc_child.js";
-import { installService, uninstallService, linkCliBinaries, unlinkCliBinaries, LAUNCHD_LABEL, SYSTEMD_UNIT, WINDOWS_TASK_NAME } from "./daemon/install.js";
 import {
   defaultAgentName,
   effectiveAutoStartRelay,
@@ -287,6 +289,9 @@ const _pairingCoordinator = new PairingCoordinator({
 });
 const _pairingCommands = new PairingCommands(_pairingCoordinator);
 const _relayCommands = new RelayCommands(_pairingCoordinator);
+const _daemonCommands = new DaemonCommands();
+const _cronCommands = new CronCommands();
+const _serviceCommands = new ServiceCommands();
 // Plan/28 Wave D.1: `thinking` published alongside `model` so the app's
 // Quick Actions sheet hydrates the thinking segmented control on first
 // open instead of starting null. The SDK fires `thinking_level_select`
@@ -1737,17 +1742,17 @@ function _registerRemotePiCommands(pi: ExtensionAPI): void {
     { suffix: "revoke", description: "Revoke a paired device by its shortid", complete: async (prefix) => _shortidCompletions(prefix), run: runWithCtx(async (args, ctx) => { await _cmdRevoke(args, ctx); }) },
     { suffix: "set-relay", description: "Persist a new relay URL to user config", run: runWithCtx((args, ctx) => { _cmdSetRelay(args, ctx); }) },
     { suffix: "peers", description: "List local + cross-PC mesh peers, grouped by PC label", run: runWithCtx(async (_args, ctx) => { await _cmdPeers(ctx); }) },
-    { suffix: "create", description: "Register a folder as a daemon and start it (when the supervisor is running)", run: runWithCtx(async (args, ctx) => { await _cmdCreate(args, ctx); }) },
-    { suffix: "remove", description: "Stop + unregister a daemon by id (local config is preserved)", run: runWithCtx(async (args, ctx) => { await _cmdRemove(args, ctx); }) },
-    { suffix: "daemons", description: "List registered daemons + state", run: runWithCtx(async (_args, ctx) => { await _cmdDaemonsList(ctx); }) },
-    { suffix: "daemon start", description: "Start daemons: all, or one by id (`daemon start <id>`)", run: runWithCtx(async (args, ctx) => { await _cmdDaemonStart(ctx, args || undefined); }) },
-    { suffix: "daemon stop", description: "Stop daemons: all, or one by id (`daemon stop <id>`)", run: runWithCtx(async (args, ctx) => { await _cmdDaemonStop(ctx, args || undefined); }) },
-    { suffix: "daemon restart", description: "Restart daemons: all, or one by id (`daemon restart <id>`)", run: runWithCtx(async (args, ctx) => { await _cmdDaemonRestart(ctx, args || undefined); }) },
-    { suffix: "daemon status", description: "Show fleet runtime status (pid, uptime, restarts)", run: runWithCtx(async (_args, ctx) => { await _cmdDaemonStatus(ctx); }) },
-    { suffix: "daemon send", description: "Send a prompt to a daemon: `daemon send <id> \"<text>\"`", run: runWithCtx(async (args, ctx) => { await _cmdDaemonSend(args, ctx); }) },
-    { suffix: "cron", completionValues: ["cron", "cron add", "cron list", "cron remove", "cron enable", "cron disable", "cron run", "cron log"], description: "Schedule recurring prompts to daemons: `cron <add|list|remove|enable|disable|run|log>`", run: runWithCtx(async (args, ctx) => { await _cmdCron(args, ctx); }) },
-    { suffix: "install", description: "Install pi-supervisord as a system service + link the remote-pi CLI (systemd/launchd/Task Scheduler; Windows prompts for admin)", run: runWithCtx((_args, ctx) => { _cmdInstall(ctx, { linkCli: true }); }) },
-    { suffix: "uninstall", description: "Remove the pi-supervisord system service + the CLI shims (daemons registry preserved; Windows prompts for admin)", run: runWithCtx((_args, ctx) => { _cmdUninstall(ctx, { linkCli: true }); }) },
+    { suffix: "create", description: "Register a folder as a daemon and start it (when the supervisor is running)", run: runWithCtx(async (args, ctx) => { await _daemonCommands.create(args, ctx); }) },
+    { suffix: "remove", description: "Stop + unregister a daemon by id (local config is preserved)", run: runWithCtx(async (args, ctx) => { await _daemonCommands.remove(args, ctx); }) },
+    { suffix: "daemons", description: "List registered daemons + state", run: runWithCtx(async (_args, ctx) => { await _daemonCommands.list(ctx); }) },
+    { suffix: "daemon start", description: "Start daemons: all, or one by id (`daemon start <id>`)", run: runWithCtx(async (args, ctx) => { await _daemonCommands.start(ctx, args || undefined); }) },
+    { suffix: "daemon stop", description: "Stop daemons: all, or one by id (`daemon stop <id>`)", run: runWithCtx(async (args, ctx) => { await _daemonCommands.stop(ctx, args || undefined); }) },
+    { suffix: "daemon restart", description: "Restart daemons: all, or one by id (`daemon restart <id>`)", run: runWithCtx(async (args, ctx) => { await _daemonCommands.restart(ctx, args || undefined); }) },
+    { suffix: "daemon status", description: "Show fleet runtime status (pid, uptime, restarts)", run: runWithCtx(async (_args, ctx) => { await _daemonCommands.status(ctx); }) },
+    { suffix: "daemon send", description: "Send a prompt to a daemon: `daemon send <id> \"<text>\"`", run: runWithCtx(async (args, ctx) => { await _daemonCommands.send(args, ctx); }) },
+    { suffix: "cron", completionValues: ["cron", "cron add", "cron list", "cron remove", "cron enable", "cron disable", "cron run", "cron log"], description: "Schedule recurring prompts to daemons: `cron <add|list|remove|enable|disable|run|log>`", run: runWithCtx(async (args, ctx) => { await _cronCommands.run(args, ctx); }) },
+    { suffix: "install", description: "Install pi-supervisord as a system service + link the remote-pi CLI (systemd/launchd/Task Scheduler; Windows prompts for admin)", run: runWithCtx((_args, ctx) => { _serviceCommands.install(ctx, { linkCli: true }); }) },
+    { suffix: "uninstall", description: "Remove the pi-supervisord system service + the CLI shims (daemons registry preserved; Windows prompts for admin)", run: runWithCtx((_args, ctx) => { _serviceCommands.uninstall(ctx, { linkCli: true }); }) },
   ];
 
   registerRemotePiCommands(
@@ -1889,544 +1894,8 @@ function _cmdSetRelay(arg: string, ctx: Pick<ExtensionContext, "ui">): void {
   _relayCommands.setRelay(arg, ctx);
 }
 
-// ── Daemon registry commands (plan/26 Wave 1) ─────────────────────────────────
-
-/**
- * `/remote-pi create [<cwd>] [--name <name>]`
- *
- * Promotes a folder to a daemon entry in `~/.pi/remote/daemons.json`. The
- * cwd is **always normalized to an absolute realpath** before storage —
- * `~/Movies`, `./Movies`, `../foo/Movies` all collapse to a single
- * canonical entry. Relative paths resolve against the Pi process's
- * current working directory, not the slash-command's `ctx.cwd`.
- *
- * Side effects on the cwd's local config (`<cwd>/.pi/remote-pi/config.json`):
- *   - If the config doesn't exist: created with `auto_start_relay=true`
- *     (mandatory for daemons) and `agent_name` from `--name` if provided.
- *   - If the config already exists: left untouched. Re-running `create`
- *     on an existing daemon is idempotent at this layer; the registry
- *     itself rejects duplicate cwds.
- */
-async function _cmdCreate(arg: string, ctx: Pick<ExtensionContext, "ui">): Promise<void> {
-  // Parse `[cwd] [--name "value with spaces" | --name word]` in any order.
-  // The first non-flag token is the cwd; the rest of the line after
-  // `--name` (quoted or unquoted) is the display name.
-  const nameMatch = arg.match(/--name\s+"([^"]+)"|--name\s+(\S+)/);
-  const name = nameMatch ? (nameMatch[1] ?? nameMatch[2]) : undefined;
-  const cwdRaw = arg.replace(/--name\s+"[^"]+"|--name\s+\S+/, "").trim();
-  if (!cwdRaw) {
-    ctx.ui.notify(
-      "[remote-pi] Usage: /remote-pi create <absolute-or-relative-cwd> [--name \"Display name\"]",
-      "warning",
-    );
-    return;
-  }
-
-  let result: { id: string; cwd: string; name: string };
-  try {
-    result = addDaemon(cwdRaw, name);
-  } catch (err) {
-    ctx.ui.notify(`[remote-pi] create failed: ${String(err)}`, "error");
-    return;
-  }
-
-  // No local `.pi/remote-pi/config.json` is written anymore — the name lives
-  // in the registry and the supervisor injects the full config (agent_name,
-  // auto_start_relay true) via REMOTE_PI_DIRECT_CONFIG when it spawns the
-  // daemon. The cwd needs no init folder.
-
-  ctx.ui.notify(
-    `[remote-pi] Daemon registered: id=${result.id} name="${result.name}" cwd=${result.cwd}`,
-    "info",
-  );
-
-  // Auto-start: register alone used to leave the daemon idle until the next
-  // supervisor restart (the reported bug — `create` didn't run anything). Ask
-  // the supervisor to spawn THIS daemon now; it reads the name from the
-  // registry and injects the config via env. When the supervisor is offline we
-  // keep the
-  // registration and tell the user it'll boot on the next supervisor start.
-  try {
-    await callSupervisor({ op: "start", id: result.id });
-    ctx.ui.notify(`[remote-pi] Daemon started: id=${result.id}`, "info");
-  } catch (err) {
-    if (err instanceof SupervisorOfflineError) {
-      ctx.ui.notify(
-        `[remote-pi] Registered, but the supervisor is offline — not running yet. ` +
-        `Run \`remote-pi install\` (or start \`pi-supervisord\`); it auto-starts on the next supervisor boot.`,
-        "warning",
-      );
-      return;
-    }
-    ctx.ui.notify(`[remote-pi] Registered, but auto-start failed: ${String(err)}`, "error");
-  }
-}
-
-/**
- * `/remote-pi remove <id>`
- *
- * Unregisters a daemon by its 8-hex-char id (the same id printed by
- * `/remote-pi create` and `/remote-pi daemons`). The cwd's local config
- * stays on disk — re-creating later with the same cwd is a no-op
- * because the existing config wins.
- */
-async function _cmdRemove(arg: string, ctx: Pick<ExtensionContext, "ui">): Promise<void> {
-  const id = arg.trim();
-  if (!id) {
-    ctx.ui.notify(
-      "[remote-pi] Usage: /remote-pi remove <id>. Run /remote-pi daemons to see ids.",
-      "warning",
-    );
-    return;
-  }
-
-  // Prefer the supervisor's `unregister`: it STOPS the running child (SIGTERM →
-  // SIGKILL) BEFORE deleting the registry entry. Removing only the registry
-  // (the old behaviour) left an orphaned `pi --mode rpc` process running with
-  // nothing left to manage it — the reported bug. Fall back to a registry-only
-  // removal when the supervisor is offline (no managed process to stop anyway).
-  try {
-    const data = await callSupervisor({ op: "unregister", id });
-    if (!data.removed) {
-      const known = listDaemons().map((d) => d.id).join(", ") || "(none)";
-      ctx.ui.notify(`[remote-pi] No daemon with id "${id}". Known ids: ${known}`, "warning");
-      return;
-    }
-    ctx.ui.notify(
-      `[remote-pi] Daemon removed + process stopped: id=${id} cwd=${data.cwd}. ` +
-      `Local config at ${data.cwd}/.pi/remote-pi/config.json was kept.`,
-      "info",
-    );
-    return;
-  } catch (err) {
-    if (!(err instanceof SupervisorOfflineError)) {
-      ctx.ui.notify(`[remote-pi] remove failed: ${String(err)}`, "error");
-      return;
-    }
-    // Supervisor offline — fall through to registry-only removal below.
-  }
-
-  let result: { removed: boolean; cwd?: string };
-  try {
-    result = removeDaemon(id);
-  } catch (err) {
-    ctx.ui.notify(`[remote-pi] remove failed: ${String(err)}`, "error");
-    return;
-  }
-
-  if (!result.removed) {
-    const known = listDaemons().map((d) => d.id).join(", ") || "(none)";
-    ctx.ui.notify(`[remote-pi] No daemon with id "${id}". Known ids: ${known}`, "warning");
-    return;
-  }
-
-  ctx.ui.notify(
-    `[remote-pi] Daemon removed from registry: id=${id} cwd=${result.cwd}. ` +
-    `Supervisor was offline, so any running process was NOT stopped. Local config kept.`,
-    "warning",
-  );
-}
-
-// ── Fleet-ops commands (plan/26 W2) — talk to the supervisor over UDS ─────────
-//
-// Every command here is a thin wrapper around `callSupervisor(...)`. When
-// the supervisor isn't running we fall back to a friendly hint instead of
-// the raw error, so the user can't get stuck on "what's wrong?".
-
-function _notifyOffline(ctx: Pick<ExtensionContext, "ui">, err: SupervisorOfflineError): void {
-  ctx.ui.notify(`[remote-pi] ${err.message}`, "warning");
-}
-
-function _formatDaemonTable(daemons: DaemonInfo[]): string {
-  if (daemons.length === 0) return "(no daemons registered)";
-  const rows = daemons.map((d) => {
-    const uptime = d.uptime_s !== undefined ? `${d.uptime_s}s` : "—";
-    const pid = d.pid !== undefined ? String(d.pid) : "—";
-    const restarts = d.restart_count ?? 0;
-    return `  ${d.id}  ${d.state.padEnd(8)}  pid=${pid}  up=${uptime}  restarts=${restarts}  ${d.name}  ${d.cwd}`;
-  });
-  return rows.join("\n");
-}
-
-/**
- * `/remote-pi daemons` — registry + runtime state in one view. When the
- * supervisor is offline we still show registry-only output (state =
- * "stopped" everywhere), so the user can see what's configured even
- * before `install`.
- */
-async function _cmdDaemonsList(ctx: Pick<ExtensionContext, "ui">): Promise<void> {
-  if (!(await supervisorOnline())) {
-    const registry = listDaemons();
-    if (registry.length === 0) {
-      ctx.ui.notify("[remote-pi] No daemons registered. Run /remote-pi create <cwd>.", "info");
-      return;
-    }
-    const rows = registry.map((d) => {
-      const cfg = loadLocalConfig(d.cwd);
-      const name = cfg.agent_name ?? defaultAgentName(d.cwd);
-      return `  ${d.id}  ${name}  ${d.cwd}  (supervisor offline)`;
-    }).join("\n");
-    ctx.ui.notify(`[remote-pi] Daemons (registry only — run install to bring supervisor up):\n${rows}`, "info");
-    return;
-  }
-  try {
-    const data = await callSupervisor({ op: "list" });
-    ctx.ui.notify(`[remote-pi] Daemons:\n${_formatDaemonTable(data.daemons)}`, "info");
-  } catch (err) {
-    if (err instanceof SupervisorOfflineError) { _notifyOffline(ctx, err); return; }
-    ctx.ui.notify(`[remote-pi] daemons failed: ${String(err)}`, "error");
-  }
-}
-
-async function _cmdDaemonStatus(ctx: Pick<ExtensionContext, "ui">): Promise<void> {
-  try {
-    const data = await callSupervisor({ op: "status" });
-    ctx.ui.notify(`[remote-pi] Fleet status:\n${_formatDaemonTable(data.daemons)}`, "info");
-  } catch (err) {
-    if (err instanceof SupervisorOfflineError) { _notifyOffline(ctx, err); return; }
-    ctx.ui.notify(`[remote-pi] status failed: ${String(err)}`, "error");
-  }
-}
-
-async function _cmdDaemonStart(ctx: Pick<ExtensionContext, "ui">, id?: string): Promise<void> {
-  try {
-    if (id) {
-      const data = await callSupervisor({ op: "start", id });
-      ctx.ui.notify(
-        data.started
-          ? `[remote-pi] Started daemon ${id} (${data.state}).`
-          : `[remote-pi] Daemon ${id} already ${data.state}.`,
-        "info",
-      );
-      return;
-    }
-    const data = await callSupervisor({ op: "start_all" });
-    ctx.ui.notify(
-      `[remote-pi] Started ${data.started.length} daemon(s), ` +
-      `${data.already_running.length} already running.`,
-      "info",
-    );
-  } catch (err) {
-    if (err instanceof SupervisorOfflineError) { _notifyOffline(ctx, err); return; }
-    ctx.ui.notify(`[remote-pi] start failed: ${String(err)}`, "error");
-  }
-}
-
-async function _cmdDaemonStop(ctx: Pick<ExtensionContext, "ui">, id?: string): Promise<void> {
-  try {
-    if (id) {
-      const data = await callSupervisor({ op: "stop", id });
-      ctx.ui.notify(
-        data.stopped
-          ? `[remote-pi] Stopped daemon ${id}.`
-          : `[remote-pi] Daemon ${id} already ${data.state}.`,
-        "info",
-      );
-      return;
-    }
-    const data = await callSupervisor({ op: "stop_all" });
-    ctx.ui.notify(
-      `[remote-pi] Stopped ${data.stopped.length} daemon(s), ` +
-      `${data.already_stopped.length} already stopped.`,
-      "info",
-    );
-  } catch (err) {
-    if (err instanceof SupervisorOfflineError) { _notifyOffline(ctx, err); return; }
-    ctx.ui.notify(`[remote-pi] stop failed: ${String(err)}`, "error");
-  }
-}
-
-async function _cmdDaemonRestart(ctx: Pick<ExtensionContext, "ui">, id?: string): Promise<void> {
-  try {
-    if (id) {
-      const data = await callSupervisor({ op: "restart", id });
-      ctx.ui.notify(`[remote-pi] Restarted daemon ${id} (${data.state}).`, "info");
-      return;
-    }
-    const data = await callSupervisor({ op: "restart_all" });
-    ctx.ui.notify(`[remote-pi] Restarted ${data.restarted.length} daemon(s).`, "info");
-  } catch (err) {
-    if (err instanceof SupervisorOfflineError) { _notifyOffline(ctx, err); return; }
-    ctx.ui.notify(`[remote-pi] restart failed: ${String(err)}`, "error");
-  }
-}
-
-/**
- * `/remote-pi daemon send <id> "<text>"` — injects a prompt into a
- * running daemon via its RPC stdin. The agent processes the prompt as
- * if a user typed it; output flows back via the relay/mesh, not here.
- *
- * Fire-and-forget at this layer — the CLI just confirms delivery.
- */
-async function _cmdDaemonSend(arg: string, ctx: Pick<ExtensionContext, "ui">): Promise<void> {
-  // Parse `<id> <text...>` — id is the first token, rest is the prompt.
-  // The text may be quoted; if so, strip the outer quotes. Otherwise
-  // take the entire remainder verbatim.
-  const m = arg.match(/^(\S+)\s+(?:"([^"]*)"|(.*))$/);
-  if (!m) {
-    ctx.ui.notify(
-      "[remote-pi] Usage: /remote-pi daemon send <id> \"<prompt text>\"",
-      "warning",
-    );
-    return;
-  }
-  const id = m[1]!;
-  const text = (m[2] ?? m[3] ?? "").trim();
-  if (!text) {
-    ctx.ui.notify("[remote-pi] daemon send: prompt text is empty.", "warning");
-    return;
-  }
-  try {
-    const data = await callSupervisor({ op: "send", id, text });
-    if (data.delivered) {
-      ctx.ui.notify(`[remote-pi] Sent to ${id}: ${text.slice(0, 60)}${text.length > 60 ? "…" : ""}`, "info");
-    } else {
-      ctx.ui.notify(`[remote-pi] daemon ${id} did not accept the prompt (not running?)`, "warning");
-    }
-  } catch (err) {
-    if (err instanceof SupervisorOfflineError) { _notifyOffline(ctx, err); return; }
-    ctx.ui.notify(`[remote-pi] daemon send failed: ${String(err)}`, "error");
-  }
-}
-
-// ── Cron — scheduled prompts for daemons (plan/39) ──────────────────────────
-
-/** Splits an arg string into tokens, honoring double-quoted groups. */
-function _tokenizeArgs(s: string): string[] {
-  const out: string[] = [];
-  const re = /"([^"]*)"|(\S+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(s)) !== null) out.push(m[1] !== undefined ? m[1] : m[2]!);
-  return out;
-}
-
-/**
- * `/remote-pi cron <add|list|remove|enable|disable|run|log>` — schedules
- * recurring prompts to daemons via the supervisor. All subcommands require the
- * supervisor running (offline → friendly notice, not a crash).
- */
-async function _cmdCron(arg: string, ctx: Pick<ExtensionContext, "ui">): Promise<void> {
-  const trimmed = arg.trim();
-  const sp = trimmed.indexOf(" ");
-  const sub = (sp === -1 ? trimmed : trimmed.slice(0, sp)).toLowerCase();
-  const rest = sp === -1 ? "" : trimmed.slice(sp + 1).trim();
-  try {
-    switch (sub) {
-      case "":
-      case "list":    return await _cronList(ctx);
-      case "add":     return await _cronAdd(rest, ctx);
-      case "remove":
-      case "rm":      return await _cronMutate({ op: "cron_remove", job_id: rest.trim() }, rest.trim(), ctx);
-      case "enable":  return await _cronMutate({ op: "cron_enable", job_id: rest.trim(), enabled: true }, rest.trim(), ctx);
-      case "disable": return await _cronMutate({ op: "cron_enable", job_id: rest.trim(), enabled: false }, rest.trim(), ctx);
-      case "run":     return await _cronRun(rest.trim(), ctx);
-      case "log":     return await _cronLog(rest, ctx);
-      default:
-        ctx.ui.notify("[remote-pi] Usage: /remote-pi cron <add|list|remove|enable|disable|run|log>", "warning");
-    }
-  } catch (err) {
-    if (err instanceof SupervisorOfflineError) {
-      ctx.ui.notify(
-        "[remote-pi] Cron needs the supervisor running. Run `remote-pi install` " +
-        "(or start `pi-supervisord`).",
-        "warning",
-      );
-      return;
-    }
-    ctx.ui.notify(`[remote-pi] cron ${sub || "list"} failed: ${String(err)}`, "error");
-  }
-}
-
-async function _cronAdd(rest: string, ctx: Pick<ExtensionContext, "ui">): Promise<void> {
-  const toks = _tokenizeArgs(rest);
-  let tz: string | undefined;
-  let wake = false;
-  let skipBusy = true;
-  let catchup = false;
-  const pos: string[] = [];
-  for (let i = 0; i < toks.length; i++) {
-    const t = toks[i]!;
-    if (t === "--wake") wake = true;
-    else if (t === "--no-skip-busy") skipBusy = false;
-    else if (t === "--catchup") catchup = true;
-    else if (t === "--tz") tz = toks[++i];
-    else pos.push(t);
-  }
-  const [daemonId, schedule, prompt] = pos;
-  if (!daemonId || !schedule || !prompt) {
-    ctx.ui.notify(
-      '[remote-pi] Usage: /remote-pi cron add <daemonId> "<cron-expr>" "<prompt>" ' +
-      "[--tz Area/City] [--wake] [--no-skip-busy] [--catchup]",
-      "warning",
-    );
-    return;
-  }
-  const req: Extract<ControlRequest, { op: "cron_add" }> = {
-    op: "cron_add", daemon_id: daemonId, schedule, prompt,
-  };
-  if (tz) req.tz = tz;
-  if (wake) req.wake = true;
-  if (!skipBusy) req.skip_if_busy = false;
-  if (catchup) req.catchup = true;
-  const data = await callSupervisor(req);
-  ctx.ui.notify(
-    `[remote-pi] Cron ${data.job.id} added → daemon ${daemonId}: "${schedule}"` +
-    `${tz ? ` (${tz})` : ""}. Next run: ${data.job.next_run ?? "?"}`,
-    "info",
-  );
-}
-
-async function _cronList(ctx: Pick<ExtensionContext, "ui">): Promise<void> {
-  const data = await callSupervisor({ op: "cron_list" });
-  if (data.jobs.length === 0) {
-    ctx.ui.notify("[remote-pi] No cron jobs.", "info");
-    return;
-  }
-  const lines = data.jobs.map((j) =>
-    `${j.enabled ? "✓" : "✗"} ${j.id}  "${j.schedule}"${j.tz ? ` (${j.tz})` : ""}  → ${j.daemon_id}  ` +
-    `next:${j.next_run ?? "?"}  last:${j.last_status ?? "—"}${j.last_run ? `@${j.last_run}` : ""}`,
-  );
-  ctx.ui.notify(`[remote-pi] Cron jobs (${data.jobs.length}):\n${lines.join("\n")}`, "info");
-}
-
-async function _cronMutate(
-  req: Extract<ControlRequest, { op: "cron_remove" | "cron_enable" }>,
-  jobId: string,
-  ctx: Pick<ExtensionContext, "ui">,
-): Promise<void> {
-  if (!jobId) {
-    ctx.ui.notify(`[remote-pi] Usage: /remote-pi cron ${req.op === "cron_remove" ? "remove" : "enable|disable"} <jobId>`, "warning");
-    return;
-  }
-  if (req.op === "cron_remove") {
-    const data = await callSupervisor(req);
-    ctx.ui.notify(data.removed ? `[remote-pi] Cron ${jobId} removed.` : `[remote-pi] No cron job ${jobId}.`, data.removed ? "info" : "warning");
-  } else {
-    const data = await callSupervisor(req);
-    ctx.ui.notify(
-      data.updated ? `[remote-pi] Cron ${jobId} ${data.enabled ? "enabled" : "disabled"}.` : `[remote-pi] No cron job ${jobId}.`,
-      data.updated ? "info" : "warning",
-    );
-  }
-}
-
-async function _cronRun(jobId: string, ctx: Pick<ExtensionContext, "ui">): Promise<void> {
-  if (!jobId) {
-    ctx.ui.notify("[remote-pi] Usage: /remote-pi cron run <jobId>", "warning");
-    return;
-  }
-  const data = await callSupervisor({ op: "cron_run", job_id: jobId });
-  ctx.ui.notify(`[remote-pi] Cron ${jobId} fired now → ${data.result}`, "info");
-}
-
-async function _cronLog(rest: string, ctx: Pick<ExtensionContext, "ui">): Promise<void> {
-  const toks = _tokenizeArgs(rest);
-  let jobId: string | undefined;
-  let tail = 20;
-  for (let i = 0; i < toks.length; i++) {
-    const t = toks[i]!;
-    if (t === "--tail") { const n = Number(toks[++i]); if (Number.isFinite(n)) tail = n; }
-    else if (!t.startsWith("--")) jobId = t;
-  }
-  const req: Extract<ControlRequest, { op: "cron_log" }> = { op: "cron_log", tail };
-  if (jobId) req.job_id = jobId;
-  const data = await callSupervisor(req);
-  if (data.entries.length === 0) {
-    ctx.ui.notify("[remote-pi] No cron log entries.", "info");
-    return;
-  }
-  const lines = data.entries.map((e) =>
-    `${new Date(e.ts).toISOString()}  ${e.fired ? "▶" : "∅"} ${e.result}  ${e.job_id} → ${e.daemon_id}  ${e.prompt_preview}`,
-  );
-  ctx.ui.notify(`[remote-pi] Cron log (last ${data.entries.length}):\n${lines.join("\n")}`, "info");
-}
-
-// ── Install/uninstall the supervisor service (plan/26 W3) ────────────────────
-//
-// Installs `pi-supervisord` as a user-level system service (systemd
-// `--user` unit on Linux, launchd LaunchAgent on macOS). Once installed:
-//   - Supervisor starts at login + survives reboots.
-//   - `remote-pi daemon start/stop/send/...` work without manually
-//     spawning the supervisor.
-// Uninstall is the inverse — leaves the registry (`daemons.json`) intact,
-// so re-installing later picks up where you left off.
-
-/**
- * `linkCli` controls whether we symlink `remote-pi` + `pi-supervisord`
- * into `~/.local/bin/`. The slash-command path passes `true` (user is
- * inside Pi's TUI — they installed via `pi install npm:remote-pi` and
- * need us to expose the CLI for them). The standalone-CLI path passes
- * `false` because the user is already running our binary from PATH (they
- * did `npm install -g remote-pi`), so re-linking would point their
- * `remote-pi` at the Pi-extension copy and diverge on upgrades.
- */
-/** Returns true on success, false when install failed (so the standalone CLI
- *  can exit non-zero — e.g. the Cockpit / CI detect failure by exit code).
- *  We do NOT process.exit here: this also runs inside the Pi TUI, where exiting
- *  would kill the session. */
-function _cmdInstall(ctx: Pick<ExtensionContext, "ui">, opts: { linkCli?: boolean } = {}): boolean {
-  const linkCli = opts.linkCli ?? false;
-  try {
-    const result = installService();
-    const sections = [
-      `[remote-pi] Supervisor service installed (${result.platform}).`,
-      `  Unit: ${result.unitPath}`,
-      `  Steps:\n${result.log.map((l) => "    " + l).join("\n")}`,
-    ];
-    if (linkCli) {
-      const link = linkCliBinaries();
-      sections.push(
-        `  CLI bins linked into ${link.binDir}:`,
-        link.links.map((l) => `    ${l.name} → ${l.target}`).join("\n"),
-        `  Steps:\n${link.log.map((l) => "    " + l).join("\n")}`,
-      );
-      if (!link.onPath) {
-        if (process.platform === "win32") {
-          sections.push(
-            `  ⚠ ${link.binDir} was just added to your user PATH (it wasn't there yet).`,
-            `    Open a NEW terminal and run \`remote-pi daemons\` to verify.`,
-          );
-        } else {
-          sections.push(
-            `  ⚠ ${link.binDir} is not on $PATH yet. Add this line to ~/.zshrc / ~/.bashrc:`,
-            `      export PATH="$HOME/.local/bin:$PATH"`,
-            `    Then open a new terminal and run \`remote-pi daemons\` to verify.`,
-          );
-        }
-      }
-    }
-    ctx.ui.notify(sections.join("\n"), "info");
-    return true;
-  } catch (err) {
-    ctx.ui.notify(`[remote-pi] install failed: ${String(err)}`, "error");
-    return false;
-  }
-}
-
-function _cmdUninstall(ctx: Pick<ExtensionContext, "ui">, opts: { linkCli?: boolean } = {}): void {
-  const linkCli = opts.linkCli ?? false;
-  try {
-    const result = uninstallService();
-    const sections = [
-      `[remote-pi] Supervisor service uninstalled (${result.platform}).`,
-      `  Unit: ${result.unitPath} (${result.removed ? "removed" : "not present"})`,
-      `  Steps:\n${result.log.map((l) => "    " + l).join("\n")}`,
-      `  Note: daemons registry (~/.pi/remote/daemons.json) kept — re-install restores everything.`,
-    ];
-    if (linkCli) {
-      const unlink = unlinkCliBinaries();
-      sections.push(
-        `  CLI bins cleanup (${unlink.binDir}):`,
-        unlink.removed
-          .map((r) => `    ${r.name} (${r.existed ? "removed" : "not present"})`)
-          .join("\n"),
-      );
-    }
-    ctx.ui.notify(sections.join("\n"), "info");
-  } catch (err) {
-    ctx.ui.notify(`[remote-pi] uninstall failed: ${String(err)}`, "error");
-  }
-}
+// Daemon, cron, and service command handlers live in extension/command_surface/*.
+// The daemon/ modules remain the single source of runtime behavior.
 
 // ── Agent-network commands (plano 19) ─────────────────────────────────────────
 
@@ -3149,61 +2618,7 @@ export function _mapAgentMessagesToEvents(
 
 // ── Standalone CLI ────────────────────────────────────────────────────────────
 
-/**
- * `remote-pi restart-supervisor` — restarts the `pi-supervisord` PROCESS
- * (not the daemons). The supervisor is a long-running Node process with no
- * hot-reload, so after a `dist` rebuild the old code keeps running until the
- * process is restarted. The Cockpit "Restart supervisor" button shells out to
- * this; the OS-specific restart lives here so the app stays cross-platform.
- *
- * Restarting the supervisor re-spawns every daemon as a side effect. Exits 0
- * on success, non-zero on failure (the Cockpit detects failure by exit code).
- */
-/** One step of a restart sequence. `ignoreFailure` steps (e.g. `schtasks /End`
- *  when the task isn't running) don't abort the sequence. */
-export interface RestartStep { cmd: string; args: string[]; ignoreFailure?: boolean }
-
-/** Pure: the OS command sequence that restarts the supervisor service, or null
- *  when the platform isn't supported. Most platforms are 1 step; Windows is 2
- *  (`schtasks /End` then `/Run`). Exported for tests. */
-export function _restartSupervisorCommand(
-  platform: NodeJS.Platform,
-  uid: number,
-): RestartStep[] | null {
-  if (platform === "darwin") return [{ cmd: "launchctl", args: ["kickstart", "-k", `gui/${uid}/${LAUNCHD_LABEL}`] }];
-  if (platform === "linux") return [{ cmd: "systemctl", args: ["--user", "restart", SYSTEMD_UNIT] }];
-  if (platform === "win32") return [
-    { cmd: "schtasks", args: ["/End", "/TN", WINDOWS_TASK_NAME], ignoreFailure: true },
-    { cmd: "schtasks", args: ["/Run", "/TN", WINDOWS_TASK_NAME] },
-  ];
-  return null;
-}
-
-function _restartSupervisor(): void {
-  const uid = process.getuid?.() ?? 0;
-  const steps = _restartSupervisorCommand(process.platform, uid);
-  if (!steps) {
-    console.error(
-      `[remote-pi] restart-supervisor is not supported on '${process.platform}' yet. ` +
-      "Restart pi-supervisord manually.",
-    );
-    process.exit(1);
-  }
-  for (const step of steps) {
-    const r = spawnSync(step.cmd, step.args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
-    if (r.error) {
-      if (step.ignoreFailure) continue;
-      console.error(`[remote-pi] restart-supervisor failed: ${step.cmd} not runnable (${r.error.message}). Is the service installed? Run \`remote-pi install\`.`);
-      process.exit(1);
-    }
-    if (r.status !== 0 && !step.ignoreFailure) {
-      const detail = (r.stderr || r.stdout || "").trim();
-      console.error(`[remote-pi] restart-supervisor failed (${step.cmd} exited ${r.status})${detail ? `: ${detail}` : ""}.`);
-      process.exit(r.status === null ? 1 : r.status);
-    }
-  }
-  console.log("[remote-pi] Supervisor restarted.");
-}
+// Supervisor restart command planning/execution lives in command_surface/supervisor_restart.ts.
 
 function _isDirectRun(): boolean {
   try {
@@ -3255,30 +2670,30 @@ if (_isDirectRun()) {
     // parser (shared with the slash-command path) sees the same shape
     // as it would from a Pi interactive prompt.
     const joined = cliArgs.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ");
-    await _cmdCreate(joined, {
+    await _daemonCommands.create(joined, {
       ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"],
     });
   } else if (subcmd === "remove") {
     const id = (cliArgs[0] ?? "").trim();
-    await _cmdRemove(id, {
+    await _daemonCommands.remove(id, {
       ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"],
     });
   } else if (subcmd === "daemons") {
     // Mirror the slash handler: ask the supervisor when reachable,
     // fall back to registry-only when not.
     const stubCtx = { ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"] };
-    await _cmdDaemonsList(stubCtx);
+    await _daemonCommands.list(stubCtx);
   } else if (subcmd === "daemon") {
     // `remote-pi daemon <op> [args]`. Reuse the fleet-ops handlers — they
     // already accept a minimal ctx with `notify`.
     const op = cliArgs[0] ?? "";
     const rest = cliArgs.slice(1).map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ");
     const stubCtx = { ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"] };
-    if      (op === "start")   { await _cmdDaemonStart(stubCtx, cliArgs[1]); }
-    else if (op === "stop")    { await _cmdDaemonStop(stubCtx, cliArgs[1]); }
-    else if (op === "restart") { await _cmdDaemonRestart(stubCtx, cliArgs[1]); }
-    else if (op === "status")  { await _cmdDaemonStatus(stubCtx); }
-    else if (op === "send")    { await _cmdDaemonSend(rest, stubCtx); }
+    if      (op === "start")   { await _daemonCommands.start(stubCtx, cliArgs[1]); }
+    else if (op === "stop")    { await _daemonCommands.stop(stubCtx, cliArgs[1]); }
+    else if (op === "restart") { await _daemonCommands.restart(stubCtx, cliArgs[1]); }
+    else if (op === "status")  { await _daemonCommands.status(stubCtx); }
+    else if (op === "send")    { await _daemonCommands.send(rest, stubCtx); }
     else {
       console.log("Usage: remote-pi daemon <start|stop|restart [<id>]|status|send <id> \"<text>\">");
     }
@@ -3287,7 +2702,7 @@ if (_isDirectRun()) {
     // parser sees the same shape as a Pi slash prompt.
     const joined = cliArgs.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ");
     const stubCtx = { ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"] };
-    await _cmdCron(joined, stubCtx);
+    await _cronCommands.run(joined, stubCtx);
   } else if (subcmd === "peers") {
     // Read-only roster of the local + cross-PC mesh. Unlike `devices` (which
     // reads paired phones from peers.json), the mesh roster lives only in the
@@ -3310,7 +2725,7 @@ if (_isDirectRun()) {
     const stubCtx = { ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"] };
     // Propagate failure as a non-zero exit so callers (Cockpit / CI) detect it
     // — installService throws on a failed schtasks/launchctl/systemctl step.
-    if (!_cmdInstall(stubCtx, { linkCli: false })) process.exit(1);
+    if (!_serviceCommands.install(stubCtx, { linkCli: false })) process.exit(1);
   } else if (subcmd === "uninstall") {
     const stubCtx = { ui: { notify: (msg: string) => console.log(msg) } as unknown as ExtensionContext["ui"] };
     // `linkCli: true` even from the CLI: unlinking is ALWAYS safe and must run
@@ -3320,9 +2735,9 @@ if (_isDirectRun()) {
     // user who installed via the TUI (`/remote-pi install`, which links) and
     // uninstalls from a shell still gets the links cleaned up — the asymmetry
     // that left an orphaned `~/.local/bin/remote-pi` behind.
-    _cmdUninstall(stubCtx, { linkCli: true });
+    _serviceCommands.uninstall(stubCtx, { linkCli: true });
   } else if (subcmd === "restart-supervisor") {
-    _restartSupervisor();
+    restartSupervisor();
   } else {
     console.log([
       "Usage: remote-pi <command>",
