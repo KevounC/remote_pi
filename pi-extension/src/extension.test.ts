@@ -161,6 +161,8 @@ const {
   _getActivePeerCountForTest,
   _restartSupervisorCommand,
   _setDisposedForTest,
+  _setRemoteSessionIdForTest,
+  _getRemoteSessionIdForTest,
   _hasMeshNodeForTest,
   _getLockedNameForTest,
   _resetCwdLockForTest,
@@ -996,13 +998,15 @@ describe("multi-channel broadcast (W2D)", () => {
   test("session_sync from owner A → session_history reply only to A", async () => {
     await _pairForTest("ownerA__1234567890");
     await _pairAdditionalForTest("ownerB__abcdefghij", "Android");
+    const sessionId = currentSessionIdFromSends();
     const sendsBefore = relayRef.current!.send.mock.calls.length;
 
-    // Owner A asks for history.
+    // Owner A asks for history. session_sync is session-scoped (canonical-
+    // session gate): route it through the captured session id like a real app.
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
-        type: "session_sync", id: "sync-1", limit: 50,
+        type: "session_sync", id: "sync-1", session_id: sessionId, limit: 50,
       })).toString("base64"),
     }));
     // Let the handler run.
@@ -1037,13 +1041,15 @@ describe("multi-channel broadcast (W2D)", () => {
   test("user_message from A → rebroadcast reaches both A and B (with id preserved)", async () => {
     await _pairForTest("ownerA__1234567890");
     await _pairAdditionalForTest("ownerB__abcdefghij", "Android");
+    const sessionId = currentSessionIdFromSends();
     const sendsBefore = relayRef.current!.send.mock.calls.length;
 
-    // Owner A sends user_message with a stable id.
+    // Owner A sends user_message with a stable id. user_message is session-
+    // scoped: route through the captured session id.
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
-        type: "user_message", id: "msg-123", text: "oi",
+        type: "user_message", id: "msg-123", session_id: sessionId, text: "oi",
       })).toString("base64"),
     }));
     // Flush microtasks so the route handler runs.
@@ -1065,12 +1071,13 @@ describe("multi-channel broadcast (W2D)", () => {
   test("queued_message_set broadcasts queued state to every owner", async () => {
     await _pairForTest("ownerA__1234567890");
     await _pairAdditionalForTest("ownerB__abcdefghij", "Android");
+    const sessionId = currentSessionIdFromSends();
     const sendsBefore = relayRef.current!.send.mock.calls.length;
 
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
-        type: "queued_message_set", id: "queued-1", text: "next prompt",
+        type: "queued_message_set", id: "queued-1", session_id: sessionId, text: "next prompt",
       })).toString("base64"),
     }));
     await new Promise<void>((r) => setImmediate(r));
@@ -1094,10 +1101,11 @@ describe("multi-channel broadcast (W2D)", () => {
 
   test("queued_message_clear clears and broadcasts empty queued state", async () => {
     await _pairForTest("ownerA__1234567890");
+    const sessionId = currentSessionIdFromSends();
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
-        type: "queued_message_set", id: "queued-clear", text: "discard me",
+        type: "queued_message_set", id: "queued-clear", session_id: sessionId, text: "discard me",
       })).toString("base64"),
     }));
     await new Promise<void>((r) => setImmediate(r));
@@ -1106,7 +1114,7 @@ describe("multi-channel broadcast (W2D)", () => {
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
-        type: "queued_message_clear", id: "clear-queued",
+        type: "queued_message_clear", id: "clear-queued", session_id: sessionId,
       })).toString("base64"),
     }));
     await new Promise<void>((r) => setImmediate(r));
@@ -1114,17 +1122,22 @@ describe("multi-channel broadcast (W2D)", () => {
     const sent = relayRef.current!.send.mock.calls.slice(sendsBefore)
       .map((c) => c[0] as string).map(decodeSentCt);
     const state = sent.find((d) => d.inner.type === "queued_message_state");
-    expect(state?.inner).toEqual({ type: "queued_message_state" });
+    // Empty/cleared state: type only, no `id`/`text` payload. (session_id is
+    // now stamped by _withCurrentSession — correct canonical-session behavior.)
+    expect(state?.inner).toMatchObject({ type: "queued_message_state" });
+    expect(state?.inner).not.toHaveProperty("id");
+    expect(state?.inner).not.toHaveProperty("text");
   });
 
   test("session_sync sends queued state before history", async () => {
     await _pairForTest("ownerA__1234567890");
+    const sessionId = currentSessionIdFromSends();
     _setMessageBufferForTest([{ role: "user", content: "already sent", timestamp: 1700000000000 }]);
     _setSessionStartedAtForTest(1699999999000);
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
-        type: "queued_message_set", id: "queued-sync", text: "after this",
+        type: "queued_message_set", id: "queued-sync", session_id: sessionId, text: "after this",
       })).toString("base64"),
     }));
     await new Promise<void>((r) => setImmediate(r));
@@ -1133,7 +1146,7 @@ describe("multi-channel broadcast (W2D)", () => {
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
-        type: "session_sync", id: "sync-queued", limit: 50,
+        type: "session_sync", id: "sync-queued", session_id: sessionId, limit: 50,
       })).toString("base64"),
     }));
     await new Promise<void>((r) => setImmediate(r));
@@ -1153,6 +1166,7 @@ describe("multi-channel broadcast (W2D)", () => {
 
   test("queued message drains once as a normal user_message after active turn ends", async () => {
     await _pairForTest("ownerA__1234567890");
+    const sessionId = currentSessionIdFromSends();
     const sendUserMessage = vi.fn();
     const onTurnStart = captureEventHandler("turn_start");
     const onInput = captureEventHandler("input");
@@ -1168,7 +1182,7 @@ describe("multi-channel broadcast (W2D)", () => {
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
-        type: "queued_message_set", id: "queued-drain", text: "run next",
+        type: "queued_message_set", id: "queued-drain", session_id: sessionId, text: "run next",
       })).toString("base64"),
     }));
     await new Promise<void>((r) => setImmediate(r));
@@ -1193,7 +1207,11 @@ describe("multi-channel broadcast (W2D)", () => {
     const sent = relayRef.current!.send.mock.calls.slice(sendsBeforeDrain)
       .map((c) => c[0] as string).map(decodeSentCt);
     const emptyState = sent.find((d) => d.inner.type === "queued_message_state");
-    expect(emptyState?.inner).toEqual({ type: "queued_message_state" });
+    // Empty/cleared state: type only, no `id`/`text` payload. (session_id is
+    // now stamped by _withCurrentSession — correct canonical-session behavior.)
+    expect(emptyState?.inner).toMatchObject({ type: "queued_message_state" });
+    expect(emptyState?.inner).not.toHaveProperty("id");
+    expect(emptyState?.inner).not.toHaveProperty("text");
     const drainedEcho = sent.find((d) => d.inner.type === "user_message");
     expect(drainedEcho?.inner).toMatchObject({
       type: "user_message",
@@ -1334,6 +1352,7 @@ describe("multi-channel broadcast (W2D)", () => {
 
   test("plan/30: idle user_message without images → normal sendUserMessage and no `images` key on echo", async () => {
     await _pairForTest("ownerA__1234567890");
+    const sessionId = currentSessionIdFromSends();
     const sendUserMessage = vi.fn();
     _setPiForTest({
       sendUserMessage,
@@ -1343,7 +1362,7 @@ describe("multi-channel broadcast (W2D)", () => {
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
-        type: "user_message", id: "msg-txt", text: "hi",
+        type: "user_message", id: "msg-txt", session_id: sessionId, text: "hi",
       })).toString("base64"),
     }));
     await new Promise<void>((r) => setImmediate(r));
@@ -1362,6 +1381,7 @@ describe("multi-channel broadcast (W2D)", () => {
     "plan/43: active steering calls sendUserMessage(deliverAs='steer')",
     async () => {
       await _pairForTest("ownerA__1234567890");
+      const sessionId = currentSessionIdFromSends();
       const onInput = captureEventHandler("input");
       onInput({ type: "input", text: "primary", source: "interactive" });
       await new Promise<void>((r) => setImmediate(r));
@@ -1378,6 +1398,7 @@ describe("multi-channel broadcast (W2D)", () => {
         ct: Buffer.from(JSON.stringify({
           type: "user_message",
           id: "msg-steer",
+          session_id: sessionId,
           text: "refine this",
           streaming_behavior: "steer",
         })).toString("base64"),
@@ -1400,6 +1421,7 @@ describe("multi-channel broadcast (W2D)", () => {
 
   test("plan/43: steering without a known turn id still reaches SDK as steer", async () => {
     await _pairForTest("ownerA__1234567890");
+    const sessionId = currentSessionIdFromSends();
     expect(_getCurrentTurnIdForTest()).toBeNull();
     const sendUserMessage = vi.fn();
     _setPiForTest({
@@ -1413,6 +1435,7 @@ describe("multi-channel broadcast (W2D)", () => {
       ct: Buffer.from(JSON.stringify({
         type: "user_message",
         id: "msg-stale-steer",
+        session_id: sessionId,
         text: "refine while stale",
         streaming_behavior: "steer",
       })).toString("base64"),
@@ -1435,6 +1458,7 @@ describe("multi-channel broadcast (W2D)", () => {
 
   test("plan/43: busy app message without wire behavior is defensively steered", async () => {
     await _pairForTest("ownerA__1234567890");
+    const sessionId = currentSessionIdFromSends();
     const onTurnStart = captureEventHandler("turn_start");
     onTurnStart({ type: "turn_start", turnIndex: 0, timestamp: 0 });
     const activeTurnId = _getCurrentTurnIdForTest();
@@ -1451,6 +1475,7 @@ describe("multi-channel broadcast (W2D)", () => {
       ct: Buffer.from(JSON.stringify({
         type: "user_message",
         id: "msg-busy-no-mode",
+        session_id: sessionId,
         text: "late correction",
       })).toString("base64"),
     }));
@@ -1472,6 +1497,7 @@ describe("multi-channel broadcast (W2D)", () => {
 
   test("app session_new recaptures fresh message API for the next app prompt", async () => {
     await _pairForTest("ownerA__1234567890");
+    const sessionId = currentSessionIdFromSends();
 
     const staleMessage = "This extension ctx is stale after session replacement or reload.";
     const staleSendUserMessage = vi.fn(() => { throw new Error(staleMessage); });
@@ -1502,16 +1528,21 @@ describe("multi-channel broadcast (W2D)", () => {
       ct: Buffer.from(JSON.stringify({
         type: "session_new",
         id: "new-fresh-api",
+        session_id: sessionId,
       })).toString("base64"),
     }));
     await new Promise<void>((r) => setImmediate(r));
 
+    // session_new swapped the canonical session: the next user_message must
+    // carry the freshly-captured id, not the pre-new one.
+    const freshSessionId = _getRemoteSessionIdForTest()!;
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
         type: "user_message",
         id: "msg-after-new",
+        session_id: freshSessionId,
         text: "hello after new",
       })).toString("base64"),
     }));
@@ -1531,6 +1562,7 @@ describe("multi-channel broadcast (W2D)", () => {
 
   test("app prompt waits for async fresh message API rejection before echoing", async () => {
     await _pairForTest("ownerA__1234567890");
+    const sessionId = currentSessionIdFromSends();
 
     const staleMessage = "This extension ctx is stale after session replacement or reload.";
     const staleSendUserMessage = vi.fn(() => { throw new Error(staleMessage); });
@@ -1560,16 +1592,21 @@ describe("multi-channel broadcast (W2D)", () => {
       ct: Buffer.from(JSON.stringify({
         type: "session_new",
         id: "new-fresh-api-reject",
+        session_id: sessionId,
       })).toString("base64"),
     }));
     await new Promise<void>((r) => setImmediate(r));
 
+    // session_new swapped the canonical session: route the post-new prompt
+    // through the freshly-captured id.
+    const freshSessionId = _getRemoteSessionIdForTest()!;
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
         type: "user_message",
         id: "msg-after-new-reject",
+        session_id: freshSessionId,
         text: "hello after rejected new",
       })).toString("base64"),
     }));
@@ -1591,6 +1628,7 @@ describe("multi-channel broadcast (W2D)", () => {
 
   test("plan/43: steering sendUserMessage throw returns correlated error and no echo", async () => {
     await _pairForTest("ownerA__1234567890");
+    const sessionId = currentSessionIdFromSends();
     const onInput = captureEventHandler("input");
     onInput({ type: "input", text: "primary", source: "interactive" });
     await new Promise<void>((r) => setImmediate(r));
@@ -1608,6 +1646,7 @@ describe("multi-channel broadcast (W2D)", () => {
       ct: Buffer.from(JSON.stringify({
         type: "user_message",
         id: "msg-steer-fail",
+        session_id: sessionId,
         text: "bad steer",
         streaming_behavior: "steer",
       })).toString("base64"),
@@ -1740,12 +1779,13 @@ describe("multi-channel broadcast (W2D)", () => {
     // `relay.send.mock.calls`: user_message echoes precede any reply
     // generated downstream (none expected here since SDK is mocked).
     await _pairForTest("ownerA__1234567890");
+    const sessionId = currentSessionIdFromSends();
     const sendsBefore = relayRef.current!.send.mock.calls.length;
 
     relayRef.current!.emit("message", JSON.stringify({
       peer: "ownerA__1234567890",
       ct: Buffer.from(JSON.stringify({
-        type: "user_message", id: "msg-order-1", text: "order check",
+        type: "user_message", id: "msg-order-1", session_id: sessionId, text: "order check",
       })).toString("base64"),
     }));
     await new Promise<void>((r) => setImmediate(r));
@@ -2457,12 +2497,15 @@ describe("routeClientMessage cancel handling", () => {
       abort: ReturnType<typeof vi.fn>;
       compact: ReturnType<typeof vi.fn>;
     });
+    // session_start re-captures the canonical session id (a fresh uuid when the
+    // ctx carries no sessionManager) — read the live id, not the pair_ok id.
+    const sessionId = _getRemoteSessionIdForTest()!;
 
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     relayRef.current!.emit("message", JSON.stringify({
       peer: "owner-cancel-1",
       ct: Buffer.from(JSON.stringify({
-        type: "cancel", id: "cancel-stale", target_id: "msg-stale",
+        type: "cancel", id: "cancel-stale", session_id: sessionId, target_id: "msg-stale",
       })).toString("base64"),
     }));
 
@@ -2498,12 +2541,15 @@ describe("routeClientMessage cancel handling", () => {
       compact: ReturnType<typeof vi.fn>;
     });
     _setPiForTest(null);
+    // session_start re-captures the canonical session id (a fresh uuid when the
+    // ctx carries no sessionManager) — read the live id, not the pair_ok id.
+    const sessionId = _getRemoteSessionIdForTest()!;
 
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     relayRef.current!.emit("message", JSON.stringify({
       peer: "owner-cancel-nopi",
       ct: Buffer.from(JSON.stringify({
-        type: "cancel", id: "cancel-nopi", target_id: "msg-nopi",
+        type: "cancel", id: "cancel-nopi", session_id: sessionId, target_id: "msg-nopi",
       })).toString("base64"),
     }));
 
@@ -2535,12 +2581,15 @@ describe("routeClientMessage cancel handling", () => {
     onSessionStart({ type: "session_start" }, { compact: vi.fn() } as unknown as {
       compact: ReturnType<typeof vi.fn>;
     });
+    // session_start re-captures the canonical session id (a fresh uuid when the
+    // ctx carries no sessionManager) — read the live id, not the pair_ok id.
+    const sessionId = _getRemoteSessionIdForTest()!;
 
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     relayRef.current!.emit("message", JSON.stringify({
       peer: "owner-cancel-2",
       ct: Buffer.from(JSON.stringify({
-        type: "cancel", id: "cancel-nonreal", target_id: "msg-nonreal",
+        type: "cancel", id: "cancel-nonreal", session_id: sessionId, target_id: "msg-nonreal",
       })).toString("base64"),
     }));
 
@@ -2576,12 +2625,15 @@ describe("routeClientMessage cancel handling", () => {
       abort: ReturnType<typeof vi.fn>;
       compact: ReturnType<typeof vi.fn>;
     });
+    // session_start re-captures the canonical session id (a fresh uuid when the
+    // ctx carries no sessionManager) — read the live id, not the pair_ok id.
+    const sessionId = _getRemoteSessionIdForTest()!;
 
     const sendsBefore = relayRef.current!.send.mock.calls.length;
     relayRef.current!.emit("message", JSON.stringify({
       peer: "owner-cancel-3",
       ct: Buffer.from(JSON.stringify({
-        type: "cancel", id: "cancel-throw", target_id: "msg-throw",
+        type: "cancel", id: "cancel-throw", session_id: sessionId, target_id: "msg-throw",
       })).toString("base64"),
     }));
 
@@ -3309,6 +3361,10 @@ describe("session_shutdown teardown", () => {
       sendUserMessage: staleSendUserMessage,
       sendMessage: vi.fn(() => { throw new Error(staleMessage); }),
     });
+    // Pin the canonical session id so the session-scoped user_message passes
+    // the attribution gate and reaches the _disposed guard this test targets.
+    const sessionId = "019f17a6-9143-7be1-825b-183b42c3e681";
+    _setRemoteSessionIdForTest(sessionId);
 
     const shutdown = captureEventHandler("session_shutdown");
     await shutdown({ type: "session_shutdown", reason: "resume" });
@@ -3316,7 +3372,7 @@ describe("session_shutdown teardown", () => {
     const sent: unknown[] = [];
     _routeClientMessageFrom(
       { send: (msg: unknown) => { sent.push(msg); } } as Parameters<typeof _routeClientMessageFrom>[0],
-      { type: "user_message", id: "msg-after-shutdown", text: "late hello" },
+      { type: "user_message", id: "msg-after-shutdown", session_id: sessionId, text: "late hello" },
       { abort: vi.fn() },
     );
 

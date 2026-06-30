@@ -2,32 +2,39 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import { DecodeError, decodeServer, encodeClient } from "./codec.js";
+import {
+  SESSION_SCOPED_SERVER_TYPES,
+  NON_SESSION_SCOPED_SERVER_TYPES,
+} from "./session_scope.js";
 
 const fixtureDir = fileURLToPath(
   new URL("../../../.orchestration/contracts/fixtures", import.meta.url),
 );
 
-const SERVER_TYPE_FILES = new Set([
-  "pair_ok.jsonl",
-  "pair_error.jsonl",
-  "user_input.jsonl",
-  "user_message.jsonl",
-  "agent_stream.jsonl",
-  "agent_message.jsonl",
-  "tool_request.jsonl",
-  "tool_result.jsonl",
-  "error.jsonl",
-  "cancelled.jsonl",
-  "pong.jsonl",
-  "bye.jsonl",
-  "session_history.jsonl",
+// Single source of truth: a fixture is a decodeable SERVER fixture iff its
+// carried `type` is a registered server type (session-scoped or not). Derived
+// from the session_scope registry so adding a server type can't silently drift
+// this set — the canonical-session work added action_ok/action_error/compaction/
+// models_list/queued_message_state as server types and this hand-maintained
+// list fell behind. The only filename alias is `agent_stream.jsonl`, which
+// carries agent_chunk/agent_done under a historical name.
+const SERVER_TYPES = new Set<string>([
+  ...SESSION_SCOPED_SERVER_TYPES,
+  ...NON_SESSION_SCOPED_SERVER_TYPES,
 ]);
+const FILE_TYPE_ALIASES: Record<string, string> = {
+  "agent_stream.jsonl": "agent_chunk",
+};
+function isServerFixture(file: string): boolean {
+  const t = FILE_TYPE_ALIASES[file] ?? file.replace(/\.jsonl$/, "");
+  return SERVER_TYPES.has(t);
+}
 
 describe("fixtures", () => {
   const files = readdirSync(fixtureDir).filter((f) => f.endsWith(".jsonl"));
 
-  test("31 fixture files present", () => {
-    expect(files).toHaveLength(31);
+  test("36 fixture files present", () => {
+    expect(files).toHaveLength(36);
   });
 
   for (const file of files) {
@@ -37,7 +44,7 @@ describe("fixtures", () => {
         .filter(Boolean);
 
       for (const line of lines) {
-        if (SERVER_TYPE_FILES.has(file)) {
+        if (isServerFixture(file)) {
           const msg = decodeServer(line);
           expect(msg).toHaveProperty("type");
         } else {
