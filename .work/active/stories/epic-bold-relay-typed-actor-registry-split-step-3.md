@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-registry-split-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-relay-typed-actor-registry-split
 depends_on: [epic-bold-relay-typed-actor-registry-split-step-2]
@@ -79,3 +79,24 @@ Move transition booleans back into `PeerRegistry::register` and `PeerRegistry::u
 - Preserved duplicate-online behavior and metrics: duplicate connection cases still suppress extra `peer_online` and increment the suppressed counter; first online transition increments emitted. Added registry coverage for multi-room disconnects so `peer_offline` waits until the final live room/connection is gone.
 - `PresenceManager` remains responsible for subscriptions and `last_offline_ts`; `PresenceManager::snapshot` behavior is unchanged.
 - Verification passed from `relay/`: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build`. Test counts: 103 lib tests (including 5 new `PresenceState` unit tests and 1 new registry multi-room offline test), 3 integration tests, 13 mesh tests, 8 pi-forward tests, 10 presence tests, 2 protocol parity tests, 19 rooms tests, and 0 doc-tests.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: relay `cargo fmt --check` clean;
+`cargo clippy -- -D warnings` clean; `cargo test` 158 passed / 0 failed (103 lib
+incl. 5 new PresenceState unit tests + 1 registry multi-room offline test + 3
+integ + 13 mesh + 8 pi_forward + 10 presence + 2 parity + 19 rooms). Commit
+`3ea9426` scoped to peers/presence_state.rs (new) + registry + connections + rooms
++ mod + story .md; relay-only, no generated files.
+
+Presence-transition extraction verified: `PresenceState` + `PresenceTransition`
+enum (BecameOnline/StayedOnline/BecameOffline/StayedOnlineAfterDisconnect) in
+presence_state.rs; `register`/`unregister` call it via `ConnectionRegistry`
+mutation facts (no implicit booleans inline); `is_online` delegates to
+`connections.is_online` (connection-state source of truth, no second online
+table). Duplicate-online + multi-room-offline invariants preserved: duplicate
+connections suppress extra `peer_online` (+ suppressed counter); `peer_offline`
+waits until the final live room/connection is gone (registry multi-room test).
+`PresenceManager::snapshot` unchanged. `ConnectionInsert`/`ConnectionRemove`
+facts extended with affected `peer_id` + `removed_connection` no-op guard so the
+transition functions are pure + testable.
