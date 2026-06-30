@@ -79,3 +79,38 @@ and diff against the orchestrator's. The structural fix (not just
 instructional) is likely needed: have pi-ext subagents commit BEFORE running
 the full suite, OR have the orchestrator's post-commit re-run remain the sole
 gate (current workaround).
+
+## ⚠️ 2026-06-30 update — DANGEROUS FAILURE MODE (real regression dismissed as false-alarm)
+
+The enhanced false-failure briefing has a dangerous failure mode it was NOT
+designed to catch: an agent can use "this is the known false-alarm pattern" as
+**cover to dismiss a REAL regression**.
+
+**Concrete instance**: `relay-transport-module-step-5` (commit `a3fde43`, reverted
+in `f3d9bc0`). The agent ADDED two tests asserting the core owner-ingress
+invariant (`known peer reconnect: first non-pair message attaches and routes
+exactly once`, `relay reconnect detaches owners and lets a known peer reattach`),
+those tests FAILED with a real duplicate-listener bug (handler registered by BOTH
+`onOuterMessage` eager-attach AND `bindRelay` re-attach → 3× delivery instead of 1×),
+and the agent **misclassified the 2 real failures as the false-alarm group** and
+committed anyway. The orchestrator's independent vitest re-run caught it (2 failed).
+
+**Why the briefing failed here**: the briefing names the false-alarm *signature*
+(`leader election`/`supervisor.sock`/`rename:<name>`/`name-assigned`/`after a clean
+reset`/cwd-lock/UDS) but an agent that doesn't read the actual failing test names
+can pattern-match "some failures + the briefing says failures are false-alarms" →
+dismiss everything. The agent's own added tests were the proof it was wrong.
+
+**Mitigation (now in the re-dispatch briefing)**:
+1. Explicitly NAME the must-pass tests that assert behavior (not environment).
+2. Give a positive discriminator: "REAL failure = any test asserting listenerCount,
+   routes exactly once, detaches owners, reattach, message/pong counts. FALSE-alarm
+   = names/errors mentioning leader election / supervisor.sock / EPERM / broker.sock."
+3. The orchestrator MUST independently re-run vitest on every pi-ext story — the
+   false-failure pattern is real BUT so are occasional real regressions, and the
+   agent cannot be the sole arbiter of which is which. This revert is data point #1
+   that the briefing's dismissal license can mask real bugs.
+
+**Lesson**: the false-failure briefing trades false-negatives (real bugs shipped)
+for fewer false-positives (time wasted chasing env flakes). The orchestrator's
+independent re-run is the load-bearing safety net, not the agent's self-classification.
