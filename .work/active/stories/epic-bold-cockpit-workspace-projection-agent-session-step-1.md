@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-agent-session-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-agent-session
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document, epic-bold-transcript-event-log-projection-derive]
@@ -129,3 +129,17 @@ Delete `agent_session_projection.dart` and revert `AgentSession` / `RpcDataMappe
 - `RpcDataMapper.state()` already maps legacy `isStreaming` into `AgentTurnProjection.streaming` from the landed dependency; targeted mapper tests remain in `rpc_data_mapper_transcript_projection_test.dart` and were run with this story.
 - Added tests for empty, booting, idle, streaming, pending-send, and crashed projection snapshots plus an `AgentSession` compatibility test proving `isBusy`/`isAlive` match the new projection through pending-send, working, and crashed states.
 - Verification: `flutter pub get --offline`; targeted `flutter test test/domain/agent_session_projection_test.dart test/ui/agent_session_turn_projection_test.dart test/data/rpc_data_mapper_transcript_projection_test.dart` (21/21); `flutter analyze` (0 issues); full `flutter test` (210/210).
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: whole-cockpit `flutter analyze` →
+No issues found; full `flutter test` → 210/210 (incl. 7 new projection tests).
+Commit `0e920a0` scoped to cockpit only (new agent_session_projection.dart +
+agent_session compat getters + 2 test files + story .md); no cross-subproject
+collision. Ports & adapters verified: `agent_session_projection.dart` imports
+ONLY domain entities (no UI/Hive/process/Flutter widget APIs). Reused (not
+forked) `AgentTurnProjection` + Cockpit transcript projection — no second
+algebra. `isBusy`/`isAlive` semantics preserved (compat-getter test proves it
+across pending-send/working/crashed states); `AgentProcessLifecycle.running`
+maps to legacy `idle` to keep visible UI behavior unchanged. Targeted snapshot
+tests cover empty/booting/idle/streaming/pending-send/crashed.
