@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-control-handlers
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor
 depends_on: [epic-bold-relay-typed-actor-frame-dispatch]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Relay typed actor — typed control handlers
@@ -394,3 +394,11 @@ cargo test
 ```
 
 Targeted tests should cover malformed peer-list fail-closed behavior, auth hello defaults, subscription graph replacement/removal, presence/rooms dedup and check limiter behavior, room metadata merge-patch semantics, and mesh HTTP status compatibility.
+
+## Review — advanced to done (2026-06-30)
+
+All 6 child steps `done` (control/auth handlers, presence/rooms dedup, room-meta
+typed actor, mesh HTTP boundary — all consuming generated protocol types with
+the generated-contract invariant held at each generated step). The relay's
+control-frame and mesh-membership handling is now typed-actor + generated-DTO
+driven. Epic complete.
