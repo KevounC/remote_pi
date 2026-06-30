@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-hydration-replay-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-hydration-replay
 depends_on: [epic-bold-transcript-event-log-hydration-replay-step-1]
@@ -97,3 +97,18 @@ Future<void> _appendTranscriptEventsAndProject(
 ## Rollback
 
 Restore `_applyHistory` to `_convertHistory` + diffed row reconcile. The event store/adapter from step 1 can remain unused.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: **app tests 610 passed (up from 608
+— the agent's 7 new replay tests)**; `flutter analyze` clean except the known-unrelated
+`axisAlignment` deprecation. Commit `c567ab3` scoped to app only (sync_service +
+tests); collision guard held.
+
+Replay behavior verified: `_applyHistory` → `_replayHistory` — appends/dedupes events
+in `TranscriptEventStore` (source of truth) before rebuilding the disposable
+`MessageRecord` projection cache. Append-only semantics preserved: replays omitting
+existing local/logged events do NOT delete them; duplicate replay appends zero events
++ no box churn (idempotent). Stale `session_started_at` rejected before `appendAll`
+(in the serialized `_writeChain` boundary). Late authoritative confirmation after
+send timeout + stale-boundary rejection tested. Targeted sync_service tests 60 passed.
