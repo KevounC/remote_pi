@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-cockpit-control-rpc-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, cockpit, pi-extension]
 parent: epic-bold-generated-protocol-cockpit-control-rpc
 depends_on: [epic-bold-generated-protocol-schema-source]
@@ -83,3 +83,21 @@ runtime codepaths outside Cockpit are touched by this step.
 - Verification: `flutter pub get --offline` passed; `flutter analyze` passed with 0 issues; `flutter test` passed (226/226).
 - Discrepancies: generated Dart output does not yet include `cockpitControl` DTOs, so this step aligns Cockpit to the checked-in schema vocabulary by hand-domain values while preserving legacy transport serialization for later structured-emission steps.
 
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: whole-cockpit `flutter analyze` →
+No issues found; full `flutter test` → 226/226 (incl. new rpc_event_mapper_test).
+Commit `7aae1f2` scoped to cockpit only (rpc_event_mapper + pi_rpc_process +
+rpc_process_gateway + pi_command + rpc_event + the UI consumers that call
+sendControl + story .md); no cross-subproject collision.
+
+Typed abstraction verified: `sendControl` takes `PiControlCommand` (not raw
+verb String); typed event set covers all 5 overlay events
+(remote-pi:relay-state, name-assigned, pair-code, paired, mesh-revoked);
+RpcUnknown degradation preserved for unknown custom types. No runtime behavior
+change — `PiRpcProcess` still serializes to the existing NUL-prefixed `prompt`
+compatibility frame (centralized in the gateway adapter); existing relay/name
+payload fields unchanged. The deviation (generated Dart lacks cockpitControl
+DTOs yet, so hand-domain values align to the schema vocabulary while preserving
+legacy transport) is a legitimate first-boundary-step approach, documented.
