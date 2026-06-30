@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-store-step-1
 kind: story
-stage: review
+stage: implementing
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-store
 depends_on: [epic-bold-transcript-event-log-projection-derive]
@@ -126,3 +126,14 @@ Fix by either making the store port/adapter conform to the repository lifecycle 
 - Discrepancies from design: none; the re-fix adds coverage only.
 - Adjacent issues parked: none.
 - Verification: `HOME=/tmp/pi-dart-home /opt/flutter/bin/cache/dart-sdk/bin/dart analyze test/data/local/transcript_event_store_hive_test.dart lib/data/local/transcript_event_store_hive.dart lib/data/local/records/transcript_event_record.dart lib/data/local/boxes.dart` passed. `dart test test/data/local/transcript_event_store_hive_test.dart` could not run because pub network access failed with `403 Forbidden`; `flutter analyze`/`flutter test` cannot start because `/opt/flutter/bin/cache` is read-only.
+
+## Review bounce (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blockers**:
+- `app/test/data/local/transcript_event_store_hive_test.dart:31` / `app/test/data/local/transcript_event_store_hive_test.dart:91`: the targeted test file added in commit `94ccdb54` does not pass. The cases using peer ids with `/` and `=` fail before exercising the store invariants because `LocalBoxes.transcriptEventsBoxName` produces Hive file names containing `/` (`transcript_events_peer/one=__...` and `transcript_events_peer/id=__...`), causing `PathNotFoundException`. This violates the targeted-store-tests acceptance criterion and leaves the peer-key filename-safety invariant unverified/failing.
+
+**Verification run**:
+- `cd /home/agent/forks/remote_pi/app && HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter analyze` → exit 1 with only the known-unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802`.
+- `cd /home/agent/forks/remote_pi/app && HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter test test/data/local/transcript_event_store_hive_test.dart` → exit 1; 3 tests passed, 2 failed with `PathNotFoundException` while opening transcript event Hive boxes for peer ids containing `/`.
