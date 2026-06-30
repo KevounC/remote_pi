@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-agent-session-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-agent-session
 depends_on: [epic-bold-cockpit-workspace-projection-agent-session-step-2, epic-bold-turn-state-machine-projection-consumers-step-4]
@@ -109,3 +109,24 @@ Inline the process controller back into `AgentSession`, restore direct `_status`
 - Verification: `flutter pub get --offline`, targeted `flutter test test/ui/agent_session_turn_projection_test.dart`, `flutter analyze`, and full `flutter test` passed.
 - Discrepancies from design: controller keeps pass-through wrappers for existing model/session/history/relay RPC commands so stdin ownership stays with the process controller while preserving current `AgentSession` public behavior; no new pane-wide process abstraction was introduced.
 - Adjacent issues parked: none.
+
+## Review
+
+Approved (2026-06-30) with HIGH-risk verification — core lifecycle extraction.
+Independently re-ran: whole-cockpit `flutter analyze` → No issues found; full
+`flutter test` → 218/218 (incl. new terminal-convergence tests). Commit `6eb803f`
+scoped to cockpit only (new agent_session_signal.dart + agent_process_controller.dart
++ refactored agent_session.dart + tests + story .md); no cross-subproject
+collision.
+
+Terminal-path convergence verified directly in tests: agent end, stream error,
+stop/abort acknowledgement, process exit (marks stale + not-working), new session,
+history load (clears legacy streaming), restart, dispose — each asserts
+`turn.working isFalse` + `startedAt:null`. Process/turn separation confirmed:
+`AgentProcessController` owns boot/stdin/subscription/exit/restart/dispose;
+`AgentSession` coordinates `AgentSessionSignal`s into lifecycle/turn/transcript
+projections; `AgentStatus.streaming` no longer drives turn state. `onTurnEnd`
+success-only semantics preserved + tested (fires only on previously-working
+successful agent_end; not on error/stop/exit/idle). Compat getters derive from
+AgentTurnProjection/process lifecycle. The pass-through-wrapper deviation is
+legitimate (centralizes stdin ownership without changing public behavior).
