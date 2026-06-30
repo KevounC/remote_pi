@@ -5,6 +5,7 @@ use axum::extract::ws::Message;
 use tokio::sync::mpsc;
 
 use super::connections::ConnectionRegistry;
+use super::rooms::RoomStateStore;
 use crate::metrics::FirehoseMetrics;
 use crate::presence::PresenceManager;
 use crate::rooms::{RoomManager, RoomMeta, RoomMetaPatch};
@@ -47,6 +48,7 @@ use crate::rooms::{RoomManager, RoomMeta, RoomMetaPatch};
 #[derive(Debug)]
 pub struct PeerRegistry {
     connections: ConnectionRegistry,
+    room_state: RoomStateStore,
     presence: Arc<PresenceManager>,
     rooms: Arc<RoomManager>,
     metrics: Arc<FirehoseMetrics>,
@@ -60,6 +62,7 @@ impl PeerRegistry {
     ) -> Self {
         Self {
             connections: ConnectionRegistry::new(),
+            room_state: RoomStateStore::new(),
             presence,
             rooms,
             metrics,
@@ -79,14 +82,19 @@ impl PeerRegistry {
         room_meta: RoomMeta,
         tx: mpsc::UnboundedSender<Message>,
     ) -> u64 {
-        let insert = self.connections.insert(&peer_id, room_meta.clone(), tx);
+        let room_id = room_meta.room_id.clone();
+        let insert = self.connections.insert(&peer_id, &room_id, tx);
+        let announced_meta = self
+            .room_state
+            .on_connection_inserted(&peer_id, room_meta, &insert);
 
-        // room_announced fires once per (peer, room) lifecycle.
-        if insert.is_first_in_room {
+        // room_announced fires once per (peer, room) lifecycle. Duplicate
+        // connections refresh the canonical rooms snapshot but do not announce.
+        if let Some(announced_meta) = announced_meta {
             let room_subs = self.rooms.subscribers_of(&peer_id).await;
             if !room_subs.is_empty() {
-                let mut announced =
-                    serde_json::to_value(&room_meta).expect("RoomMeta serialization is infallible");
+                let mut announced = serde_json::to_value(&announced_meta)
+                    .expect("RoomMeta serialization is infallible");
                 announced["type"] = "room_announced".into();
                 announced["peer"] = peer_id.as_str().into();
                 let msg = announced.to_string();
@@ -142,14 +150,17 @@ impl PeerRegistry {
             .as_millis() as i64;
 
         let remove = self.connections.remove(peer_id, room_id, conn_id);
+        let ended = self
+            .room_state
+            .on_connection_removed(peer_id, room_id, &remove);
 
-        if remove.room_emptied {
+        if let Some(ended) = ended {
             let room_subs = self.rooms.subscribers_of(peer_id).await;
             if !room_subs.is_empty() {
                 let msg = serde_json::json!({
                     "type": "room_ended",
                     "peer": peer_id,
-                    "room_id": room_id,
+                    "room_id": ended.room_id,
                     "since_ts": now_ms,
                 })
                 .to_string();
@@ -189,10 +200,10 @@ impl PeerRegistry {
     /// projection published by the pi-extension; the relay does not infer or
     /// synthesize turn lifecycle from it.
     ///
-    /// Multiple conns at the same room collapse to a single entry (using
-    /// the most recently registered meta for stability).
+    /// Multiple conns at the same room collapse to a single canonical entry;
+    /// later duplicate registrations refresh that snapshot for compatibility.
     pub fn rooms_of(&self, peer_id: &str) -> Vec<RoomMeta> {
-        self.connections.rooms_of(peer_id)
+        self.room_state.rooms_of(peer_id)
     }
 
     /// Broadcasts `msg` to every live connection at `(dest_peer, dest_room)`
@@ -213,7 +224,7 @@ impl PeerRegistry {
             .send_to_room(dest_peer, dest_room, msg, from_conn_id)
     }
 
-    /// Applies `patch` to every live conn at `(peer_id, room_id)` and
+    /// Applies `patch` to the canonical room state at `(peer_id, room_id)` and
     /// broadcasts `room_meta_updated` to room subscribers. Returns `false`
     /// when no entries exist for the pair (so the handler can log and drop).
     ///
@@ -233,18 +244,20 @@ impl PeerRegistry {
         room_id: &str,
         patch: RoomMetaPatch,
     ) -> bool {
-        let snapshot = match self.connections.update_room_meta(peer_id, room_id, &patch) {
-            Some(snapshot) => snapshot,
+        let is_empty_patch = patch.is_empty();
+        let patch_result = match self.room_state.apply_patch(peer_id, room_id, patch) {
+            Some(result) => result,
             None => return false,
         };
 
         // Empty patch → state didn't change, suppress broadcast.
-        if patch.is_empty() {
+        if is_empty_patch {
             return true;
         }
 
         let room_subs = self.rooms.subscribers_of(peer_id).await;
         if !room_subs.is_empty() {
+            let snapshot = patch_result.meta;
             let mut meta_obj = serde_json::Map::new();
             if let Some(m) = &snapshot.model {
                 meta_obj.insert("model".to_string(), serde_json::Value::String(m.clone()));
@@ -401,6 +414,73 @@ mod tests {
         assert!(reg.forward(&peer, "main", Message::Text("hi2".into()), conn2));
         assert_eq!(rx1.try_recv().unwrap().to_text().unwrap(), "hi2");
         assert!(rx2.try_recv().is_err());
+    }
+
+    /// Duplicate connections refresh the canonical `rooms_of` snapshot using
+    /// the most recently registered metadata (the old `Vec::last()` behavior)
+    /// but only the first connection emits `room_announced`; `room_ended` waits
+    /// until the last duplicate disconnects.
+    #[tokio::test]
+    async fn duplicate_connection_refreshes_room_snapshot_without_duplicate_events() {
+        let presence = Arc::new(PresenceManager::new());
+        let rooms = Arc::new(RoomManager::new());
+        let metrics = Arc::new(FirehoseMetrics::new());
+        let reg = PeerRegistry::new(presence, rooms.clone(), metrics);
+
+        let pi = "pi".to_string();
+        let app = "app".to_string();
+
+        let (tx_app, mut rx_app) = mpsc::unbounded_channel::<Message>();
+        let _ = reg.register(app.clone(), make_meta("main"), tx_app).await;
+        rooms.subscribe(app.clone(), vec![pi.clone()]).await;
+
+        let mut first_meta = make_meta("main");
+        first_meta.model = Some("old-model".to_string());
+        first_meta.working = false;
+        let (tx_pi_1, _rx_pi_1) = mpsc::unbounded_channel::<Message>();
+        let conn1 = reg.register(pi.clone(), first_meta, tx_pi_1).await;
+
+        let announced = rx_app
+            .try_recv()
+            .expect("first connection emits room_announced");
+        let announced: serde_json::Value =
+            serde_json::from_str(announced.to_text().unwrap()).unwrap();
+        assert_eq!(announced["type"], "room_announced");
+        assert_eq!(announced["model"], "old-model");
+        assert_eq!(announced["working"], false);
+
+        let mut refreshed_meta = make_meta("main");
+        refreshed_meta.model = Some("new-model".to_string());
+        refreshed_meta.session_id = Some("sess-2".to_string());
+        refreshed_meta.working = true;
+        let (tx_pi_2, _rx_pi_2) = mpsc::unbounded_channel::<Message>();
+        let conn2 = reg.register(pi.clone(), refreshed_meta, tx_pi_2).await;
+
+        assert!(
+            rx_app.try_recv().is_err(),
+            "duplicate room connection must not emit a second room_announced"
+        );
+        let snapshot = reg.rooms_of(&pi);
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].model.as_deref(), Some("new-model"));
+        assert_eq!(snapshot[0].session_id.as_deref(), Some("sess-2"));
+        assert!(snapshot[0].working);
+
+        reg.unregister(&pi, "main", conn1).await;
+        assert!(
+            rx_app.try_recv().is_err(),
+            "removing a non-last duplicate must not emit room_ended"
+        );
+        assert_eq!(reg.rooms_of(&pi).len(), 1);
+
+        reg.unregister(&pi, "main", conn2).await;
+        let ended = rx_app
+            .try_recv()
+            .expect("last duplicate disconnect emits room_ended");
+        let ended: serde_json::Value = serde_json::from_str(ended.to_text().unwrap()).unwrap();
+        assert_eq!(ended["type"], "room_ended");
+        assert_eq!(ended["room_id"], "main");
+        assert!(reg.rooms_of(&pi).is_empty());
     }
 
     /// Three conns at same (peer, room); one disconnects; remaining two keep

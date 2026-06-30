@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-registry-split-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-relay-typed-actor-registry-split
 depends_on: [epic-bold-relay-typed-actor-registry-split-step-1]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 2: Move room lifecycle and metadata into a room-state store
@@ -57,10 +57,10 @@ There is one canonical room metadata snapshot per live `(peer, room)`.
 
 ## Acceptance Criteria
 
-- [ ] One canonical `RoomMeta` exists per live `(peer, room)`.
-- [ ] `rooms_of` and `update_room_meta` use the room-state store, not connection entries.
-- [ ] Tests cover duplicate connection metadata compatibility, first/last room events, and `working` true/false/absent patches.
-- [ ] From `relay/`: `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` pass.
+- [x] One canonical `RoomMeta` exists per live `(peer, room)`.
+- [x] `rooms_of` and `update_room_meta` use the room-state store, not connection entries.
+- [x] Tests cover duplicate connection metadata compatibility, first/last room events, and `working` true/false/absent patches.
+- [x] From `relay/`: `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` pass.
 
 ## Risk
 
@@ -69,3 +69,11 @@ High. `RoomMetaPatch.working` drives remote working-state convergence, and dupli
 ## Rollback
 
 Restore `RoomMeta` to connection entries and move `rooms_of`/`update_room_meta` back to the sender map. This is a pure code revert because the wire shape is unchanged.
+
+## Implementation
+
+- Added `relay/src/peers/rooms.rs` with `RoomStateStore`, a mutex-protected canonical map keyed by `(peer_id, room_id)`.
+- `ConnectionEntry` now stores only `conn_id` and sender; room metadata is no longer duplicated across live connection entries.
+- `PeerRegistry::rooms_of` and `PeerRegistry::update_room_meta` read/write the room-state store. Duplicate connections refresh the canonical rooms snapshot while suppressing duplicate `room_announced`; `room_ended` still emits only when the last connection leaves.
+- Preserved `RoomMetaPatch` merge semantics: nullable string fields set/clear, absent fields preserve prior state, and `working: true` / `working: false` both publish explicit convergence state while omitted `working` preserves the current value. `session_id` remains opaque metadata only.
+- Added focused tests for room store canonicalization plus registry-level duplicate metadata compatibility / first-last event behavior. Full relay verification passed: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build` (97 lib tests, 3 integration tests, 13 mesh tests, 8 pi-forward tests, 10 presence tests, 2 protocol parity tests, 19 rooms tests, doc-tests 0).
