@@ -1,14 +1,14 @@
 ---
 id: epic-bold-cockpit-workspace-projection-agent-session
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, cockpit]
 parent: epic-bold-cockpit-workspace-projection
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document, epic-bold-transcript-event-log]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Cockpit workspace — AgentSession as transcript projection
@@ -363,3 +363,12 @@ No active item depended on the new story ids before creation; the parent feature
 - Changing layout persistence version or Hive store signatures.
 - Importing mobile `ConnectionManager`, relay room metadata, pairing, crypto, or app Hive transcript storage into Cockpit.
 - Baking patchbay-specific assumptions into Cockpit classes; keep the projection names portable so patchbay can replace the process adapter later.
+
+## Review — advanced to done (2026-06-30)
+
+All 5 child steps `done` (projection contract → feed from transcript →
+process/turn split → realize from WorkspaceTab → UI migration + compat
+retirement). The Cockpit AgentSession is now a projection-coordinated
+PaneItem: `AgentProcessController` owns process lifecycle; `AgentSession`
+coordinates signals into lifecycle/turn/transcript projections; UI widgets read
+the projection directly; mutable compat state retired. Epic complete.
