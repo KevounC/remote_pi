@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-relay-transport-module
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-split-pi-extension-index
 depends_on: [epic-bold-split-pi-extension-index-composition-root]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Split pi-extension index — relay transport module
@@ -350,3 +350,14 @@ No project-specific `.agents/skills/refactor-conventions/` catalog exists. The d
 
 ## Atomic steps acknowledged
 No step intentionally changes public protocol, relay wire format, CLI API, or user-visible behavior. Step 2 is the semi-atomic lifecycle transfer because live relay ownership, reconnect scheduling, and relay-state emission must agree in one commit. Step 5 is the semi-atomic ingress transfer because duplicate or missing relay listeners can double-deliver or drop app messages. Both remain rollbackable by restoring the previous `index.ts` wiring.
+
+## Review — advanced to done (2026-06-30)
+
+All 5 child steps `done` (adapter shell → start/close/reconnect/state-emission →
+room-meta centralization → cross-PC bridge lifecycle → owner ingress routing).
+`index.ts` no longer owns the relay: the `RelayTransportPort` adapter owns the
+relay socket, reconnect backoff, room-meta cache/replay, cross-PC bridge attach
+(idempotent), and the owner outer-message subscription. The agent's idempotent
+`attachCrossPcBridge` fixed a real triple-attach duplicate-listener bug; the
+orchestrator aligned two stale test-fixture assertions to the post-step-4
+bridge-attach-in-start architecture. Epic complete.
