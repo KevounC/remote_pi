@@ -71,6 +71,7 @@ import {
 } from "./session/transcript_projection.js";
 import { RelayClient, RoomAlreadyOpenError } from "./transport/relay_client.js";
 import { PlainPeerChannel } from "./transport/peer_channel.js";
+import { OwnerMultiplexer } from "./extension/owner_multiplexer.js";
 import { createCommandSurface } from "./extension/command_surface.js";
 import { registerRemotePiCommands, type RemotePiCommandSpec } from "./extension/command_surface/commands.js";
 import { createRemotePiExtensionRuntime } from "./extension/composition_root.js";
@@ -145,10 +146,10 @@ import {
 // what unblocked the app from sending application messages.
 //
 // Now: `idle` → `started`. The `paired` state is a derived metric
-// (`_activePeers.size > 0`) — N owners can be connected at once, each with
-// its own `PlainPeerChannel` in `_activePeers`. Plan/24 W2D ("multi-channel
-// broadcast"): pairing a second device no longer disconnects the first, and
-// every connected owner receives the same agent stream in parallel.
+// (`OwnerMultiplexer.activeCount() > 0`) — N owners can be connected at once,
+// each with its own `PlainPeerChannel` owned by the multiplexer. Plan/24 W2D
+// ("multi-channel broadcast"): pairing a second device no longer disconnects
+// the first, and every connected owner receives the same agent stream in parallel.
 
 export type RemoteState = "idle" | "started";
 
@@ -172,22 +173,18 @@ let _lastRelayStatus: RelayConnectivity | null = null;
  *  and doesn't begin with "/" (which would route to the command parser). */
 export const CTRL_PREFIX = "\x00remote-pi-ctrl:";
 let _relayUrl: string | null = null;  // URL used by current _relay connection
-/**
- * Owners currently connected via the relay. Key = app peer pubkey (Ed25519,
- * base64 standard); value = the dedicated PlainPeerChannel routing messages
- * to/from that owner.
- *
- * Operational notes:
- *   - Adding/removing entries is exclusively in `_attachPeerChannel` and
- *     `_detachPeerChannel` (or `_goIdle` for the bulk teardown). Don't mutate
- *     directly elsewhere — those helpers keep the footer/log/state in sync.
- *   - `paired` UX state is `_activePeers.size > 0`. The footer and the
- *     `/remote-pi status` output both derive from this.
- */
-const _activePeers = new Map<string, PlainPeerChannel>();
-let _peerShort = "";  // shortid of the most recently attached peer (UX hint only)
-
 let _myRoomId: string | null = null;   // this Pi's room id (derived from cwd)
+
+const _owners = new OwnerMultiplexer({
+  createChannel: (input) => new PlainPeerChannel(
+    input.relay,
+    input.peerId,
+    input.roomId ?? _myRoomId ?? undefined,
+    input.onMessage,
+    () => input.onDisconnect(input.peerId),
+  ),
+  refreshFooter: () => _refreshFooter(),
+});
 // Plan/28 Wave D.1: `thinking` published alongside `model` so the app's
 // Quick Actions sheet hydrates the thinking segmented control on first
 // open instead of starting null. The SDK fires `thinking_level_select`
@@ -425,7 +422,7 @@ function _refreshFooter(ctx?: RemotePiUiContext): void {
     // `devicePaired` now reflects "any owner currently attached" — picks one
     // shortid representatively (multi-owner UX detail surfaces in the
     // `/remote-pi status` line, not the footer slot).
-    devicePaired: _anyPeerActive() ? _peerShort : undefined,
+    devicePaired: _owners.activeCount() > 0 ? _owners.peerHint() : undefined,
     hasPairings: _hasGlobalPairings,
     agentName: _meshNode?.name(),
   };
@@ -841,43 +838,26 @@ export function _hasPendingReconnect(): boolean {
  * Public state-snapshot helper. Returns the derived UX state, not the raw
  * `_state` enum: the W2D refactor collapsed the internal machine to
  * `idle | started` and made `paired` a derived metric
- * (`_activePeers.size > 0`). Tests and the footer keep the three-state
- * mental model via this getter.
+ * (`ownerMultiplexer.activeCount() > 0`). Tests and the footer keep the
+ * three-state mental model via this getter.
  */
 export function _getState(): "idle" | "started" | "paired" {
   if (_state === "idle") return "idle";
-  return _activePeers.size > 0 ? "paired" : "started";
+  return _owners.activeCount() > 0 ? "paired" : "started";
 }
 
 /** Test-only: number of owners currently attached via PlainPeerChannel. */
 export function _getActivePeerCountForTest(): number {
-  return _activePeers.size;
+  return _owners.activeCount();
 }
 
 /** Test-only: true if a specific peer (base64 std) has an attached channel. */
 export function _hasActivePeerForTest(appPeerIdStd: string): boolean {
-  return _activePeers.has(appPeerIdStd);
+  return _owners.has(appPeerIdStd);
 }
 
 
 // ── Multi-channel helpers ─────────────────────────────────────────────────────
-
-/**
- * Sends `msg` to every currently-attached owner channel. The default
- * dispatch for application-level events that are part of "the agent
- * session is doing X" (agent_chunk, tool_request, tool_result, agent_done,
- * user_input mirror, room_meta_update, etc.) — all paired devices see the
- * same stream.
- *
- * Per-request responses (e.g. `session_history` answering a specific
- * `session_sync` query, or `pair_ok` answering `pair_request`) must NOT
- * use this — they go to the sender channel directly.
- */
-function _broadcastToActive(msg: ServerMessage): void {
-  for (const ch of _activePeers.values()) {
-    try { ch.send(msg); } catch { /* best-effort per channel */ }
-  }
-}
 
 function _queuedMessageState(): Extract<ServerMessage, { type: "queued_message_state" }> {
   const queued = _turnProjection().queuedMessage;
@@ -887,37 +867,7 @@ function _queuedMessageState(): Extract<ServerMessage, { type: "queued_message_s
 }
 
 function _broadcastQueuedMessageState(): void {
-  _broadcastToActive(_queuedMessageState());
-}
-
-/** Returns true when at least one owner is attached. Derived `paired` UX. */
-function _anyPeerActive(): boolean {
-  return _activePeers.size > 0;
-}
-
-/**
- * Adds an owner's channel to `_activePeers`. Also updates the UX hint
- * `_peerShort` (last-attached shortid) so the footer + status can pick
- * a representative device when only one is connected.
- */
-function _attachPeerChannel(appPeerId: string, channel: PlainPeerChannel): void {
-  _activePeers.set(appPeerId, channel);
-  _peerShort = appPeerId.slice(0, 8);
-  _applyTurnAndPublish({ type: "peer_attached", target: { kind: "owner", id: appPeerId } });
-}
-
-/** Detaches a single owner's channel + removes it from the map. Used by
- *  `_onPeerDisconnect`, `_cmdRevoke`, and the SelfRevoke callback. */
-function _detachPeerChannel(appPeerId: string): void {
-  const ch = _activePeers.get(appPeerId);
-  if (!ch) return;
-  try { ch.detach(); } catch { /* best-effort */ }
-  _activePeers.delete(appPeerId);
-  if (_peerShort === appPeerId.slice(0, 8)) {
-    // Pick a different remaining peer for the UX hint, or clear when none.
-    const next = _activePeers.keys().next().value;
-    _peerShort = next ? next.slice(0, 8) : "";
-  }
+  _owners.broadcast(_queuedMessageState());
 }
 
 // ── Display-name helpers ──────────────────────────────────────────────────────
@@ -968,8 +918,8 @@ async function _findKnownPeer(appPeerIdStd: string): Promise<PeerRecord | null> 
 function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
   // Broadcast bye to every still-attached owner so each app surfaces
   // "offline" immediately instead of waiting ~50s for a ping miss.
-  if (byeReason && _state !== "idle" && _anyPeerActive()) {
-    _broadcastToActive({ type: "bye", reason: byeReason });
+  if (byeReason && _state !== "idle" && _owners.activeCount() > 0) {
+    _owners.broadcast({ type: "bye", reason: byeReason });
   }
 
   // Cancel any pending reconnect attempt. Critical: /remote-pi stop must
@@ -983,12 +933,8 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
   _stopAutoListener?.();
   _stopAutoListener = null;
 
-  // Tear down every per-owner channel and clear the map.
-  for (const ch of _activePeers.values()) {
-    try { ch.detach(); } catch { /* best-effort */ }
-  }
-  _activePeers.clear();
-  _peerShort = "";
+  // Tear down every per-owner channel and clear the multiplexer registry.
+  _owners.detachAll();
   _applyTurnAndPublish({ type: "session_shutdown" });
   _resetTurnSnapshot();
   _publishWorking(false);
@@ -1020,8 +966,8 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
 /**
  * Called when the relay WS closes unexpectedly (network drop, relay restart,
  * etc.). Does a **partial** teardown — keeps `_sessionStartedAt`, `_transcriptEvents`,
- * `_relayUrl`, `_cachedEd25519`, `_peerShort` so the session can resume on
- * reconnect — and schedules an `_attemptReconnect`.
+ * `_relayUrl`, and `_cachedEd25519` so the session can resume on reconnect —
+ * and schedules an `_attemptReconnect`.
  *
  * Peer (app) reconnect after a successful relay reconnect is handled by the
  * existing auto-listener via `peers.json` lookup, so we don't need to track
@@ -1036,11 +982,7 @@ function _onRelayClose(): void {
   // Detach every per-owner channel — relay is gone, none can route. The
   // auto-listener re-attaches owners after `_attemptReconnect` succeeds
   // (via the same known-peer + pair_request paths used on first connect).
-  for (const ch of _activePeers.values()) {
-    try { ch.detach(); } catch { /* best-effort */ }
-  }
-  _activePeers.clear();
-  _peerShort = "";
+  _owners.detachAll();
   if (!_turnProjection().working) _resetTurnSnapshot();
 
   _relay = null;  // _relayUrl preserved for retry
@@ -1281,12 +1223,12 @@ async function _renameAgent(newName: string): Promise<void> {
  */
 export function _onPeerDisconnect(appPeerId?: string): void {
   if (_state === "idle") return;
-  const target = appPeerId ?? [..._activePeers.keys()].pop();
+  const target = appPeerId ?? _owners.peerIds().at(-1);
   if (!target) return;
-  if (!_activePeers.has(target)) return;
+  if (!_owners.has(target)) return;
 
-  _detachPeerChannel(target);
-  if (_anyPeerActive()) {
+  _owners.detach(target);
+  if (_owners.activeCount() > 0) {
     // Other owners still attached — keep the turn projection so they continue
     // seeing the in-flight agent stream.
     _refreshFooter();
@@ -1305,7 +1247,7 @@ export function _onPeerDisconnect(appPeerId?: string): void {
  * Attaches a new owner channel to the multi-owner set. Replaces the
  * pre-W2D singleton `_promoteToPaired` which set `_state = "paired"` and
  * a single `_peerChannel`. The relay state remains `started`; pairing
- * status is derived from `_activePeers.size`.
+ * status is derived from `OwnerMultiplexer.activeCount()`.
  *
  * Idempotent for the same `appPeerId` (re-attaching tears down the prior
  * channel and installs a fresh one — covers reconnect from the same
@@ -1319,23 +1261,19 @@ function _attachOwner(
 ): PlainPeerChannel {
   const peerShort = appPeerId.slice(0, 8);
 
-  // Drop any stale channel for this owner before re-attaching.
-  if (_activePeers.has(appPeerId)) _detachPeerChannel(appPeerId);
-
-  const channel = new PlainPeerChannel(
+  const channel = _owners.attach({
     relay,
-    appPeerId,
-    _myRoomId ?? undefined,
-    (msg) => _routeClientMessageFrom(channel, msg, _lastEventCtx ?? _lastCtx ?? _noopCtx),
-    () => _onPeerDisconnect(appPeerId),
-  );
-
-  _attachPeerChannel(appPeerId, channel);
-  _refreshFooter();
+    peerId: appPeerId,
+    roomId: _myRoomId ?? undefined,
+    turnActive: _turnProjection().working,
+    onMessage: (msg, sender) => _routeClientMessageFrom(sender as PlainPeerChannel, msg, _lastEventCtx ?? _lastCtx ?? _noopCtx),
+    onDisconnect: (peerId) => _onPeerDisconnect(peerId),
+  }) as PlainPeerChannel;
+  _applyTurnAndPublish({ type: "peer_attached", target: { kind: "owner", id: appPeerId } });
 
   _notify(
     `[remote-pi] Owner attached: peer=${peerShort}, name=${peerName} ` +
-    `(${_activePeers.size} active)`,
+    `(${_owners.activeCount()} active)`,
     "info",
   );
 
@@ -1352,7 +1290,7 @@ function _attachOwner(
 //
 // Installed while in 'started' state. Decodes the outer envelope as
 // base64(JSON) and dispatches per sender peer_id:
-//   • Sender already in `_activePeers` → ignored here (the per-owner
+//   • Sender already in OwnerMultiplexer → ignored here (the per-owner
 //     PlainPeerChannel listens on the same relay event and handles its own
 //     traffic via its `remotePeerId` filter)
 //   • `pair_request` from a new peer → validate token, persist peer, send
@@ -1375,7 +1313,7 @@ function _installAutoListener(relay: RelayClient): () => void {
 
     if (_state !== "started") return;
     // Already-attached owners: their PlainPeerChannel handles routing.
-    if (_activePeers.has(outer.peer)) return;
+    if (_owners.has(outer.peer)) return;
 
     // Decode inner envelope (base64 JSON)
     let inner: ClientMessage;
@@ -1569,11 +1507,11 @@ function _isAgentMessageApi(value: unknown): value is AgentMessageApi {
 
 const _sdkSessionProjection = new SdkSessionProjection({
   outputs: {
-    broadcast: _broadcastToActive,
+    broadcast: (message) => _owners.broadcast(message),
     sendTo: (sender, message) => sender.send(message),
     publishRoomMeta: (patch) => _publishRoomMetaPatch(patch),
-    activeOwnerIds: () => [..._activePeers.keys()],
-    lateAttachTargets: () => [..._activePeers.entries()].map(([peerId, channel]) => ({ peerId, channel })),
+    activeOwnerIds: () => _owners.peerIds(),
+    lateAttachTargets: () => _owners.entries(),
     handleClientMessage: (sender, message) => _routeClientMessageFrom(sender as PlainPeerChannel, message, _lastEventCtx ?? _lastCtx ?? _noopCtx),
     onStaleMessageApi: (api) => _forgetStaleMessageApi(api),
   },
@@ -1615,8 +1553,8 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     const before = _turnProjection();
     const turnId = before.replyTo ?? before.activeTurnId ?? `local_${randomUUID()}`;
     _applyTurnAndPublish({ type: "local_input", turnId, replyTo: turnId, source: "local" });
-    if (!_anyPeerActive()) return;
-    _broadcastToActive(_withCurrentSession({ type: "user_input", id: turnId, text: event.text }));
+    if (_owners.activeCount() === 0) return;
+    _owners.broadcast(_withCurrentSession({ type: "user_input", id: turnId, text: event.text }));
     return undefined;
   });
 
@@ -1657,8 +1595,8 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     if (ae.type !== "text_delta") return;
     const projection = _applyTurnAndPublish({ type: "agent_chunk" });
     const replyTo = projection.replyTo ?? projection.activeTurnId;
-    if (!_anyPeerActive() || replyTo === null) return;
-    _broadcastToActive(_withCurrentSession({ type: "agent_chunk", in_reply_to: replyTo, delta: ae.delta }));
+    if (_owners.activeCount() === 0 || replyTo === null) return;
+    _owners.broadcast(_withCurrentSession({ type: "agent_chunk", in_reply_to: replyTo, delta: ae.delta }));
   });
 
   // Notify every connected owner that a tool is about to run (visibility
@@ -1677,8 +1615,8 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
       tool: event.toolName,
       args,
     });
-    if (!_anyPeerActive()) return;
-    _broadcastToActive(_withCurrentSession({
+    if (_owners.activeCount() === 0) return;
+    _owners.broadcast(_withCurrentSession({
       type: "tool_request",
       tool_call_id: event.toolCallId,
       tool: event.toolName,
@@ -1707,11 +1645,11 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
           toolCallId: event.toolCallId,
           result: text,
         });
-    if (!_anyPeerActive()) return;
+    if (_owners.activeCount() === 0) return;
     const msg: ServerMessage = event.isError
       ? _withCurrentSession({ type: "tool_result", tool_call_id: event.toolCallId, error: text })
       : _withCurrentSession({ type: "tool_result", tool_call_id: event.toolCallId, result: text });
-    _broadcastToActive(msg);
+    _owners.broadcast(msg);
   });
 
   // Cumulative session buffer fed via `message_end`, which fires once per
@@ -1733,7 +1671,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     // assistant message with stopReason "error" + an `errorMessage` (pi-ai).
     // `error` is an existing ServerMessage the app already renders — no
     // protocol/app change. `in_reply_to` ties it to the turn the app awaits.
-    if (m.role === "assistant" && m.stopReason === "error" && _anyPeerActive()) {
+    if (m.role === "assistant" && m.stopReason === "error" && _owners.activeCount() > 0) {
       const message = typeof m.errorMessage === "string" && m.errorMessage
         ? m.errorMessage
         : "Provider error";
@@ -1742,7 +1680,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
       const errMsg: ServerMessage = _withCurrentSession(replyTo
         ? { type: "error", in_reply_to: replyTo, code: "provider_error", message }
         : { type: "error", code: "provider_error", message });
-      _broadcastToActive(errMsg);
+      _owners.broadcast(errMsg);
     }
   });
 
@@ -1753,8 +1691,8 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     const finishedTurnId = before.replyTo ?? before.activeTurnId;
     if (finishedTurnId === null) return;
     _applyTurnAndPublish({ type: "agent_done" });
-    if (_anyPeerActive()) {
-      _broadcastToActive(_withCurrentSession({ type: "agent_done", in_reply_to: finishedTurnId }));
+    if (_owners.activeCount() > 0) {
+      _owners.broadcast(_withCurrentSession({ type: "agent_done", in_reply_to: finishedTurnId }));
     }
     _maybeSendLateAttachSessionSync();
     _maybeDrainQueuedMessage();
@@ -1811,7 +1749,7 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
       tokensBefore,
     });
     // (1) Live result to every connected owner.
-    _broadcastToActive(_withCurrentSession({ type: "compaction", summary, tokens_before: tokensBefore, ts }));
+    _owners.broadcast(_withCurrentSession({ type: "compaction", summary, tokens_before: tokensBefore, ts }));
     // (3) Working ends.
     _applyTurnAndPublish({ type: "compaction_done" });
     _applyTurnAndPublish({ type: "turn_end" });
@@ -1945,31 +1883,20 @@ function createIndexDeps(): LegacyIndexDeps {
       setRelay: (relay) => { _relay = relay; },
     },
     owners: {
-      activeCount: () => _activePeers.size,
+      activeCount: () => _owners.activeCount(),
       attach: (input) => {
-        if (_activePeers.has(input.peerId)) _detachPeerChannel(input.peerId);
-        let channel: PlainPeerChannel;
-        channel = new PlainPeerChannel(
-          input.relay,
-          input.peerId,
-          input.roomId ?? _myRoomId ?? undefined,
-          (message) => input.onMessage(message, channel),
-          () => input.onDisconnect?.(input.peerId),
-        );
-        _attachPeerChannel(input.peerId, channel);
-        _refreshFooter();
+        const channel = _owners.attach({
+          ...input,
+          roomId: input.roomId ?? _myRoomId ?? undefined,
+          turnActive: _turnProjection().working,
+        });
+        _applyTurnAndPublish({ type: "peer_attached", target: { kind: "owner", id: input.peerId } });
         return channel;
       },
-      detach: (peerId, reason) => {
-        const channel = _activePeers.get(peerId);
-        if (channel && reason) {
-          try { channel.send({ type: "bye", reason }); } catch { /* best-effort */ }
-        }
-        _detachPeerChannel(peerId);
-      },
-      broadcast: _broadcastToActive,
-      routeFrom: (sender, message) => _routeClientMessageFrom(sender as PlainPeerChannel, message, _lastEventCtx ?? _lastCtx ?? _noopCtx),
-      lateAttachTargets: () => [..._activePeers.values()],
+      detach: (peerId, reason) => { _owners.detach(peerId, reason); },
+      broadcast: (message) => _owners.broadcast(message),
+      routeFrom: (sender, message) => _owners.routeFrom(sender, message),
+      lateAttachTargets: () => _owners.lateAttachTargets(),
     },
     session: {
       bindApi: (boundPi) => {
@@ -2094,13 +2021,13 @@ function _cmdStatus(ctx: Pick<ExtensionContext, "ui">): void {
     meshLine = "⚪ Local mesh: not connected";
   }
 
-  // Relay line — paired state is derived from _activePeers.size now.
+  // Relay line — paired state is derived from OwnerMultiplexer.activeCount().
   let relayLine: string;
   if (_state === "idle") {
     relayLine = `⚪ Relay: off (${relayUrl}) — run /remote-pi to start`;
-  } else if (_activePeers.size > 0) {
-    const count = _activePeers.size;
-    const shortids = [..._activePeers.keys()].map((k) => k.slice(0, 8)).join(", ");
+  } else if (_owners.activeCount() > 0) {
+    const count = _owners.activeCount();
+    const shortids = _owners.peerIds().map((k) => k.slice(0, 8)).join(", ");
     relayLine = `🟢 Relay: ${count} owner${count === 1 ? "" : "s"} online (${shortids}) (${relayUrl})`;
   } else {
     relayLine = _hasGlobalPairings
@@ -2387,7 +2314,6 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
 
   _relay = relay;
   _relayUrl = relayUrl;
-  _peerShort = myShort;
   _myRoomId = roomId;
   _state = "started";
   // Set _sessionStartedAt ONLY on first /remote-pi start since process boot.
@@ -2418,8 +2344,8 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
         // Other owners keep their session. Only fall back to full idle
         // when there are zero attached owners left.
         _refreshPairingsCache();
-        if (_activePeers.has(ownerEpk)) {
-          _detachPeerChannel(ownerEpk);
+        if (_owners.has(ownerEpk)) {
+          _owners.detach(ownerEpk);
           _refreshFooter();
         }
         // Surface the revocation inside the Pi chat panel via
@@ -2471,8 +2397,8 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
  * Pre-W2D this rejected with "Already paired with X" once one owner was
  * connected, forcing /remote-pi stop to pair a second device — the
  * catch-22 the multi-channel refactor was designed to break. Now the new
- * device is **added** to `_activePeers` after scanning, while existing
- * owners keep their session.
+ * device is added to OwnerMultiplexer after scanning, while existing owners
+ * keep their session.
  */
 async function _cmdPair(ctx: Pick<ExtensionContext, "ui" | "cwd">, args = ""): Promise<void> {
   const cwd = "cwd" in ctx ? (ctx as ExtensionCommandContext).cwd : "";
@@ -2587,7 +2513,7 @@ async function _cmdList(ctx: Pick<ExtensionContext, "ui">): Promise<void> {
   // the singleton " (active)" marker that only ever marked one peer.
   const lines = peers.map((p) => {
     const shortid = p.remote_epk.slice(0, 8);
-    const tag = _activePeers.has(p.remote_epk) ? " 🟢 online" : " ⚪ offline";
+    const tag = _owners.has(p.remote_epk) ? " 🟢 online" : " ⚪ offline";
     return `• ${shortid} — ${p.name}${tag}`;
   }).join("\n");
   ctx.ui.notify(`[remote-pi] Paired devices:\n${lines}`, "info");
@@ -2654,12 +2580,10 @@ async function _cmdRevoke(arg: string, ctx: Pick<ExtensionContext, "ui" | "cwd">
 
   // Multi-channel (W2D): close just this owner's channel. Other connected
   // owners keep their session — the relay stays `started`.
-  if (_activePeers.has(peer.remote_epk)) {
+  if (_owners.has(peer.remote_epk)) {
     // Notify the revoked device explicitly before tearing the channel
     // down — otherwise it would only know via ping miss.
-    const ch = _activePeers.get(peer.remote_epk);
-    try { ch?.send({ type: "bye", reason: "session_replaced" }); } catch { /* best-effort */ }
-    _detachPeerChannel(peer.remote_epk);
+    _owners.detach(peer.remote_epk, "session_replaced");
     _refreshFooter();
   }
 
@@ -3370,7 +3294,7 @@ function _deliverMeshMessageToAgent(
 ): void {
   const bodyText = typeof env.body === "string" ? env.body : JSON.stringify(env.body);
   const toolCallId = `mesh_${env.id}`;
-  _broadcastToActive(_withCurrentSession({
+  _owners.broadcast(_withCurrentSession({
     type: "tool_request",
     tool_call_id: toolCallId,
     tool: "agent-network",
@@ -3378,7 +3302,7 @@ function _deliverMeshMessageToAgent(
       ? { from: env.from, re: env.re, message: bodyText }
       : { from: env.from, message: bodyText },
   }));
-  _broadcastToActive(_withCurrentSession({ type: "tool_result", tool_call_id: toolCallId, result: { from: env.from, message: bodyText } }));
+  _owners.broadcast(_withCurrentSession({ type: "tool_result", tool_call_id: toolCallId, result: { from: env.from, message: bodyText } }));
 
   const label = `agent-network message from "${env.from}"`;
   if (!_pi) {
@@ -3550,8 +3474,8 @@ async function _cmdJoin(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<void
  * sender-specific responses (cancelled, pong, session_history) flow back
  * through the right wire instead of being broadcast.
  *
- * Broadcast messages (user_input mirror, agent_chunk, tool_*) still use
- * `_broadcastToActive` from the SDK event handlers; this router only
+ * Broadcast messages (user_input mirror, agent_chunk, tool_*) still fan out
+ * through OwnerMultiplexer from the SDK event handlers; this router only
  * handles incoming app→pi requests.
  */
 function _abortCurrentTurn(
@@ -3589,7 +3513,7 @@ function _sendDeliveryError(sender: PlainPeerChannel | null, inReplyTo: string, 
     message: `Agent rejected incoming message: ${detail}`,
   });
   if (sender) sender.send(error);
-  else _broadcastToActive(error);
+  else _owners.broadcast(error);
 }
 
 async function _deliverUserMessage(
@@ -3656,7 +3580,7 @@ async function _deliverUserMessage(
     ...(msg.images && msg.images.length > 0 ? { images: msg.images } : {}),
     ...(shouldSteer ? { streaming_behavior: "steer" as const } : {}),
   });
-  _broadcastToActive(echo);
+  _owners.broadcast(echo);
 }
 
 function _maybeDrainQueuedMessage(): void {
@@ -3674,7 +3598,7 @@ function _maybeSendLateAttachSessionSync(): void {
   const history = _buildSessionHistoryMessage(projection.awaitingSyncTurnId, undefined);
   for (const target of projection.lateAttachSyncTargets) {
     if (target.kind !== "owner") continue;
-    const channel = _activePeers.get(target.id);
+    const channel = _owners.get(target.id);
     if (!channel) continue;
     try { channel.send(history); } catch { /* best-effort per late attach */ }
   }
@@ -3857,9 +3781,9 @@ export function routeClientMessage(
   msg: ClientMessage,
   ctx: Pick<ExtensionContext, "abort">,
 ): void {
-  const fallback = [..._activePeers.values()].pop();
+  const fallback = _owners.entries().at(-1)?.channel;
   if (!fallback) return;
-  _routeClientMessageFrom(fallback, msg, ctx);
+  _routeClientMessageFrom(fallback as PlainPeerChannel, msg, ctx);
 }
 
 // ── session_sync handler + helpers ────────────────────────────────────────────
@@ -3929,8 +3853,8 @@ function _buildSessionHistoryMessage(
  * no new app-side code is needed.
  *
  * Unlike a per-request session_history reply (which must go to the sender
- * channel only — see `_broadcastToActive`), this is an intentional fan-out:
- * a new session is global state, so every owner must see the reset.
+ * channel only), this is an intentional fan-out: a new session is global state,
+ * so every owner must see the reset.
  */
 function _resetSessionForNew(inReplyTo: string): void {
   _transcriptEvents = [];
@@ -3941,7 +3865,7 @@ function _resetSessionForNew(inReplyTo: string): void {
   _publishWorking(false);
   _broadcastQueuedMessageState();
   _sessionStartedAt = Date.now();
-  _broadcastToActive(_withCurrentSession({
+  _owners.broadcast(_withCurrentSession({
     type: "session_history",
     in_reply_to: inReplyTo,
     session_started_at: _sessionStartedAt,

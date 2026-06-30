@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-owner-multiplexer-module-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-owner-multiplexer-module
 depends_on: [epic-bold-split-pi-extension-index-owner-multiplexer-module-step-1]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 2: Move owner channel registry and fanout into the module
@@ -93,6 +93,17 @@ class OwnerMultiplexer implements OwnerMultiplexerPort {
 - [ ] Late-attach tracking still records owners attached during an active turn for catch-up history.
 - [ ] Existing multi-channel tests for two owners, `agent_chunk` broadcast, revoke-one-owner, and queued-message fanout pass.
 - [ ] `corepack pnpm test -- src/extension.test.ts -t "multi-channel broadcast"` and `corepack pnpm typecheck` pass.
+
+## Implementation
+
+- Added `OwnerMultiplexer` as the owner-channel registry and fanout owner. `index.ts` no longer owns `_activePeers`, `_peerShort`, `_attachPeerChannel`, `_detachPeerChannel`, `_broadcastToActive`, or `_anyPeerActive`; derived paired state now reads `OwnerMultiplexer.activeCount() > 0`.
+- Preserved idempotent reattach by detaching an existing channel for the same owner before installing the new `PlainPeerChannel`, preserving one relay listener per owner peer id.
+- Preserved best-effort fanout by isolating each `send()` in `OwnerMultiplexer.broadcast()`; detaching one owner preserves other owner channels and keeps relay state `started`.
+- Preserved late-attach behavior by passing active-turn state into owner attach and keeping the existing turn projection `peer_attached` event for catch-up history flushes.
+- Verification:
+  - `corepack pnpm typecheck`: pass.
+  - `corepack pnpm exec vitest run src/extension.test.ts -t "multi-channel broadcast"`: pass — 28 passed, 119 skipped, 0 failed.
+  - `corepack pnpm exec vitest run src/extension.test.ts`: attempted — 142 passed, 5 failed. The failures are all local mesh/UDS setup cases (`session_shutdown DURING _cmdStart...`, clean reset mesh join, name-assigned join, rename live, same-folder same-name lock). A direct Node UDS bind in this sandbox fails with `listen EPERM`, so these are the mesh UDS cases unable to bind in the current shell environment; no multi-owner/owner-multiplexer acceptance tests failed.
 
 ## Risk
 

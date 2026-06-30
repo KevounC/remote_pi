@@ -780,7 +780,7 @@ describe("/remote-pi revoke", () => {
 
   test("revoke of currently-attached owner → channel removed, relay stays started", async () => {
     // Multi-channel (W2D): revoking the only attached owner removes their
-    // channel from _activePeers but leaves the relay up. Pre-W2D this went
+    // channel from OwnerMultiplexer but leaves the relay up. Pre-W2D this went
     // all the way back to `idle` via _goIdle; that's no longer the case.
     _tokenStatus = "ok";
     const ACTIVE_PEER = "activepeer_xxxx";
@@ -1034,7 +1034,7 @@ describe("multi-channel broadcast (W2D)", () => {
   // ── Source-of-truth rebroadcast (plan/24 W2D fix) ──────────────────────────
   //
   // When app A sends a user_message, the Pi must echo it to every
-  // _activePeers entry (A included) after the SDK accepts the handoff.
+  // OwnerMultiplexer channel (A included) after the SDK accepts the handoff.
   // App side renders from the echo, not from local optimistic state — keeps
   // every paired device's session view bit-identical.
 
@@ -3199,7 +3199,7 @@ describe("bye on teardown", () => {
   test("revoke of attached owner → channel sees bye{session_replaced}, relay stays started", async () => {
     _tokenStatus = "ok";
     const ACTIVE = "peer-bye-active";
-    // Attach the peer so it lives in _activePeers
+    // Attach the peer so it lives in OwnerMultiplexer
     await _pairForTest(ACTIVE);
     const sendsBefore = relayRef.current!.send.mock.calls.length;
 
