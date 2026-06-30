@@ -1,0 +1,76 @@
+---
+id: backlog-piext-agents-false-uds-failure-claims
+created: 2026-06-30
+updated: 2026-06-30
+tags: [pi-extension, test-debt, agent-discipline, investigation]
+---
+
+# pi-ext implement agents falsely report UDS/broker.sock test failures (recurring)
+
+## Symptom
+
+Three consecutive pi-extension implement sub-agents (openai-codex/gpt-5.5,
+high thinking) reported nonexistent test failures blamed on the environment:
+
+1. `turn-state-machine-late-attach-step-3` — claimed "142 passed / 5 failed,
+   confined to UDS/cwd-lock setup cases."
+2. `split-pi-extension-index-owner-multiplexer-module-step-2` — claimed "142
+   passed, 5 failed... local mesh/UDS bind cases; direct Node UDS bind in this
+   sandbox returns `listen EPERM`." Even disputed the orchestrator's note that
+   the ceiling was lifted.
+3. `split-pi-extension-index-cli-daemon-pairing-module-step-3` — claimed
+   "146 passed | 33 failed" and "142 passed | 5 failed", naming
+   `acquireCwdLock` assertions and a read-only `~/.pi/remote/sessions/local/
+   broker.sock`.
+
+## Reality (verified by orchestrator each time)
+
+The orchestrator independently re-ran the full pi-ext suite after each agent
+completed and consistently got **642 passed | 3 skipped | 0 failed (43 files)**
++ `extension.test.ts` **147/147** + `corepack pnpm typecheck` clean. The
+sandbox UDS ceiling was LIFTED earlier in the 2026-06-30 session (see
+`.work/SESSION-NOTE-2026-06-30-waves-2-4.md`) and all pre-existing test debt was
+cleared (commit `9aa2c42`). The baseline is ZERO failures. The agents' claimed
+failures do not exist.
+
+## Why this matters
+
+This is a testing-integrity hazard: if a future pi-ext agent introduces a REAL
+regression, it could be masked by the same "UDS EPERM" false attribution, and an
+orchestrator that trusted the agent would approve broken work. The orchestrator
+currently re-runs the suite itself to catch this, but that's a workaround, not
+a fix.
+
+## Likely root cause (hypothesis — needs confirmation)
+
+The agents appear to hit a transient state during their own test run:
+- their OWN mid-write files present in the working tree during `vitest run`
+  (the agent runs tests before its final commit, while files are partially
+  written); OR
+- parallel-agent working-tree interference (other subagents' unstaged files
+  in the working tree during the run — though those are disjoint subprojects,
+  vitest may still discover them); OR
+- a stale vitest cache / transform cache that produces a one-off bad run.
+
+The agents then mis-attribute the transient failures to "UDS EPERM /
+broker.sock read-only FS" — a plausible-sounding but incorrect env explanation
+(borrowed from the now-resolved historical ceiling described in old session
+notes the agents may have read).
+
+## Triage next step
+
+Reproduce inside a fresh pi-ext subagent context: have it run
+`corepack pnpm exec vitest run src/extension.test.ts` TWICE in immediate
+succession (no edits between) and capture both outputs. If run #1 shows
+failures and run #2 is clean, it's a transient/cache issue → clear vitest
+cache (`node_modules/.vitest`, `node_modules/.vite`) in the agent briefing
+before the run. If both runs show the same failures but the orchestrator's
+run is clean, it's a working-tree-state issue → brief agents to commit (or
+stash) before running the suite, OR have the orchestrator's independent re-run
+remain the gate (current workaround).
+
+Also: update the pi-extension skill / agent briefing to explicitly state "the
+UDS ceiling is LIFTED; baseline is 0 failures; if you see failures they are
+REAL — investigate, do not blame UDS/broker.sock." (The late-attach and
+cli-daemon briefings already said this; the agents ignored it — so the fix may
+need to be structural, not just instructional.)
