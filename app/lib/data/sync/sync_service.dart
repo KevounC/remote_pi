@@ -359,7 +359,7 @@ class SyncService extends Service {
 
   @visibleForTesting
   Future<void> debugApplyHistory(SessionHistory history) =>
-      _applyHistory(history);
+      _replayHistory(history);
 
   Future<void> setQueuedMessage(String text) async {
     final ch = _conn.channel;
@@ -724,7 +724,7 @@ class SyncService extends Service {
 
       case SessionHistory():
         // ignore: discarded_futures
-        _applyHistory(msg);
+        _replayHistory(msg);
 
       case ErrorMessage(:final inReplyTo, :final code, :final message):
         if (code.contains('unknown_peer')) {
@@ -1012,34 +1012,77 @@ class SyncService extends Service {
     }
   }
 
-  Future<void> _applyHistory(SessionHistory h) async {
-    final ref = _activeRef;
-    if (ref == null) return;
-    if (h.sessionId != ref.sessionId) return;
-    final incomingStartedAt = h.sessionStartedAt;
+  Future<void> _replayHistory(SessionHistory history) async {
+    final key = _activeTranscriptKeyOrNull();
+    if (key == null) return;
+    if (history.sessionId != key.sessionId) return;
+    if (_isStaleHistory(history.sessionStartedAt)) return;
 
-    if (_acceptedSessionStartedAtHighWater != null &&
-        incomingStartedAt < _acceptedSessionStartedAtHighWater!) {
-      return;
-    }
-
-    await _appendTranscriptEvents(
-      sessionHistoryToTranscriptEvents(history: h, sessionId: ref.sessionId),
+    final replayEvents = sessionHistoryToTranscriptEvents(
+      history: history,
+      sessionId: key.sessionId,
     );
 
-    final shouldAdvanceSessionHighWater =
-        _acceptedSessionStartedAtHighWater == null ||
-        incomingStartedAt > _acceptedSessionStartedAtHighWater!;
-    if (shouldAdvanceSessionHighWater) {
-      _acceptedSessionStartedAtHighWater = incomingStartedAt;
-      _updateIndex(
-        (cur) => cur.copyWith(
-          sessionStartedAt: DateTime.fromMillisecondsSinceEpoch(
-            incomingStartedAt,
-          ),
-        ),
-      );
+    await _enqueue(() async {
+      final ref = _activeRef;
+      if (ref == null || !_sameTranscriptKey(key, ref)) return;
+      if (history.sessionId != key.sessionId) return;
+      // Re-check inside the serialized write boundary: two replay batches can
+      // race in from reconnect/status streams, and a stale boundary must be
+      // rejected before any store append observes it.
+      if (_isStaleHistory(history.sessionStartedAt)) return;
+
+      final result = await _eventStore.appendAll(key, replayEvents);
+      if (result.appended > 0) {
+        final log = await _eventStore.readSession(key);
+        final projection = deriveTranscriptProjection(
+          sessionId: key.sessionId,
+          events: log,
+        );
+        _emitStreaming(projection.streaming);
+        _setTurnView(projection.turn);
+        await _rewriteMessageProjectionInWriteChain(ref, projection, log);
+      }
+      await _acceptHistoryBoundaryInWriteChain(ref, history.sessionStartedAt);
+    });
+  }
+
+  bool _isStaleHistory(int sessionStartedAt) =>
+      _acceptedSessionStartedAtHighWater != null &&
+      sessionStartedAt < _acceptedSessionStartedAtHighWater!;
+
+  Future<void> _acceptHistoryBoundaryInWriteChain(
+    RemoteSessionRef ref,
+    int sessionStartedAt,
+  ) async {
+    if (_acceptedSessionStartedAtHighWater != null &&
+        sessionStartedAt <= _acceptedSessionStartedAtHighWater!) {
+      return;
     }
+    _acceptedSessionStartedAtHighWater = sessionStartedAt;
+    final idx = _boxes.sessionsIndexBox();
+    final key = LocalBoxes.sessionKey(ref);
+    final raw = idx.get(key);
+    final cur = raw is Map
+        ? SessionIndexRecord.tryFromJson(raw.cast<String, dynamic>())
+        : null;
+    final base =
+        cur ??
+        SessionIndexRecord(
+          epk: ref.peerEpk,
+          roomId: ref.roomId,
+          sessionId: ref.sessionId,
+        );
+    await idx.put(
+      key,
+      base
+          .copyWith(
+            sessionStartedAt: DateTime.fromMillisecondsSinceEpoch(
+              sessionStartedAt,
+            ),
+          )
+          .toJson(),
+    );
   }
 
   // ---------------------------------------------------------------------------

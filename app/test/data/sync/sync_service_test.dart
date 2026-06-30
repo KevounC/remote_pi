@@ -1247,6 +1247,51 @@ void main() {
   );
 
   test(
+    'late authoritative history replay after timeout confirms and removes failure',
+    () async {
+      final s = await setup(
+        pendingSendTimeout: const Duration(milliseconds: 20),
+      );
+      await s.sync.sendMessage('eventual replay');
+      await _settle();
+      final sentId = s.ch.sent.whereType<UserMessage>().last.id;
+
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await _settle();
+      expect(messages(s.epk).single.status, UserMsgStatus.failed);
+
+      s.ch.push(
+        SessionHistory(
+          sessionId: s.sessionId,
+          inReplyTo: 'sync-late-confirmation',
+          sessionStartedAt: 1000,
+          events: [UserInputEvt(ts: 1, id: sentId, text: 'eventual replay')],
+          eos: true,
+        ),
+      );
+      await _settle();
+
+      final rows = messages(s.epk);
+      expect(rows, hasLength(1));
+      expect(rows.single.id, sentId);
+      expect(rows.single.role, MsgRole.user);
+      expect(rows.single.text, 'eventual replay');
+      expect(rows.single.status, UserMsgStatus.confirmed);
+      expect(
+        await s.sync.debugTranscriptEventStore.readSession(
+          transcriptKeyFor(s.epk),
+        ),
+        hasLength(3),
+        reason:
+            'the submitted, failed, and confirmed events all remain in the log',
+      );
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
     'transcript log drives replay and converges idle across terminal outcomes',
     () async {
       final s = await setup();
@@ -1754,6 +1799,50 @@ void main() {
       expect(
         index(s.epk)?.sessionStartedAt,
         DateTime.fromMillisecondsSinceEpoch(1001),
+      );
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
+    'stale replay is rejected inside the serialized append boundary',
+    () async {
+      final s = await setup();
+
+      final newer = s.sync.debugApplyHistory(
+        SessionHistory(
+          sessionId: s.sessionId,
+          inReplyTo: 'sync-newer-racing',
+          sessionStartedAt: 1000,
+          events: const [UserInputEvt(ts: 1, id: 'newer', text: 'newer row')],
+          eos: true,
+        ),
+      );
+      final older = s.sync.debugApplyHistory(
+        SessionHistory(
+          sessionId: s.sessionId,
+          inReplyTo: 'sync-older-racing',
+          sessionStartedAt: 999,
+          events: const [UserInputEvt(ts: 2, id: 'older', text: 'older row')],
+          eos: true,
+        ),
+      );
+      await Future.wait([newer, older]);
+      await _settle();
+
+      expect(messages(s.epk).map((r) => r.id), ['newer']);
+      expect(
+        await s.sync.debugTranscriptEventStore.readSession(
+          transcriptKeyFor(s.epk),
+        ),
+        hasLength(1),
+        reason: 'the stale batch must not be appended to the source log',
+      );
+      expect(
+        index(s.epk)?.sessionStartedAt,
+        DateTime.fromMillisecondsSinceEpoch(1000),
       );
 
       s.conn.dispose();
