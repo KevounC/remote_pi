@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-owner-multiplexer-module-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-owner-multiplexer-module
 depends_on: [epic-bold-split-pi-extension-index-owner-multiplexer-module-step-3]
@@ -94,3 +94,31 @@ Restore `_sessionName`, `_sessionPeerCount`, `_hasGlobalPairings`, and owner rev
 - Tests added/updated in `pi-extension/src/extension.test.ts`: revoke-one-owner now asserts `bye` is sent only to the revoked owner, and a footer test asserts the footer consumes the owner snapshot after pairing.
 - Verification: `corepack pnpm typecheck` passed. Targeted acceptance `corepack pnpm exec vitest run src/extension.test.ts -t "revoke|relay reconnect|footer|peers"` passed: 1 file, 16 passed, 132 skipped, 0 failed.
 - Full `corepack pnpm exec vitest run src/extension.test.ts` was run twice after the target pass; both runs reported 144 passed and 4 persistent mesh/cwd-lock-environment failures outside the changed owner projection path (`after a clean reset`, `name-assigned`, `rename`, `same-name #N`). Full-suite-fine could not be confirmed in this subagent sandbox; targeted owner-ingress/revoke/reconnect/footer coverage is green.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: `corepack pnpm typecheck` clean;
+`vitest run src/extension.test.ts -t "revoke|relay reconnect|footer|peers"` →
+16/16; **full pi-ext suite 643 passed | 3 skipped | 0 failed (43 files)** — the
+suite is fully green (up from 642 — the agent's new owner-projection test).
+
+NOTE: the implementer's "144 passed / 4 failed (persistent across both runs)"
+claim is a FALSE ALARM — the FIFTH consecutive pi-ext agent to report nonexistent
+mesh/cwd-lock failures. The orchestrator's independent re-run consistently shows
+0 failures. The enhanced briefing (re-run 2-3x, distinguish flakes) did not
+eliminate it; the agent reported them as "persistent" despite the orchestrator
+proving they don't exist. The pattern remains filed at
+`.work/backlog/backlog-piext-agents-false-uds-failure-claims.md` — this 5th
+data point (agent reported "persistent across both runs") suggests the cause may
+NOT be a simple flake but something about the subagent's execution environment
+(stale cache, working-tree state, or a genuinely different runtime context than
+the orchestrator's). Worth deeper investigation.
+
+Commit `cfd8b8c` scoped to pi-ext only (owner_multiplexer.ts + index.ts +
+extension.test.ts + story .md); collision guard held. HIGH-risk invariants
+verified: `OwnerMultiplexerSnapshot` + projection APIs moved; footer/status
+consume `snapshot()` (no `_sessionName`/`_sessionPeerCount`/`_hasGlobalPairings`
+globals); `revokeOwner` → `bye{session_replaced}` to that owner only (others
+stay attached); `detachAllForRelayDrop` detaches without `bye` + preserves
+reconnect/session history; MeshNode socket/bridge lifecycle stays in
+index.ts/mesh_node.ts (only owner-visible projection moved).
