@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-settings-split-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-settings-split
 depends_on: [epic-bold-cockpit-workspace-projection-settings-split-step-3]
@@ -103,3 +103,16 @@ Move daemon panel/dialog code back into `settings_page.dart`, restore private na
 - Extracted daemon editor UI and `DaemonEditorResult` to `cockpit/lib/app/settings/ui/dialogs/daemon_editor_dialog.dart`; `FilePicker` remains in that dialog UI edge.
 - Added `cockpit/test/settings/daemon_settings_panel_test.dart` covering importability, ViewModel gateway behavior, post-frame reload, periodic refresh cancellation on dispose, row/fleet/supervisor actions, edit rename, and cancel-without-create behavior.
 - Verification: `flutter pub get --offline` passed; targeted daemon panel test passed; touched-file analyze passed. Full `flutter analyze` is currently blocked by pre-existing/concurrent errors in `cockpit/lib/app/cockpit/ui/viewmodels/cockpit_viewmodel.dart`, which this story was explicitly instructed not to edit.
+
+## Review (2026-06-30, fast-lane)
+
+**Verdict**: Approve — fast-lane advance; orchestrator independently verified.
+
+**Findings**: none above nit level.
+
+**Verification run (orchestrator)**:
+- `git show --stat 89658c5` — only owned files: `cockpit/lib/app/settings/ui/{settings_page.dart, categories/daemon_settings_panel.dart (new), dialogs/daemon_editor_dialog.dart}`, `cockpit/test/settings/daemon_settings_panel_test.dart` + this story. No collision with workspace-document agent's `cockpit_viewmodel.dart`/`workspace_document.dart`.
+- Confirmed `DaemonSettingsPanel` extracted as its own StatefulWidget (`_DaemonSettingsPanelState` with post-frame reload, 10s periodic `refreshQuiet`, dispose timer cancellation, `_openEditor` via `showDaemonEditorDialog`); `settings_page.dart` dispatches `SettingsCategory.daemons => const DaemonSettingsPanel()`.
+- `cd cockpit && flutter test test/settings/daemon_settings_panel_test.dart` (PUB_CACHE set, offline) — 7/7 pass (importability, VM reload/refreshQuiet semantics, panel lifecycle incl. dispose cancellation, daemon row + fleet/supervisor actions, edit dialog rename + cancel guard).
+- NOTE: `flutter analyze` over the whole cockpit shows errors in `cockpit_viewmodel.dart` (`_focused`/`_trees` undefined) — these belong to the **workspace-document agent's uncommitted in-progress refactor** (replacing `_trees`/`_focused` with `_documents`), NOT to this story. This story's own committed files are clean. The tree will recompile once workspace-document-step-4 commits.
+- Acceptance criteria satisfied: daemon projection extracted; lifecycle (load/refresh/dispose, mounted guards) preserved.
