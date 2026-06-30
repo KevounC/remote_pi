@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-relay-transport-module-step-5
 kind: story
-stage: review
+stage: implementing
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-relay-transport-module
 depends_on: [epic-bold-split-pi-extension-index-relay-transport-module-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-30
+updated: 2026-06-29
 ---
 
 # Step 5: Route owner ingress through RelayTransportPort and lock compatibility tests
@@ -83,12 +83,3 @@ paired apps after reconnect.
 Restore direct `_installAutoListener(relay)` and `new PlainPeerChannel(relay, ...)`
 construction in `index.ts`. Because the wire format is unchanged, rollback is a
 wiring-only revert.
-
-## Implementation
-- Duplicate-listener fix: `RelayTransportPort.onOuterMessage()` now only records outer-message handlers; relay socket attachment is owned by `bindRelay()` so a connected relay has exactly one owner-ingress `message` listener before peer attach.
-- Owner ingress routing: `index.ts` installs one owner-ingress subscription through relay transport, keeps it across relay reconnect, and creates owner/transient peer channels through `RelayTransportAdapter.createPeerChannel()` instead of constructing `PlainPeerChannel` directly.
-- No-double-deliver/no-strand guards: known-peer first non-pair messages are routed once after channel attach; relay close detaches owner channels while retaining owner ingress for the next bound relay; stop/unsubscribe removes the transport handler.
-- Compatibility locked: added owner-ingress invariant tests for known-peer first-message single delivery and relay reconnect detach/reattach.
-- Verification: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; targeted vitest `known peer reconnect|relay reconnect detaches` passed 2/2. Full `vitest run src/extension.test.ts src/transport/relay_client.test.ts` had 157 passed / 4 failed; the 4 failures match the documented false-alarm environment pattern (`after a clean reset`, `name-assigned`, `rename:<name>`, same-name cwd-lock), while the two owner-ingress invariant tests passed.
-- Discrepancies from design: `createPeerChannel` is exposed on the concrete relay transport adapter with an optional composition-root port method to avoid modifying `legacy_ports.ts`; a single temporary current-relay epoch check remains for legacy owner ingress until the pairing coordinator is retired.
-- Adjacent issues parked: none.

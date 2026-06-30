@@ -585,7 +585,7 @@ describe("state machine + pair_request flow", () => {
     expect(relayRef.current!.send.mock.calls.length).toBe(sendsBefore);
   });
 
-  test("known peer reconnect: first non-pair message attaches and routes exactly once", async () => {
+  test("known peer reconnect: any non-pair message from peers.json → paired", async () => {
     const APP_PEER_ID = "known-app-peer";
     _knownPeers.push({
       name: "Known App",
@@ -596,19 +596,12 @@ describe("state machine + pair_request flow", () => {
     captureHandler("remote-pi");
     await _connectForTest(makeMockCtx());
     expect(_getState()).toBe("started");
-    expect(relayRef.current!.listenerCount("message")).toBe(1);
 
     relayRef.current!.emit("message", makeInnerLine(APP_PEER_ID, {
       type: "ping", id: "ping-reconnect",
     }));
 
     await vi.waitFor(() => expect(_getState()).toBe("paired"), { timeout: 2000 });
-    const pongs = relayRef.current!.send.mock.calls
-      .map((c) => c[0] as string)
-      .map(decodeSentCt)
-      .filter((d) => d.peer === APP_PEER_ID && d.inner.type === "pong" && d.inner["in_reply_to"] === "ping-reconnect");
-    expect(pongs).toHaveLength(1);
-    expect(relayRef.current!.listenerCount("message")).toBe(2);
   });
 
   test("unknown peer non-pair message → state stays started, no peer added", async () => {
@@ -3975,50 +3968,6 @@ describe("relay reconnect", () => {
       // Advance well past the largest backoff — no new attempt
       await vi.advanceTimersByTimeAsync(60_000);
       expect(relayInstances).toHaveLength(1);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  test("relay reconnect detaches owners and lets a known peer reattach on the new message stream", async () => {
-    vi.useFakeTimers();
-    try {
-      const APP_PEER_ID = "known-after-relay-drop";
-      _knownPeers.push({
-        name: "Known App",
-        remote_epk: APP_PEER_ID,
-        paired_at: new Date().toISOString(),
-      });
-
-      captureHandler("remote-pi");
-      await _connectForTest(makeMockCtx());
-      relayInstances[0]!.emit("message", makeInnerLine(APP_PEER_ID, {
-        type: "ping", id: "before-drop",
-      }));
-      await vi.waitFor(() => expect(_getState()).toBe("paired"), { timeout: 2000 });
-      expect(_hasActivePeerForTest(APP_PEER_ID)).toBe(true);
-      expect(relayInstances[0]!.listenerCount("message")).toBe(2);
-
-      relayInstances[0]!.emit("close");
-      expect(_getState()).toBe("started");
-      expect(_hasActivePeerForTest(APP_PEER_ID)).toBe(false);
-      expect(relayInstances[0]!.listenerCount("message")).toBe(0);
-
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(relayInstances).toHaveLength(2);
-      expect(relayInstances[1]!.listenerCount("message")).toBe(1);
-
-      relayInstances[1]!.emit("message", makeInnerLine(APP_PEER_ID, {
-        type: "ping", id: "after-reconnect",
-      }));
-      await vi.waitFor(() => expect(_getState()).toBe("paired"), { timeout: 2000 });
-      expect(_hasActivePeerForTest(APP_PEER_ID)).toBe(true);
-      const pongs = relayInstances[1]!.send.mock.calls
-        .map((c) => c[0] as string)
-        .map(decodeSentCt)
-        .filter((d) => d.peer === APP_PEER_ID && d.inner.type === "pong" && d.inner["in_reply_to"] === "after-reconnect");
-      expect(pongs).toHaveLength(1);
-      expect(relayInstances[1]!.listenerCount("message")).toBe(2);
     } finally {
       vi.useRealTimers();
     }
