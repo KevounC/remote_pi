@@ -60,6 +60,7 @@ pub(crate) fn control_check_cost(peers: &[String]) -> usize {
 pub(crate) struct ConnectionActor {
     pub(crate) peer_id: String,
     pub(crate) peer_short: String,
+    pub(crate) room_id: String,
     pub(crate) registry: Arc<PeerRegistry>,
     pub(crate) presence: Arc<PresenceManager>,
     pub(crate) rooms: Arc<RoomManager>,
@@ -73,6 +74,7 @@ impl ConnectionActor {
     pub(crate) fn new(
         peer_id: String,
         peer_short: String,
+        room_id: String,
         registry: Arc<PeerRegistry>,
         presence: Arc<PresenceManager>,
         rooms: Arc<RoomManager>,
@@ -81,6 +83,7 @@ impl ConnectionActor {
         Self {
             peer_id,
             peer_short,
+            room_id,
             registry,
             presence,
             rooms,

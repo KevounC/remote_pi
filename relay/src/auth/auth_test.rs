@@ -17,7 +17,7 @@ fn hello_bootstrap_defaults_and_room_meta() {
     let sk = SigningKey::generate(&mut rand::thread_rng());
     let pubkey = B64.encode(sk.verifying_key().to_bytes());
     let line = format!(
-        r#"{{"type":"hello","pubkey":"{}","room_id":"work","room_meta":{{"name":"Desk","cwd":"/repo","model":"m","thinking":"high","working":true}}}}"#,
+        r#"{{"type":"hello","pubkey":"{}","room_id":"work","room_meta":{{"name":"Desk","cwd":"/repo","session_id":"sess-1","model":"m","thinking":"high","working":true}}}}"#,
         pubkey
     );
 
@@ -26,6 +26,7 @@ fn hello_bootstrap_defaults_and_room_meta() {
     assert_eq!(peer.room_meta.room_id, "work");
     assert_eq!(peer.room_meta.name.as_deref(), Some("Desk"));
     assert_eq!(peer.room_meta.cwd.as_deref(), Some("/repo"));
+    assert_eq!(peer.room_meta.session_id.as_deref(), Some("sess-1"));
     assert_eq!(peer.room_meta.model.as_deref(), Some("m"));
     assert_eq!(peer.room_meta.thinking.as_deref(), Some("high"));
     assert!(peer.room_meta.working);

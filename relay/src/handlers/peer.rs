@@ -20,7 +20,6 @@ use crate::handlers::peer::connection_actor::{ActorDispatch, ConnectionActor};
 use crate::protocol::generated::control::{RelayControlFrame, is_relay_control_frame_type};
 use crate::protocol::outer::{OuterEnvelope, parse_line};
 use crate::reachability::RELAY_WS_PING_INTERVAL;
-use crate::rooms::RoomMetaPatch;
 
 /// Maximum number of peer IDs accepted in one presence/rooms control frame.
 /// The relay uses unbounded per-connection channels internally, so every frame
@@ -116,6 +115,7 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
     let mut actor = ConnectionActor::new(
         peer_id.clone(),
         peer_short.clone(),
+        room_id.clone(),
         registry.clone(),
         presence,
         rooms.clone(),
@@ -172,29 +172,6 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
                                         );
                                         continue;
                                     }
-                                };
-
-                                let control_frame = match control_frame {
-                                    RelayControlFrame::RoomMetaUpdate { room_id: target_room, meta } => {
-                                        let target_room = target_room.unwrap_or_else(|| room_id.clone());
-                                        let patch = RoomMetaPatch {
-                                            model: meta.model,
-                                            thinking: meta.thinking,
-                                            working: meta.working,
-                                        };
-                                        if !registry
-                                            .update_room_meta(&peer_id, &target_room, patch)
-                                            .await
-                                        {
-                                            warn!(
-                                                peer = %peer_short,
-                                                room = %target_room,
-                                                "room_meta_update for unknown (peer, room), dropping"
-                                            );
-                                        }
-                                        continue;
-                                    }
-                                    control_frame => control_frame,
                                 };
 
                                 match actor.dispatch_control(control_frame).await {

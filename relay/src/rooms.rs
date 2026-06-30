@@ -19,18 +19,20 @@ pub use room::RoomMeta;
 /// "field present in the update" (outer `Some(_)`, whose inner `None` means
 /// "clear to null" and whose inner `Some(s)` means "set to s").
 ///
-/// Built by the `room_meta_update` handler from the `meta` JSON object; the
-/// relay never inspects the inner values beyond JSON-shape (they're forwarded
+/// Decoded by generated relay-control frames from the `meta` JSON object; the
+/// relay never inspects the inner values beyond JSON shape (they're forwarded
 /// opaquely to subscribers). `working` is non-nullable: absence preserves,
 /// `Some(false)` is terminal/idle, and `Some(true)` is active.
 pub use room::RoomMetaPatch;
 
 impl RoomMetaPatch {
-    /// `true` when at least one field is present (i.e. the patch is a no-op
-    /// otherwise). Used by the registry to skip work when callers send empty
-    /// `meta: {}`.
+    /// `true` when no field is present (i.e. the patch is a no-op otherwise).
+    /// Used by the registry to skip work when callers send empty `meta: {}`.
     pub fn is_empty(&self) -> bool {
-        self.model.is_none() && self.thinking.is_none() && self.working.is_none()
+        self.model.is_none()
+            && self.thinking.is_none()
+            && self.session_id.is_none()
+            && self.working.is_none()
     }
 }
 
@@ -89,11 +91,13 @@ mod tests {
         let patch: RoomMetaPatch = serde_json::from_value(serde_json::json!({
             "model": null,
             "thinking": "high",
+            "session_id": null,
             "working": false,
         }))
         .unwrap();
         assert_eq!(patch.model, Some(None));
         assert_eq!(patch.thinking, Some(Some("high".to_string())));
+        assert_eq!(patch.session_id, Some(None));
         assert_eq!(patch.working, Some(false));
         assert!(!patch.is_empty());
     }

@@ -294,7 +294,7 @@ impl PeerRegistry {
         room_id: &str,
         patch: RoomMetaPatch,
     ) -> bool {
-        let (current_model, current_thinking, current_working) = {
+        let (current_model, current_thinking, current_session_id, current_working) = {
             let mut lock = self.senders.lock().unwrap();
             let key = (peer_id.to_string(), room_id.to_string());
             match lock.get_mut(&key) {
@@ -306,6 +306,9 @@ impl PeerRegistry {
                         if let Some(ref t) = patch.thinking {
                             meta.thinking = t.clone();
                         }
+                        if let Some(ref session_id) = patch.session_id {
+                            meta.session_id = session_id.clone();
+                        }
                         if let Some(w) = patch.working {
                             meta.working = w;
                         }
@@ -316,6 +319,7 @@ impl PeerRegistry {
                     (
                         head.1.model.clone(),
                         head.1.thinking.clone(),
+                        head.1.session_id.clone(),
                         head.1.working,
                     )
                 }
@@ -336,6 +340,12 @@ impl PeerRegistry {
             }
             if let Some(t) = &current_thinking {
                 meta_obj.insert("thinking".to_string(), serde_json::Value::String(t.clone()));
+            }
+            if let Some(session_id) = &current_session_id {
+                meta_obj.insert(
+                    "session_id".to_string(),
+                    serde_json::Value::String(session_id.clone()),
+                );
             }
             // `working` is always present (non-nullable bool), so it always
             // rides along in the broadcast — subscribers can rely on it.
@@ -393,6 +403,7 @@ mod tests {
             room_id: room_id.into(),
             name: None,
             cwd: None,
+            session_id: None,
             model: None,
             thinking: None,
             working: false,
@@ -730,6 +741,65 @@ mod tests {
             v["meta"]["working"], true,
             "absent `working` in a patch must not clear it"
         );
+    }
+
+    /// Nullable string patch fields use merge-patch semantics: a string sets
+    /// the value, and explicit `null` clears it without treating the value as a
+    /// route key or loggable dimension.
+    #[tokio::test]
+    async fn nullable_string_patch_clears_session_id_metadata() {
+        let (reg, pi, mut rx_app) = meta_fixture().await;
+
+        assert!(
+            reg.update_room_meta(
+                &pi,
+                "main",
+                RoomMetaPatch {
+                    session_id: Some(Some("sess-1".into())),
+                    ..Default::default()
+                },
+            )
+            .await
+        );
+        let v = recv_meta(&mut rx_app);
+        assert_eq!(v["meta"]["session_id"], "sess-1");
+        assert_eq!(reg.rooms_of(&pi)[0].session_id.as_deref(), Some("sess-1"));
+
+        assert!(
+            reg.update_room_meta(
+                &pi,
+                "main",
+                RoomMetaPatch {
+                    session_id: Some(None),
+                    ..Default::default()
+                },
+            )
+            .await
+        );
+        let v = recv_meta(&mut rx_app);
+        let meta = v["meta"].as_object().expect("meta object");
+        assert!(!meta.contains_key("session_id"));
+        assert!(reg.rooms_of(&pi)[0].session_id.is_none());
+    }
+
+    /// Empty patches still acknowledge existing rooms but do not broadcast a
+    /// no-op update.
+    #[tokio::test]
+    async fn empty_patch_is_acknowledged_without_broadcast() {
+        let (reg, pi, mut rx_app) = meta_fixture().await;
+
+        assert!(
+            reg.update_room_meta(&pi, "main", RoomMetaPatch::default())
+                .await
+        );
+
+        assert!(rx_app.try_recv().is_err());
+        let rooms_snapshot = reg.rooms_of(&pi);
+        assert_eq!(rooms_snapshot.len(), 1);
+        assert!(!rooms_snapshot[0].working);
+        assert!(rooms_snapshot[0].model.is_none());
+        assert!(rooms_snapshot[0].thinking.is_none());
+        assert!(rooms_snapshot[0].session_id.is_none());
     }
 
     /// `rooms_of` is the authoritative live-room snapshot and carries the

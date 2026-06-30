@@ -67,6 +67,7 @@ pub fn parse_hello_bootstrap(line: &str, now_ms: i64) -> Result<AuthenticatedPee
                     room_id,
                     name: meta.name,
                     cwd: meta.cwd,
+                    session_id: meta.session_id,
                     model: meta.model,
                     thinking: meta.thinking,
                     working: meta.working,

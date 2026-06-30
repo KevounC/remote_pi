@@ -4,7 +4,8 @@
 
 #![allow(dead_code)]
 
-use serde::{Deserialize, Deserializer, Serialize};
+use super::room::RoomMetaPatch;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -42,24 +43,11 @@ pub enum ServerAuthMsg {
     Challenge { nonce: String },
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
-pub struct RoomMetaPatch {
-    #[serde(default, deserialize_with = "deserialize_nullable_string_patch")]
-    pub model: Option<Option<String>>,
-    #[serde(default, deserialize_with = "deserialize_nullable_string_patch")]
-    pub thinking: Option<Option<String>>,
-    #[serde(default, deserialize_with = "deserialize_nullable_string_patch")]
-    pub session_id: Option<Option<String>>,
-    pub working: Option<bool>,
-}
-
-fn deserialize_nullable_string_patch<'de, D>(
-    deserializer: D,
-) -> Result<Option<Option<String>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Option::<String>::deserialize(deserializer).map(Some)
+#[derive(Debug, Clone, Deserialize)]
+pub struct RoomMetaUpdateFrame {
+    #[serde(default)]
+    pub room_id: Option<String>,
+    pub meta: RoomMetaPatch,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -96,11 +84,7 @@ pub enum RelayControlFrame {
         peers: Vec<String>,
     },
     #[serde(rename = "room_meta_update")]
-    RoomMetaUpdate {
-        #[serde(default)]
-        room_id: Option<String>,
-        meta: RoomMetaPatch,
-    },
+    RoomMetaUpdate(RoomMetaUpdateFrame),
 }
 
 pub const RELAY_CONTROL_FRAME_TYPES: &[&str] = &[

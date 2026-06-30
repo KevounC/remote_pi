@@ -4,6 +4,7 @@
 
 #![allow(dead_code)]
 
+use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,6 +15,8 @@ pub struct RoomMeta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<String>,
@@ -22,28 +25,68 @@ pub struct RoomMeta {
     pub started_at: i64,
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone)]
 pub struct RoomMetaPatch {
-    #[serde(default, deserialize_with = "deserialize_nullable_string_patch")]
     pub model: Option<Option<String>>,
-    #[serde(default, deserialize_with = "deserialize_nullable_string_patch")]
     pub thinking: Option<Option<String>>,
-    #[serde(default, deserialize_with = "deserialize_non_null_bool_patch")]
+    pub session_id: Option<Option<String>>,
     pub working: Option<bool>,
 }
 
-fn deserialize_nullable_string_patch<'de, D>(
-    deserializer: D,
-) -> Result<Option<Option<String>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Option::<String>::deserialize(deserializer).map(Some)
+const ROOM_META_PATCH_FIELDS: &[&str] = &["model", "thinking", "session_id", "working"];
+
+impl<'de> Deserialize<'de> for RoomMetaPatch {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_map(RoomMetaPatchVisitor)
+    }
 }
 
-fn deserialize_non_null_bool_patch<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    bool::deserialize(deserializer).map(Some)
+struct RoomMetaPatchVisitor;
+
+impl<'de> Visitor<'de> for RoomMetaPatchVisitor {
+    type Value = RoomMetaPatch;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a room metadata patch object")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut patch = RoomMetaPatch::default();
+        while let Some(key) = map.next_key::<String>()? {
+            match key.as_str() {
+                "model" => {
+                    if patch.model.is_some() {
+                        return Err(de::Error::duplicate_field("model"));
+                    }
+                    patch.model = Some(map.next_value::<Option<String>>()?);
+                }
+                "thinking" => {
+                    if patch.thinking.is_some() {
+                        return Err(de::Error::duplicate_field("thinking"));
+                    }
+                    patch.thinking = Some(map.next_value::<Option<String>>()?);
+                }
+                "session_id" => {
+                    if patch.session_id.is_some() {
+                        return Err(de::Error::duplicate_field("session_id"));
+                    }
+                    patch.session_id = Some(map.next_value::<Option<String>>()?);
+                }
+                "working" => {
+                    if patch.working.is_some() {
+                        return Err(de::Error::duplicate_field("working"));
+                    }
+                    patch.working = Some(map.next_value::<bool>()?);
+                }
+                other => return Err(de::Error::unknown_field(other, ROOM_META_PATCH_FIELDS)),
+            }
+        }
+        Ok(patch)
+    }
 }

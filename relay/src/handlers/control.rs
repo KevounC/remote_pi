@@ -3,7 +3,7 @@ use tracing::warn;
 
 use crate::handlers::peer::MAX_CONTROL_FRAME_PEERS;
 use crate::handlers::peer::connection_actor::{ActorDispatch, ConnectionActor};
-use crate::protocol::generated::control::RelayControlFrame;
+use crate::protocol::generated::control::{RelayControlFrame, RoomMetaUpdateFrame};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ControlFrameError {
@@ -60,13 +60,7 @@ impl<'actor> ControlHandlers<'actor> {
             RelayControlFrame::SubscribeRooms { peers } => self.subscribe_rooms(peers).await,
             RelayControlFrame::UnsubscribeRooms { peers } => self.unsubscribe_rooms(peers).await,
             RelayControlFrame::RoomsCheck { peers } => self.rooms_check(peers).await,
-            RelayControlFrame::RoomMetaUpdate { .. } => {
-                warn!(
-                    peer = %self.actor.peer_short,
-                    "room_meta_update reached presence/rooms handler, dropping"
-                );
-                ActorDispatch::Continue
-            }
+            RelayControlFrame::RoomMetaUpdate(frame) => self.room_meta_update(frame).await,
         }
     }
 
@@ -142,6 +136,23 @@ impl<'actor> ControlHandlers<'actor> {
         self.actor.emit_deduped_room_snapshots(peers)
     }
 
+    async fn room_meta_update(&mut self, frame: RoomMetaUpdateFrame) -> ActorDispatch {
+        let target_room = frame.room_id.unwrap_or_else(|| self.actor.room_id.clone());
+        if !self
+            .actor
+            .registry
+            .update_room_meta(&self.actor.peer_id, &target_room, frame.meta)
+            .await
+        {
+            warn!(
+                peer = %self.actor.peer_short,
+                room = %target_room,
+                "room_meta_update for unknown (peer, room), dropping"
+            );
+        }
+        ActorDispatch::Continue
+    }
+
     fn bounded_peers(&self, frame_type: &str, peers: Vec<String>) -> Option<Vec<String>> {
         match bounded_peer_list(frame_type, peers) {
             Ok(peers) => Some(peers),
@@ -175,14 +186,15 @@ mod tests {
     use crate::metrics::FirehoseMetrics;
     use crate::peers::registry::PeerRegistry;
     use crate::presence::PresenceManager;
-    use crate::protocol::generated::control::RelayControlFrame;
-    use crate::rooms::{RoomManager, RoomMeta};
+    use crate::protocol::generated::control::{RelayControlFrame, RoomMetaUpdateFrame};
+    use crate::rooms::{RoomManager, RoomMeta, RoomMetaPatch};
 
     fn make_meta(room_id: &str) -> RoomMeta {
         RoomMeta {
             room_id: room_id.into(),
             name: None,
             cwd: None,
+            session_id: None,
             model: None,
             thinking: None,
             working: false,
@@ -219,6 +231,7 @@ mod tests {
             ConnectionActor::new(
                 peer_id.to_owned(),
                 peer_id.to_owned(),
+                "main".to_string(),
                 self.registry.clone(),
                 self.presence.clone(),
                 self.rooms.clone(),
@@ -259,6 +272,46 @@ mod tests {
         .expect_err("generated control frame rejects non-string peers");
 
         assert!(err.to_string().contains("invalid type"));
+    }
+
+    #[test]
+    fn rejects_malformed_room_meta_update_at_generated_boundary() {
+        let err = serde_json::from_value::<RelayControlFrame>(json!({
+            "type": "room_meta_update",
+            "meta": []
+        }))
+        .expect_err("generated control frame rejects non-object meta");
+
+        assert!(err.to_string().contains("invalid type"));
+    }
+
+    #[test]
+    fn rejects_nullable_working_in_room_meta_update_at_generated_boundary() {
+        let err = serde_json::from_value::<RelayControlFrame>(json!({
+            "type": "room_meta_update",
+            "meta": { "working": null }
+        }))
+        .expect_err("generated control frame rejects null working");
+
+        assert!(err.to_string().contains("invalid type"));
+    }
+
+    #[test]
+    fn parses_room_meta_update_with_generated_patch_type() {
+        let frame: RelayControlFrame = serde_json::from_value(json!({
+            "type": "room_meta_update",
+            "meta": {
+                "session_id": null,
+                "working": false
+            }
+        }))
+        .expect("generated room_meta_update parses");
+
+        assert!(matches!(
+            frame,
+            RelayControlFrame::RoomMetaUpdate(RoomMetaUpdateFrame { meta, .. })
+                if meta.session_id == Some(None) && meta.working == Some(false)
+        ));
     }
 
     #[test]
@@ -320,6 +373,44 @@ mod tests {
         let msg = rx_app.try_recv().expect("backfill peer_online");
         let v: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
         assert_eq!(v, json!({"type": "peer_online", "peer": "pi"}));
+    }
+
+    #[tokio::test]
+    async fn room_meta_update_dispatches_through_typed_actor_handler() {
+        let fixture = Fixture::new();
+        let (tx_pi, _rx_pi) = mpsc::unbounded_channel::<Message>();
+        fixture
+            .registry
+            .register("pi".into(), make_meta("main"), tx_pi)
+            .await;
+        let (tx_app, mut rx_app) = mpsc::unbounded_channel::<Message>();
+        fixture
+            .registry
+            .register("app".into(), make_meta("main"), tx_app)
+            .await;
+        fixture
+            .rooms
+            .subscribe("app".into(), vec!["pi".to_string()])
+            .await;
+        let mut actor = fixture.actor("pi");
+
+        let dispatch = actor
+            .dispatch_control(RelayControlFrame::RoomMetaUpdate(RoomMetaUpdateFrame {
+                room_id: None,
+                meta: RoomMetaPatch {
+                    working: Some(true),
+                    ..Default::default()
+                },
+            }))
+            .await;
+
+        assert!(matches!(dispatch, ActorDispatch::Continue));
+        let msg = rx_app.try_recv().expect("room_meta_updated");
+        let v: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
+        assert_eq!(v["type"], "room_meta_updated");
+        assert_eq!(v["peer"], "pi");
+        assert_eq!(v["room_id"], "main");
+        assert_eq!(v["meta"]["working"], true);
     }
 
     #[tokio::test]

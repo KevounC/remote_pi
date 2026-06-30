@@ -799,7 +799,10 @@ function emitRustControl(entries, schemaPath) {
   const hasType = (type) => byType.has(type);
   const clientControlTypes = RELAY_CLIENT_CONTROL_TYPES.filter(hasType);
 
-  lines.push('use serde::{Deserialize, Deserializer, Serialize};');
+  lines.push('use serde::{Deserialize, Serialize};');
+  if (hasType('room_meta_update')) {
+    lines.push('use super::room::RoomMetaPatch;');
+  }
   lines.push('');
 
   if (hasType('hello') || hasType('auth')) {
@@ -859,25 +862,13 @@ function emitRustControl(entries, schemaPath) {
 
   if (hasType('room_meta_update')) {
     const updateSchema = schemasByType.get('room_meta_update');
+    if (!schemaHasProperty(updateSchema, 'room_id')) throw new Error('room_meta_update schema must declare room_id');
     if (!schemaHasProperty(updateSchema, 'meta')) throw new Error('room_meta_update schema must declare meta');
-    lines.push('#[derive(Debug, Default, Clone, Deserialize)]');
-    lines.push('pub struct RoomMetaPatch {');
-    lines.push('    #[serde(default, deserialize_with = "deserialize_nullable_string_patch")]');
-    lines.push('    pub model: Option<Option<String>>,');
-    lines.push('    #[serde(default, deserialize_with = "deserialize_nullable_string_patch")]');
-    lines.push('    pub thinking: Option<Option<String>>,');
-    lines.push('    #[serde(default, deserialize_with = "deserialize_nullable_string_patch")]');
-    lines.push('    pub session_id: Option<Option<String>>,');
-    lines.push('    pub working: Option<bool>,');
-    lines.push('}');
-    lines.push('');
-    lines.push('fn deserialize_nullable_string_patch<\'de, D>(');
-    lines.push('    deserializer: D,');
-    lines.push(') -> Result<Option<Option<String>>, D::Error>');
-    lines.push('where');
-    lines.push('    D: Deserializer<\'de>,');
-    lines.push('{');
-    lines.push('    Option::<String>::deserialize(deserializer).map(Some)');
+    lines.push('#[derive(Debug, Clone, Deserialize)]');
+    lines.push('pub struct RoomMetaUpdateFrame {');
+    lines.push('    #[serde(default)]');
+    lines.push('    pub room_id: Option<String>,');
+    lines.push('    pub meta: RoomMetaPatch,');
     lines.push('}');
     lines.push('');
   }
@@ -890,11 +881,7 @@ function emitRustControl(entries, schemaPath) {
     if (type === 'room_meta_update') {
       if (!schemaHasProperty(schema, 'room_id')) throw new Error('room_meta_update schema must declare room_id');
       lines.push('    #[serde(rename = "room_meta_update")]');
-      lines.push('    RoomMetaUpdate {');
-      lines.push('        #[serde(default)]');
-      lines.push('        room_id: Option<String>,');
-      lines.push('        meta: RoomMetaPatch,');
-      lines.push('    },');
+      lines.push('    RoomMetaUpdate(RoomMetaUpdateFrame),');
     } else {
       emitRustControlPeerVariant(lines, type, schema);
     }
@@ -1130,16 +1117,13 @@ function emitRustRoom(entries, schemaPath) {
   const nonNullableBooleans = nonNullableBoolPatchFields(roomMetaPatch);
 
   const lines = rustHeader('room');
+  lines.push('use serde::de::{self, MapAccess, Visitor};');
   lines.push('use serde::{Deserialize, Deserializer, Serialize};');
   lines.push('');
   lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
   lines.push('pub struct RoomMeta {');
   for (const [fieldName, fieldSchema] of Object.entries(roomProperties)) {
     assertRustFieldIdentifier(fieldName, `RoomMeta field ${fieldName}`);
-    // `session_id` is endpoint-owned, carried-only metadata. The relay room
-    // registry remains session-blind and preserves the pre-generated room
-    // snapshot shape by not storing or announcing it from relay-owned state.
-    if (fieldName === 'session_id') continue;
     const rustType = rustTypeForRoomMetaField(fieldName, fieldSchema);
     if (roomRequired.has(fieldName)) {
       if (fieldName === 'working') lines.push('    #[serde(default)]');
@@ -1151,13 +1135,12 @@ function emitRustRoom(entries, schemaPath) {
   }
   lines.push('}');
   lines.push('');
-  lines.push('#[derive(Debug, Default, Clone, Deserialize)]');
+  const patchFieldNames = Object.keys(patchProperties);
+  lines.push('#[derive(Debug, Default, Clone)]');
   lines.push('pub struct RoomMetaPatch {');
   for (const [fieldName, fieldSchema] of Object.entries(patchProperties)) {
     assertRustFieldIdentifier(fieldName, `RoomMetaPatch field ${fieldName}`);
-    if (fieldName === 'session_id') continue;
     if (nullableStrings.has(fieldName)) {
-      lines.push('    #[serde(default, deserialize_with = "deserialize_nullable_string_patch")]');
       lines.push(`    pub ${fieldName}: Option<Option<String>>,`);
       continue;
     }
@@ -1166,7 +1149,6 @@ function emitRustRoom(entries, schemaPath) {
       if (field.type !== 'boolean') {
         throw new Error(`RoomMetaPatch.${fieldName} must be a boolean schema for non-nullable bool patches`);
       }
-      lines.push('    #[serde(default, deserialize_with = "deserialize_non_null_bool_patch")]');
       lines.push(`    pub ${fieldName}: Option<bool>,`);
       continue;
     }
@@ -1174,20 +1156,55 @@ function emitRustRoom(entries, schemaPath) {
   }
   lines.push('}');
   lines.push('');
-  lines.push('fn deserialize_nullable_string_patch<\'de, D>(');
-  lines.push('    deserializer: D,');
-  lines.push(') -> Result<Option<Option<String>>, D::Error>');
-  lines.push('where');
-  lines.push('    D: Deserializer<\'de>,');
-  lines.push('{');
-  lines.push('    Option::<String>::deserialize(deserializer).map(Some)');
+  lines.push(`const ROOM_META_PATCH_FIELDS: &[&str] = &[${patchFieldNames.map((name) => `"${name}"`).join(', ')}];`);
+  lines.push('');
+  lines.push('impl<\'de> Deserialize<\'de> for RoomMetaPatch {');
+  lines.push('    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>');
+  lines.push('    where');
+  lines.push('        D: Deserializer<\'de>,');
+  lines.push('    {');
+  lines.push('        deserializer.deserialize_map(RoomMetaPatchVisitor)');
+  lines.push('    }');
   lines.push('}');
   lines.push('');
-  lines.push('fn deserialize_non_null_bool_patch<\'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>');
-  lines.push('where');
-  lines.push('    D: Deserializer<\'de>,');
-  lines.push('{');
-  lines.push('    bool::deserialize(deserializer).map(Some)');
+  lines.push('struct RoomMetaPatchVisitor;');
+  lines.push('');
+  lines.push('impl<\'de> Visitor<\'de> for RoomMetaPatchVisitor {');
+  lines.push('    type Value = RoomMetaPatch;');
+  lines.push('');
+  lines.push('    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {');
+  lines.push('        formatter.write_str("a room metadata patch object")');
+  lines.push('    }');
+  lines.push('');
+  lines.push('    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>');
+  lines.push('    where');
+  lines.push('        A: MapAccess<\'de>,');
+  lines.push('    {');
+  lines.push('        let mut patch = RoomMetaPatch::default();');
+  lines.push('        while let Some(key) = map.next_key::<String>()? {');
+  lines.push('            match key.as_str() {');
+  for (const fieldName of patchFieldNames) {
+    if (nullableStrings.has(fieldName)) {
+      lines.push(`                "${fieldName}" => {`);
+      lines.push(`                    if patch.${fieldName}.is_some() {`);
+      lines.push(`                        return Err(de::Error::duplicate_field("${fieldName}"));`);
+      lines.push('                    }');
+      lines.push(`                    patch.${fieldName} = Some(map.next_value::<Option<String>>()?);`);
+      lines.push('                }');
+    } else if (nonNullableBooleans.has(fieldName)) {
+      lines.push(`                "${fieldName}" => {`);
+      lines.push(`                    if patch.${fieldName}.is_some() {`);
+      lines.push(`                        return Err(de::Error::duplicate_field("${fieldName}"));`);
+      lines.push('                    }');
+      lines.push(`                    patch.${fieldName} = Some(map.next_value::<bool>()?);`);
+      lines.push('                }');
+    }
+  }
+  lines.push('                other => return Err(de::Error::unknown_field(other, ROOM_META_PATCH_FIELDS)),');
+  lines.push('            }');
+  lines.push('        }');
+  lines.push('        Ok(patch)');
+  lines.push('    }');
   lines.push('}');
   lines.push('');
   return `${lines.join('\n')}\n`;

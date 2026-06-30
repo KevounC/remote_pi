@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-control-handlers-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-control-handlers
 depends_on: [epic-bold-relay-typed-actor-control-handlers-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Move room metadata updates into a typed actor handler
@@ -100,3 +100,12 @@ Medium. The tri-state patch semantics are subtle and drive mobile working-state 
 ## Rollback
 
 Restore the raw `room_meta_update` branch and handwritten `RoomMetaPatch` construction. Keep earlier presence/rooms handler extraction if unaffected.
+
+## Implementation
+
+- Typed handler approach: generated `RelayControlFrame::RoomMetaUpdate(RoomMetaUpdateFrame)` now carries the generated `RoomMetaPatch` from `relay/src/protocol/generated/room.rs` into `ControlHandlers::room_meta_update`; `peer.rs` only decodes typed control frames and dispatches actor effects.
+- Merge-patch semantics preserved: `RoomMetaPatch` keeps absent/null/string tri-state for `model`, `thinking`, and `session_id`; `working` changes only when a boolean is present; empty patches still acknowledge existing rooms without broadcasting.
+- Malformed-meta fail-fast: generated `RoomMetaPatch` now deserializes via a map-only visitor, so non-object `meta`, `working: null`, duplicate fields, and unknown fields fail at decode instead of becoming empty patches.
+- `session_id` remains opaque room metadata: it is stored and included in room metadata snapshots/updates when present, but is not used for routing, indexing, logs, or metrics.
+- Regen verdict: touched `tools/protocol-codegen/`, regenerated `relay/src/protocol/generated/*`, `--check` passed, and deterministic double-run temp output matched both temp dirs and the committed generated directory.
+- Tests: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build` passed from `relay/` (`cargo test`: 78 lib + 3 integration + 13 mesh + 9 pi_forward + 10 presence + 19 rooms = 132 tests).
