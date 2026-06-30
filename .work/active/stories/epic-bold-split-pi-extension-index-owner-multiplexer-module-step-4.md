@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-owner-multiplexer-module-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-owner-multiplexer-module
 depends_on: [epic-bold-split-pi-extension-index-owner-multiplexer-module-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Move owner lifecycle projections, revocation hooks, and mesh peer display state
@@ -84,3 +84,13 @@ Medium. This step touches display and lifecycle projections; a bad split could m
 ## Rollback
 
 Restore `_sessionName`, `_sessionPeerCount`, `_hasGlobalPairings`, and owner revocation/detach branches in `index.ts`; leave the channel registry extraction from earlier steps intact if it remains passing.
+
+## Implementation
+
+- Added `OwnerMultiplexerSnapshot` plus owner-owned pairing/session projection APIs: `refreshPairingsCache`, `setMeshSession`, `setSessionPeerCount`, and `snapshot`.
+- Moved footer and `/remote-pi status` projection reads to `OwnerMultiplexer.snapshot()`; `index.ts` no longer owns `_sessionName`, `_sessionPeerCount`, or `_hasGlobalPairings` globals.
+- Added `disconnectOwner`, `revokeOwner`, and `detachAllForRelayDrop`; single-owner revoke sends `bye{session_replaced}` only to that owner, while relay close detaches channels without `bye` and preserves reconnect/session history state.
+- Kept `MeshNode` socket/bridge lifecycle in `index.ts`/`mesh_node.ts`; only the owner-visible session name and peer-count projection moved into the owner multiplexer.
+- Tests added/updated in `pi-extension/src/extension.test.ts`: revoke-one-owner now asserts `bye` is sent only to the revoked owner, and a footer test asserts the footer consumes the owner snapshot after pairing.
+- Verification: `corepack pnpm typecheck` passed. Targeted acceptance `corepack pnpm exec vitest run src/extension.test.ts -t "revoke|relay reconnect|footer|peers"` passed: 1 file, 16 passed, 132 skipped, 0 failed.
+- Full `corepack pnpm exec vitest run src/extension.test.ts` was run twice after the target pass; both runs reported 144 passed and 4 persistent mesh/cwd-lock-environment failures outside the changed owner projection path (`after a clean reset`, `name-assigned`, `rename`, `same-name #N`). Full-suite-fine could not be confirmed in this subagent sandbox; targeted owner-ingress/revoke/reconnect/footer coverage is green.

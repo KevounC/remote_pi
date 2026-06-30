@@ -25,6 +25,20 @@ export interface OwnerPeerRecord {
   paired_at: string;
 }
 
+export interface OwnerMultiplexerSnapshot {
+  activeOwnerCount: number;
+  ownerShortIds: string[];
+  lastOwnerShortId: string;
+  hasGlobalPairings: boolean;
+  sessionName: string | null;
+  sessionPeerCount: number;
+}
+
+export interface OwnerDisconnectResult {
+  disconnected: boolean;
+  activeOwnerCount: number;
+}
+
 type PairTokenStatus = "ok" | "expired" | "consumed" | "unknown";
 
 type PairOkMessage = Extract<ServerMessage, { type: "pair_ok" }>;
@@ -55,6 +69,7 @@ export interface OwnerPairedEvent {
 export interface OwnerMultiplexerDeps {
   createChannel(input: CreateOwnerChannelInput): PeerChannelHandle;
   refreshFooter(): void;
+  listPeers(): Promise<OwnerPeerRecord[]>;
   findKnownPeer(peerId: string): Promise<OwnerPeerRecord | null>;
   consumePairToken(token: string): PairTokenStatus;
   addPeer(record: OwnerPeerRecord): Promise<void>;
@@ -158,6 +173,9 @@ export class OwnerMultiplexer implements OwnerMultiplexerPort {
   private readonly messageRouters = new Map<PeerChannelHandle, OwnerAttachInput["onMessage"]>();
   private peerShort = "";
   private lateAttachPeerIds = new Set<string>();
+  private hasGlobalPairings = false;
+  private sessionName: string | null = null;
+  private sessionPeerCount = 0;
 
   constructor(private readonly deps: OwnerMultiplexerDeps) {}
 
@@ -167,6 +185,36 @@ export class OwnerMultiplexer implements OwnerMultiplexerPort {
 
   peerHint(): string {
     return this.peerShort;
+  }
+
+  async refreshPairingsCache(): Promise<void> {
+    try {
+      const peers = await this.deps.listPeers();
+      this.hasGlobalPairings = peers.length > 0;
+      this.deps.refreshFooter();
+    } catch {
+      // Keep the prior cache value; peers.json/keyring failures should not make
+      // footer/status flicker to a false "first pairing" state.
+    }
+  }
+
+  setMeshSession(name: string | null): void {
+    this.sessionName = name;
+  }
+
+  setSessionPeerCount(count: number): void {
+    this.sessionPeerCount = count;
+  }
+
+  snapshot(): OwnerMultiplexerSnapshot {
+    return {
+      activeOwnerCount: this.channels.size,
+      ownerShortIds: [...this.channels.keys()].map((peerId) => peerId.slice(0, 8)),
+      lastOwnerShortId: this.peerShort,
+      hasGlobalPairings: this.hasGlobalPairings,
+      sessionName: this.sessionName,
+      sessionPeerCount: this.sessionPeerCount,
+    };
   }
 
   has(peerId: string): boolean {
@@ -305,6 +353,19 @@ export class OwnerMultiplexer implements OwnerMultiplexerPort {
     return channel;
   }
 
+  disconnectOwner(peerId?: string): OwnerDisconnectResult {
+    const target = peerId ?? this.peerIds().at(-1);
+    if (!target || !this.channels.has(target)) {
+      return { disconnected: false, activeOwnerCount: this.activeCount() };
+    }
+    this.detach(target);
+    return { disconnected: true, activeOwnerCount: this.activeCount() };
+  }
+
+  revokeOwner(peerId: string): void {
+    this.detach(peerId, "session_replaced");
+  }
+
   detach(peerId: string, reason?: ByeReason): void {
     const channel = this.channels.get(peerId);
     if (!channel) return;
@@ -334,6 +395,10 @@ export class OwnerMultiplexer implements OwnerMultiplexerPort {
     this.lateAttachPeerIds.clear();
     this.peerShort = "";
     this.deps.refreshFooter();
+  }
+
+  detachAllForRelayDrop(): void {
+    this.detachAll();
   }
 
   broadcast(message: ServerMessage): void {

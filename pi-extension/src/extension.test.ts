@@ -1022,13 +1022,51 @@ describe("multi-channel broadcast (W2D)", () => {
   test("revoke of owner A → A's channel closed, B keeps running", async () => {
     await _pairForTest("ownerA__1234567890");
     await _pairAdditionalForTest("ownerB__abcdefghij", "Android");
+    const sendsBefore = relayRef.current!.send.mock.calls.length;
 
     const revoke = captureHandler("remote-pi revoke");
     await revoke("ownerA__", makeMockCtx());
 
+    const sent = relayRef.current!.send.mock.calls.slice(sendsBefore)
+      .map((c) => c[0] as string).map(decodeSentCt);
+    const byes = sent.filter((d) => d.inner.type === "bye");
+    expect(byes).toHaveLength(1);
+    expect(byes[0]!.peer).toBe("ownerA__1234567890");
+    expect(byes[0]!.inner).toMatchObject({ type: "bye", reason: "session_replaced" });
+    expect(sent.some((d) => d.peer === "ownerB__abcdefghij" && d.inner.type === "bye")).toBe(false);
     expect(_hasActivePeerForTest("ownerA__1234567890")).toBe(false);
     expect(_hasActivePeerForTest("ownerB__abcdefghij")).toBe(true);
     expect(_getState()).toBe("paired");  // derived: at least one owner still on
+  });
+
+  test("footer snapshot shows active owner and paired relay after pairing", async () => {
+    const ctx = {
+      ui: { notify: vi.fn(), setStatus: vi.fn(), setTitle: vi.fn() },
+      cwd: "/home/user/projects/remote_pi",
+      abort: vi.fn(),
+    };
+    captureHandler("remote-pi");
+    await _connectForTest(ctx as ReturnType<typeof makeMockCtx> & typeof ctx);
+    const status = captureHandler("remote-pi status");
+    await status("", ctx as ReturnType<typeof makeMockCtx> & typeof ctx);
+    ctx.ui.setStatus.mockClear();
+
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "footer-owner-123456",
+      ct: Buffer.from(JSON.stringify({
+        type: "pair_request", id: "req-footer", token: "test-token", device_name: "Footer Phone",
+      })).toString("base64"),
+    }));
+
+    await vi.waitFor(
+      () => expect(_hasActivePeerForTest("footer-owner-123456")).toBe(true),
+      { timeout: 2000 },
+    );
+    await vi.waitFor(
+      () => expect(ctx.ui.setStatus).toHaveBeenCalledWith("remote-pi:peer-active", "📱 footer-o"),
+      { timeout: 2000 },
+    );
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("remote-pi:relay", "🟢 relay");
   });
 
   // ── Source-of-truth rebroadcast (plan/24 W2D fix) ──────────────────────────

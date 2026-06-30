@@ -183,13 +183,14 @@ const _owners = new OwnerMultiplexer({
     () => input.onDisconnect(input.peerId),
   ),
   refreshFooter: () => _refreshFooter(),
+  listPeers: () => listPeers(),
   findKnownPeer: async (peerId) => {
     const peers = await listPeers();
     return peers.find((p) => p.remote_epk === peerId) ?? null;
   },
   consumePairToken: (token) => qrSession.consumeToken(token),
   addPeer: (record) => addPeer(record),
-  onPeerPersisted: () => _refreshPairingsCache(),
+  onPeerPersisted: () => { void _owners.refreshPairingsCache(); },
   currentPairingSession: () => {
     const cwd = _currentCwd();
     const sessionName = _displayName(cwd);
@@ -239,8 +240,6 @@ let _currentThinking: ThinkingLevel | undefined = undefined;  // last-known thin
 // attached via `_meshNode.attachBridge()` once the relay WS is up and this
 // Pi is the leader; MeshNode re-attaches it across UDS failovers.
 let _meshNode: MeshNode | null = null;
-let _sessionName: string | null = null;
-let _sessionPeerCount = 0;
 // Set true by the `session_shutdown` handler. The daemon auto-init defers the
 // connect (`setTimeout(_cmdRoot, 0)`) and connecting is async, so a shutdown can
 // land WHILE this instance's `_cmdRoot` is still mid-connect (`_meshNode` not
@@ -251,22 +250,6 @@ let _sessionPeerCount = 0;
 // re-evaluates the module on every session replacement), so the replacement
 // instance starts fresh with `_disposed = false`.
 let _disposed = false;
-
-// Cached state of global pairings (`peers.json`). Pairing is per-machine, so a
-// device paired in any Pi process is paired everywhere. Refreshed on boot,
-// after addPeer (handle_pair_request), and after removePeer (revoke).
-let _hasGlobalPairings = false;
-
-/** Reads peers.json and updates the global-pairings cache + footer. Fire and
- *  forget; failures keep the previous cached value. */
-function _refreshPairingsCache(): void {
-  void listPeers()
-    .then((peers) => {
-      _hasGlobalPairings = peers.length > 0;
-      _refreshFooter();
-    })
-    .catch(() => { /* keep prior cached value */ });
-}
 
 /** Re-queries the broker for the authoritative peer list. The broker's map is
  *  the source of truth — incremental +1/-1 counters drift after failover, lost
@@ -280,7 +263,7 @@ function _refreshSessionPeerCount(
     .then((reply) => {
       const peers = (reply.body as { peers?: string[] } | null)?.peers;
       if (Array.isArray(peers)) {
-        _sessionPeerCount = peers.length;
+        _owners.setSessionPeerCount(peers.length);
         _refreshFooter(ctx);
       }
     })
@@ -454,15 +437,16 @@ function _sendPiMessage(
 function _refreshFooter(ctx?: RemotePiUiContext): void {
   const ui = _currentUi(ctx);
   if (!ui || typeof ui.setStatus !== "function" || typeof ui.setTitle !== "function") return;
+  const ownerSnapshot = _owners.snapshot();
   const state: FooterState = {
-    session: _sessionName ?? undefined,
-    peerCount: _sessionPeerCount,
+    session: ownerSnapshot.sessionName ?? undefined,
+    peerCount: ownerSnapshot.sessionPeerCount,
     relayOn: _state !== "idle",
     // `devicePaired` now reflects "any owner currently attached" — picks one
     // shortid representatively (multi-owner UX detail surfaces in the
     // `/remote-pi status` line, not the footer slot).
-    devicePaired: _owners.activeCount() > 0 ? _owners.peerHint() : undefined,
-    hasPairings: _hasGlobalPairings,
+    devicePaired: ownerSnapshot.activeOwnerCount > 0 ? ownerSnapshot.lastOwnerShortId : undefined,
+    hasPairings: ownerSnapshot.hasGlobalPairings,
     agentName: _meshNode?.name(),
   };
   updateFooter(
@@ -1000,7 +984,9 @@ function _onRelayClose(): void {
   // Detach every per-owner channel — relay is gone, none can route. The
   // auto-listener re-attaches owners after `_attemptReconnect` succeeds
   // (via the same known-peer + pair_request paths used on first connect).
-  _owners.detachAll();
+  // Relay drop is not an explicit stop: do not send bye and do not clear
+  // session history or reconnect-owned state.
+  _owners.detachAllForRelayDrop();
   if (!_turnProjection().working) _resetTurnSnapshot();
 
   _relay = null;  // _relayUrl preserved for retry
@@ -1163,12 +1149,10 @@ export async function _handleControl(cmd: string): Promise<void> {
  */
 export function _onPeerDisconnect(appPeerId?: string): void {
   if (_state === "idle") return;
-  const target = appPeerId ?? _owners.peerIds().at(-1);
-  if (!target) return;
-  if (!_owners.has(target)) return;
+  const result = _owners.disconnectOwner(appPeerId);
+  if (!result.disconnected) return;
 
-  _owners.detach(target);
-  if (_owners.activeCount() > 0) {
+  if (result.activeOwnerCount > 0) {
     // Other owners still attached — keep the turn projection so they continue
     // seeing the in-flight agent stream.
     _refreshFooter();
@@ -1595,8 +1579,8 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
     if (_meshNode) {
       try { await _meshNode.close(); } catch { /* best-effort */ }
       _meshNode = null;
-      _sessionName = null;
-      _sessionPeerCount = 0;
+      _owners.setMeshSession(null);
+      _owners.setSessionPeerCount(0);
     }
     // No bye reason: the process keeps running and the fresh instance re-joins
     // the SAME relay room, so an explicit offline→online flap would be wrong.
@@ -1693,7 +1677,7 @@ function createIndexDeps(): LegacyIndexDeps {
 function createLegacyCommandSurface(): CommandSurfacePort {
   return createCommandSurface({
     deployAgentNetworkSkill: _deployAgentNetworkSkill,
-    refreshPairingsCache: _refreshPairingsCache,
+    refreshPairingsCache: () => { void _owners.refreshPairingsCache(); },
     registerAgentTools: (pi) => registerAgentTools(pi, () => _meshNode?.peer() ?? null),
     registerCommands: _registerRemotePiCommands,
     startDaemonMode: _startDaemonMode,
@@ -1768,8 +1752,8 @@ const _localMeshCommands = new LocalMeshCommands({
   meshNode: () => _meshNode,
   setMeshNode: (node) => { _meshNode = node; },
   setSessionState: (sessionName, peerCount) => {
-    _sessionName = sessionName;
-    _sessionPeerCount = peerCount;
+    _owners.setMeshSession(sessionName);
+    _owners.setSessionPeerCount(peerCount);
   },
   startRelay: _cmdStart,
   stopRelay: _goIdle,
@@ -1795,26 +1779,28 @@ const _localMeshCommands = new LocalMeshCommands({
  */
 function _cmdStatus(ctx: Pick<ExtensionContext, "ui">): void {
   const relayUrl = _relayUrl ?? resolveRelayUrl().url;
+  const ownerSnapshot = _owners.snapshot();
 
   // Mesh line
   let meshLine: string;
   if (_meshNode) {
     const name = _meshNode.name();
-    meshLine = `🟢 Local mesh: connected as "${name}" (${_sessionPeerCount} peer${_sessionPeerCount === 1 ? "" : "s"})`;
+    const count = ownerSnapshot.sessionPeerCount;
+    meshLine = `🟢 Local mesh: connected as "${name}" (${count} peer${count === 1 ? "" : "s"})`;
   } else {
     meshLine = "⚪ Local mesh: not connected";
   }
 
-  // Relay line — paired state is derived from OwnerMultiplexer.activeCount().
+  // Relay line — paired state is derived from OwnerMultiplexer snapshot.
   let relayLine: string;
   if (_state === "idle") {
     relayLine = `⚪ Relay: off (${relayUrl}) — run /remote-pi to start`;
-  } else if (_owners.activeCount() > 0) {
-    const count = _owners.activeCount();
-    const shortids = _owners.peerIds().map((k) => k.slice(0, 8)).join(", ");
+  } else if (ownerSnapshot.activeOwnerCount > 0) {
+    const count = ownerSnapshot.activeOwnerCount;
+    const shortids = ownerSnapshot.ownerShortIds.join(", ");
     relayLine = `🟢 Relay: ${count} owner${count === 1 ? "" : "s"} online (${shortids}) (${relayUrl})`;
   } else {
-    relayLine = _hasGlobalPairings
+    relayLine = ownerSnapshot.hasGlobalPairings
       ? `🟢 Relay: on, waiting for an app to connect (${relayUrl})`
       : `🟡 Relay: on, waiting for first pairing (${relayUrl})`;
   }
@@ -1998,10 +1984,9 @@ async function _cmdStart(ctx: Pick<ExtensionContext, "ui" | "cwd">): Promise<voi
         // Multi-channel (W2D): drop only the revoked owner's channel.
         // Other owners keep their session. Only fall back to full idle
         // when there are zero attached owners left.
-        _refreshPairingsCache();
+        void _owners.refreshPairingsCache();
         if (_owners.has(ownerEpk)) {
-          _owners.detach(ownerEpk);
-          _refreshFooter();
+          _owners.revokeOwner(ownerEpk);
         }
         // Surface the revocation inside the Pi chat panel via
         // `pi.sendMessage` (same channel the QR pair-code uses). Plain
@@ -2207,15 +2192,14 @@ async function _cmdRevoke(arg: string, ctx: Pick<ExtensionContext, "ui" | "cwd">
 
   const peer = matches[0]!;
   await removePeer(peer.remote_epk);
-  _refreshPairingsCache();
+  void _owners.refreshPairingsCache();
 
   // Multi-channel (W2D): close just this owner's channel. Other connected
   // owners keep their session — the relay stays `started`.
   if (_owners.has(peer.remote_epk)) {
     // Notify the revoked device explicitly before tearing the channel
     // down — otherwise it would only know via ping miss.
-    _owners.detach(peer.remote_epk, "session_replaced");
-    _refreshFooter();
+    _owners.revokeOwner(peer.remote_epk);
   }
 
   ctx.ui.notify(
