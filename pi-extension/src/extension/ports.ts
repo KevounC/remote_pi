@@ -11,6 +11,7 @@ import type {
 } from "../protocol/types.js";
 import type { RelayClient, RoomMeta } from "../transport/relay_client.js";
 import type { PeerChannel } from "../transport/peer_channel.js";
+import type { Ed25519Keypair } from "../pairing/crypto.js";
 import type { RelayConnectivity } from "./types.js";
 
 export interface RuntimeEpoch {
@@ -28,6 +29,7 @@ export interface RuntimeUiPort {
 
 export interface RelayStartInput {
   relayUrl: string;
+  keypair?: Ed25519Keypair;
   roomId?: string;
   roomMeta?: RoomMeta;
 }

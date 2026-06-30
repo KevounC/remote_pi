@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-relay-transport-module-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-relay-transport-module
 depends_on: [epic-bold-split-pi-extension-index-composition-root, epic-bold-reachability-contract-pi-adapter-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 1: Introduce the RelayTransportPort adapter module shell
@@ -74,6 +74,15 @@ same constants are not duplicated.
 - [ ] The adapter owns private relay/reconnect/status fields instead of adding new `index.ts` globals.
 - [ ] Reachability timing imports come from the reachability projection; no new duplicated backoff ladder is introduced.
 - [ ] `corepack pnpm typecheck` passes from `pi-extension/`.
+
+## Implementation
+- Added `pi-extension/src/extension/relay_transport.ts` with `createRelayTransportPort()` and `RelayTransportDeps` implementing the composition-root `RelayTransportPort` contract.
+- The adapter owns private relay, canonical relay URL, keypair, room id/meta snapshot, reconnect timer/attempt, status, outer-message handler, and temporary cross-PC bridge fields instead of adding new `index.ts` globals.
+- `RelayStartInput` now accepts an optional `keypair` so the adapter can construct authenticated `RelayClient` instances while existing legacy call sites remain source-compatible until later migration steps pass the keypair explicitly.
+- Reachability timing is imported from `reachability/reachability_contract.ts` via `reachabilityBackoffMs` and liveness constants; no duplicated backoff ladder was introduced.
+- Exposed `currentRelayForOwnerChannels()` as an internal temporary escape hatch for legacy owner-channel wiring until Step 5 removes direct relay access.
+- Verification: `corepack pnpm typecheck` passed from `pi-extension/` with only the known harmless `/home/agent/.npmrc` EACCES warning; `corepack pnpm build` passed with the same warning.
+- No full-suite Vitest run was needed for this shell-only step, so the known mesh/cwd-lock/UDS false-alarm pattern was not observed in this run.
 
 ## Risk
 Medium. This is mostly type/module setup, but it establishes the seam every later
