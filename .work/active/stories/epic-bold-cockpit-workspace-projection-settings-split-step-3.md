@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-settings-split-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-settings-split
 depends_on: [epic-bold-cockpit-workspace-projection-settings-split-step-2]
@@ -133,3 +133,15 @@ This confirms the bounce's blocker stands on its merits, not on the env block: t
   - `cd /home/agent/projects/remote_pi/cockpit && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && /home/agent/projects/remote_pi/.tools/flutter/bin/flutter pub get --offline` → `Got dependencies!`.
   - `cd /home/agent/projects/remote_pi/cockpit && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && /home/agent/projects/remote_pi/.tools/flutter/bin/flutter analyze` → `No issues found! (ran in 20.3s)`.
   - `cd /home/agent/projects/remote_pi/cockpit && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && /home/agent/projects/remote_pi/.tools/flutter/bin/flutter test test/settings/connectivity_settings_panel_test.dart` → `+8: All tests passed!`.
+
+## Review (2026-06-30)
+
+**Verdict**: Approve
+
+**Blockers**: none
+
+**Important**: none
+
+**Nits**: none
+
+**Notes**: Reviewed rework commit `b2e3979`. The expanded `cockpit/test/settings/connectivity_settings_panel_test.dart` suite contains 8 tests and now exercises `ConnectivityViewModel.load` through a fake `RelayGateway`, relay save/check behavior through the same gateway port, `PairingController` gateway cancellation on dispose, `RevokeController` late-notification suppression after dispose, post-frame panel load/save/check wiring, and panel-owned pairing/revoke controller disposal after dialogs close. Verification run from `cockpit/`: `export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && /home/agent/projects/remote_pi/.tools/flutter/bin/flutter pub get --offline` → `Got dependencies!`; `/home/agent/projects/remote_pi/.tools/flutter/bin/flutter analyze` → `No issues found! (ran in 19.4s)`; `/home/agent/projects/remote_pi/.tools/flutter/bin/flutter test test/settings/connectivity_settings_panel_test.dart` → `+8: All tests passed!`.
