@@ -25,6 +25,19 @@ final class WorkspaceCommandResult {
 final class WorkspaceDocumentCommands {
   const WorkspaceDocumentCommands._();
 
+  static WorkspaceCommandResult focusPane(
+    WorkspaceDocument document, {
+    required String paneId,
+  }) {
+    if (document.focusedPaneId == paneId ||
+        findLeaf(document.root, paneId) == null) {
+      return WorkspaceCommandResult(document: document);
+    }
+    return WorkspaceCommandResult(
+      document: document.copyWith(focusedPaneId: paneId),
+    );
+  }
+
   static WorkspaceCommandResult selectTab(
     WorkspaceDocument document, {
     required String paneId,
@@ -104,6 +117,21 @@ final class WorkspaceDocumentCommands {
         tabs: tabs,
       ),
       disposeTabIds: disposeOldTab ? <String>[oldTabId] : const <String>[],
+    );
+  }
+
+  static WorkspaceCommandResult replaceActiveTab(
+    WorkspaceDocument document, {
+    required String paneId,
+    required WorkspaceTab newTab,
+  }) {
+    final pane = findLeaf(document.root, paneId);
+    if (pane == null) return WorkspaceCommandResult(document: document);
+    return replaceTab(
+      document,
+      paneId: paneId,
+      oldTabId: pane.active,
+      newTab: newTab,
     );
   }
 

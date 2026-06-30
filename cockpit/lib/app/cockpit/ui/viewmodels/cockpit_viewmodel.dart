@@ -26,6 +26,7 @@ import 'package:cockpit/app/cockpit/domain/entities/project.dart';
 import 'package:cockpit/app/cockpit/domain/entities/session_info.dart';
 import 'package:cockpit/app/cockpit/domain/entities/thinking_level.dart';
 import 'package:cockpit/app/cockpit/domain/entities/workspace_document.dart';
+import 'package:cockpit/app/cockpit/domain/entities/workspace_document_commands.dart';
 import 'package:cockpit/app/cockpit/domain/entities/workspace_tab.dart';
 import 'package:cockpit/app/cockpit/domain/entities/worktree.dart';
 import 'package:cockpit/app/core/data/lsp/lsp_server_pool.dart';
@@ -261,15 +262,13 @@ class CockpitViewModel extends ChangeNotifier {
     String? inPane,
     bool isPreview = true,
   }) async {
-    final projectId = _selectedProjectId;
-    final tree = _activeTree;
+    final document = _activeDocument;
+    final projectId = document?.projectId;
     final paneId =
         inPane ?? (projectId == null ? null : focusedPaneId(projectId));
-    if (projectId == null || tree == null || paneId == null) return;
-    final leaf = findLeaf(tree, paneId);
+    if (document == null || projectId == null || paneId == null) return;
+    final leaf = findLeaf(document.root, paneId);
     if (leaf == null) return;
-    // Soltar um arquivo numa pane específica também a foca.
-    if (inPane != null) _setFocusedPane(projectId, inPane);
 
     // Se isPreview, tenta reutilizar a aba de preview existente ou substituir a ativa.
     // Se não é preview, cria uma aba normal (comportamento original).
@@ -280,11 +279,13 @@ class CockpitViewModel extends ChangeNotifier {
         // Se já aberto, só seleciona (mas transforma preview em normal se não é preview).
         if (s.path == path) {
           if (!isPreview && s.isPreview) s.pin();
-          _setProjectTree(
-            projectId,
-            updateLeaf(tree, paneId, (p) => p.copyWith(active: tabId)),
+          _applyWorkspaceCommand(
+            (doc) => WorkspaceDocumentCommands.selectTab(
+              doc,
+              paneId: paneId,
+              tabId: tabId,
+            ),
           );
-          notifyListeners();
           return;
         }
         // Guarda o primeiro preview encontrado para possível reutilização.
@@ -303,15 +304,15 @@ class CockpitViewModel extends ChangeNotifier {
       previewCandidate.view = view;
       previewCandidate.dirty = false;
       previewCandidate.notifyListeners(); // Força rebuild do FileViewer
-      _setProjectTree(
-        projectId,
-        updateLeaf(
-          tree,
-          paneId,
-          (p) => p.copyWith(active: previewCandidate!.id),
+      _applyWorkspaceCommand(
+        (doc) => WorkspaceDocumentCommands.replaceTab(
+          doc,
+          paneId: paneId,
+          oldTabId: previewCandidate!.id,
+          newTab: WorkspaceTab.viewer(id: previewCandidate.id, filePath: path),
+          disposeOldTab: false,
         ),
       );
-      notifyListeners();
       return;
     }
 
@@ -325,68 +326,60 @@ class CockpitViewModel extends ChangeNotifier {
     );
     _sessions[viewer.id] = viewer;
     _watchFileViewer(viewer);
+    final viewerTab = WorkspaceTab.viewer(id: viewer.id, filePath: path);
 
     // Se a pane só tem o placeholder vazio, substitui; senão adiciona aba.
     // Se é preview e a aba ativa é um FileViewer, substitui em vez de adicionar.
-    final current = this.tree(projectId) ?? tree;
+    final current = _activeDocument?.root ?? document.root;
     final lf = findLeaf(current, paneId);
     final activeTabId = lf?.active;
     final activeTab = activeTabId != null ? _sessions[activeTabId] : null;
     final only = lf?.tabs.length == 1 ? _sessions[lf!.tabs.first] : null;
 
+    late final bool applied;
     if (isPreview && activeTab is FileViewerSession && !activeTab.isPreview) {
       // Preview substituiria aba normal → adiciona ao lado.
-      _setProjectTree(
-        projectId,
-        updateLeaf(
-          current,
-          paneId,
-          (p) => p.copyWith(tabs: [...p.tabs, viewer.id], active: viewer.id),
+      applied = _applyWorkspaceCommand(
+        (doc) => WorkspaceDocumentCommands.appendTab(
+          doc,
+          paneId: paneId,
+          tab: viewerTab,
         ),
       );
     } else if (isPreview &&
         activeTab is FileViewerSession &&
         activeTab.isPreview) {
       // Preview substituir outro preview → substitui a aba ativa.
-      final oldId = activeTabId;
-      _setProjectTree(
-        projectId,
-        updateLeaf(
-          current,
-          paneId,
-          (p) => p.copyWith(
-            tabs: [...p.tabs.where((t) => t != oldId), viewer.id],
-            active: viewer.id,
-          ),
+      applied = _applyWorkspaceCommand(
+        (doc) => WorkspaceDocumentCommands.replaceActiveTab(
+          doc,
+          paneId: paneId,
+          newTab: viewerTab,
         ),
       );
-      _disposeSession(oldId!);
     } else if (lf != null &&
         only is AgentSession &&
         only.status == AgentStatus.empty) {
       // Placeholder vazio → substitui.
-      final emptyId = lf.tabs.first;
-      _setProjectTree(
-        projectId,
-        updateLeaf(
-          current,
-          paneId,
-          (p) => p.copyWith(tabs: [viewer.id], active: viewer.id),
+      applied = _applyWorkspaceCommand(
+        (doc) => WorkspaceDocumentCommands.replaceTab(
+          doc,
+          paneId: paneId,
+          oldTabId: lf.tabs.first,
+          newTab: viewerTab,
         ),
       );
-      _disposeSession(emptyId);
     } else {
       // Adiciona nova aba.
-      _setProjectTree(
-        projectId,
-        updateLeaf(
-          current,
-          paneId,
-          (p) => p.copyWith(tabs: [...p.tabs, viewer.id], active: viewer.id),
+      applied = _applyWorkspaceCommand(
+        (doc) => WorkspaceDocumentCommands.appendTab(
+          doc,
+          paneId: paneId,
+          tab: viewerTab,
         ),
       );
     }
-    notifyListeners();
+    if (!applied) _disposeSession(viewer.id);
   }
 
   /// Seleciona um arquivo no FileTreePanel (atualiza o highlight).
@@ -933,22 +926,20 @@ class CockpitViewModel extends ChangeNotifier {
 
   // ---- agent / tab / split operations (projeto ativo) -----------------------
   void focus(String paneId) {
-    final id = _selectedProjectId;
-    if (id == null || focusedPaneId(id) == paneId) return;
-    _setFocusedPane(id, paneId);
-    _clearFocusedNotification();
-    notifyListeners();
+    _applyWorkspaceCommand(
+      (document) =>
+          WorkspaceDocumentCommands.focusPane(document, paneId: paneId),
+    );
   }
 
   void selectTab(String paneId, String agentId) {
-    final tree = _activeTree;
-    if (tree == null) return;
-    _setActiveTree(
-      updateLeaf(tree, paneId, (p) => p.copyWith(active: agentId)),
+    _applyWorkspaceCommand(
+      (document) => WorkspaceDocumentCommands.selectTab(
+        document,
+        paneId: paneId,
+        tabId: agentId,
+      ),
     );
-    _setFocusedPane(_selectedProjectId!, paneId);
-    _clearFocusedNotification();
-    notifyListeners();
   }
 
   /// Abre uma aba "Novo" (placeholder vazio) na pane — o usuário escolhe ali
@@ -956,18 +947,17 @@ class CockpitViewModel extends ChangeNotifier {
   /// aba inicial de um workspace recém-aberto.
   void newEmptyTab(String paneId) {
     final projectId = _selectedProjectId;
-    final tree = _activeTree;
-    if (projectId == null || tree == null) return;
+    final project = selectedProject;
+    if (projectId == null || project == null) return;
     final empty = _makeEmpty(projectId);
-    _setActiveTree(
-      updateLeaf(
-        tree,
-        paneId,
-        (p) => p.copyWith(tabs: [...p.tabs, empty.id], active: empty.id),
+    final applied = _applyWorkspaceCommand(
+      (document) => WorkspaceDocumentCommands.appendTab(
+        document,
+        paneId: paneId,
+        tab: _sessionToWorkspaceTab(empty, project),
       ),
     );
-    _setFocusedPane(projectId, paneId);
-    notifyListeners();
+    if (!applied) _disposeSession(empty.id);
   }
 
   /// Cria uma aba (agente ou terminal) direto na subpasta [subRelative] do
@@ -975,44 +965,52 @@ class CockpitViewModel extends ChangeNotifier {
   /// da árvore de arquivos. Se a pane focada está num placeholder "Novo" vazio,
   /// substitui-o; senão, anexa uma aba nova e a ativa.
   void newTabIn(String subRelative, {required bool terminal}) {
-    final projectId = _selectedProjectId;
-    final tree = _activeTree;
-    if (projectId == null || tree == null) return;
-    final paneId = focusedPaneId(projectId) ?? leaves(tree).first.id;
-    final leaf = findLeaf(tree, paneId) ?? leaves(tree).first;
+    final document = _activeDocument;
+    final project = selectedProject;
+    if (document == null || project == null) return;
+    final paneId = focusedPaneId(project.id) ?? leaves(document.root).first.id;
+    final leaf = findLeaf(document.root, paneId) ?? leaves(document.root).first;
     final s = _spawn(subRelative, terminal: terminal);
+    final tab = _sessionToWorkspaceTab(s, project);
 
     final active = _sessions[leaf.active];
     final replaceEmpty =
         active is AgentSession && active.status == AgentStatus.empty;
 
-    _setActiveTree(
-      updateLeaf(tree, leaf.id, (p) {
-        if (replaceEmpty) {
-          final tabs = p.tabs.map((t) => t == leaf.active ? s.id : t).toList();
-          return p.copyWith(tabs: tabs, active: s.id);
-        }
-        return p.copyWith(tabs: [...p.tabs, s.id], active: s.id);
-      }),
+    final applied = _applyWorkspaceCommand(
+      (doc) => replaceEmpty
+          ? WorkspaceDocumentCommands.replaceTab(
+              doc,
+              paneId: leaf.id,
+              oldTabId: leaf.active,
+              newTab: tab,
+            )
+          : WorkspaceDocumentCommands.appendTab(doc, paneId: leaf.id, tab: tab),
     );
-    if (replaceEmpty) _disposeSession(leaf.active);
-    _setFocusedPane(projectId, leaf.id);
-    notifyListeners();
+    if (!applied) _disposeSession(s.id);
   }
 
   /// Divide a pane criando um agente novo ao lado/abaixo.
   void splitPane(String paneId, SplitDir dir, String subRelative) {
-    final tree = _activeTree;
-    if (tree == null) return;
+    final document = _activeDocument;
+    final project = selectedProject;
+    if (document == null || project == null) return;
     // O novo pane espelha o tipo da aba ativa: terminal → terminal, agente → agente.
-    final leaf = findLeaf(tree, paneId);
+    final leaf = findLeaf(document.root, paneId);
     final active = leaf == null ? null : _sessions[leaf.active];
     final terminal = active is TerminalSession;
     final s = _spawn(subRelative, terminal: terminal);
-    final newLeaf = LeafPane(id: _nid('pane'), tabs: [s.id], active: s.id);
-    _setActiveTree(splitLeaf(tree, paneId, dir, newLeaf, splitId: _nid('sp')));
-    _setFocusedPane(_selectedProjectId!, newLeaf.id);
-    notifyListeners();
+    final applied = _applyWorkspaceCommand(
+      (doc) => WorkspaceDocumentCommands.splitPane(
+        doc,
+        targetPaneId: paneId,
+        dir: dir,
+        tab: _sessionToWorkspaceTab(s, project),
+        newPaneId: _nid('pane'),
+        newSplitId: _nid('sp'),
+      ),
+    );
+    if (!applied) _disposeSession(s.id);
   }
 
   // ---- drag & drop de abas --------------------------------------------------
@@ -1020,38 +1018,14 @@ class CockpitViewModel extends ChangeNotifier {
   /// Move a aba [tabId] (de [srcPaneId]) pra dentro de [targetPaneId] como mais
   /// uma aba (acoplar). A sessão **não** é morta — só muda de lugar.
   void moveTabToPane(String srcPaneId, String tabId, String targetPaneId) {
-    final projectId = _selectedProjectId;
-    final tree = _activeTree;
-    if (projectId == null || tree == null) return;
-    if (srcPaneId == targetPaneId) return; // já está aqui
-    final src = findLeaf(tree, srcPaneId);
-    final tgt = findLeaf(tree, targetPaneId);
-    if (src == null || tgt == null || !src.tabs.contains(tabId)) return;
-
-    final remaining = src.tabs.where((t) => t != tabId).toList();
-    // Acopla no destino…
-    var t = updateLeaf(
-      tree,
-      targetPaneId,
-      (p) => p.copyWith(tabs: [...p.tabs, tabId], active: tabId),
+    _applyWorkspaceCommand(
+      (document) => WorkspaceDocumentCommands.moveTabToPane(
+        document,
+        srcPaneId: srcPaneId,
+        tabId: tabId,
+        targetPaneId: targetPaneId,
+      ),
     );
-    // …e tira da origem. src != target ⇒ há ≥2 folhas, então removeLeaf é seguro.
-    if (remaining.isEmpty) {
-      t = removeLeaf(t, srcPaneId);
-    } else {
-      t = updateLeaf(
-        t,
-        srcPaneId,
-        (p) => p.copyWith(
-          tabs: remaining,
-          active: _activeAfter(src, tabId, remaining),
-        ),
-      );
-    }
-    _setActiveTree(t);
-    _setFocusedPane(projectId, targetPaneId);
-    _ensureFocusValid();
-    notifyListeners();
   }
 
   /// Move a aba [tabId] (de [srcPaneId]) pra um **novo pane** criado dividindo
@@ -1064,47 +1038,18 @@ class CockpitViewModel extends ChangeNotifier {
     SplitDir dir, {
     required bool before,
   }) {
-    final projectId = _selectedProjectId;
-    final tree = _activeTree;
-    if (projectId == null || tree == null) return;
-    final src = findLeaf(tree, srcPaneId);
-    final tgt = findLeaf(tree, targetPaneId);
-    if (src == null || tgt == null || !src.tabs.contains(tabId)) return;
-
-    final remaining = src.tabs.where((t) => t != tabId).toList();
-    // Dividir o próprio pane que só tem essa aba contra si mesmo: no-op.
-    if (srcPaneId == targetPaneId && remaining.isEmpty) return;
-
-    final newLeaf = LeafPane(id: _nid('pane'), tabs: [tabId], active: tabId);
-    var t = tree;
-    // 1. Tira a aba da origem (se ainda sobra algo nela).
-    if (remaining.isNotEmpty) {
-      t = updateLeaf(
-        t,
-        srcPaneId,
-        (p) => p.copyWith(
-          tabs: remaining,
-          active: _activeAfter(src, tabId, remaining),
-        ),
-      );
-    }
-    // 2. Divide o alvo, inserindo o novo pane.
-    t = splitLeaf(
-      t,
-      targetPaneId,
-      dir,
-      newLeaf,
-      splitId: _nid('sp'),
-      before: before,
+    _applyWorkspaceCommand(
+      (document) => WorkspaceDocumentCommands.moveTabToNewSplit(
+        document,
+        srcPaneId: srcPaneId,
+        tabId: tabId,
+        targetPaneId: targetPaneId,
+        dir: dir,
+        before: before,
+        newPaneId: _nid('pane'),
+        newSplitId: _nid('sp'),
+      ),
     );
-    // 3. Origem ficou vazia → remove (o irmão expande).
-    if (remaining.isEmpty) {
-      t = removeLeaf(t, srcPaneId);
-    }
-    _setActiveTree(t);
-    _setFocusedPane(projectId, newLeaf.id);
-    _ensureFocusValid();
-    notifyListeners();
   }
 
   /// Reordena a aba [tabId] dentro do **mesmo** pane, ou a insere numa posição
@@ -1116,61 +1061,15 @@ class CockpitViewModel extends ChangeNotifier {
     String targetPaneId,
     int index,
   ) {
-    final projectId = _selectedProjectId;
-    final tree = _activeTree;
-    if (projectId == null || tree == null) return;
-    final src = findLeaf(tree, srcPaneId);
-    final tgt = findLeaf(tree, targetPaneId);
-    if (src == null || tgt == null || !src.tabs.contains(tabId)) return;
-
-    // Reordenação dentro da mesma folha.
-    if (srcPaneId == targetPaneId) {
-      final tabs = reorderTabs(src.tabs, tabId, index);
-      _setActiveTree(
-        updateLeaf(
-          tree,
-          srcPaneId,
-          (p) => p.copyWith(tabs: tabs, active: tabId),
-        ),
-      );
-      _setFocusedPane(projectId, srcPaneId);
-      notifyListeners();
-      return;
-    }
-
-    // Cross-pane: insere na posição pedida do destino e tira da origem.
-    final remaining = src.tabs.where((t) => t != tabId).toList();
-    final tgtTabs = [...tgt.tabs];
-    tgtTabs.insert(index.clamp(0, tgtTabs.length), tabId);
-    var t = updateLeaf(
-      tree,
-      targetPaneId,
-      (p) => p.copyWith(tabs: tgtTabs, active: tabId),
+    _applyWorkspaceCommand(
+      (document) => WorkspaceDocumentCommands.moveTabToIndex(
+        document,
+        srcPaneId: srcPaneId,
+        tabId: tabId,
+        targetPaneId: targetPaneId,
+        index: index,
+      ),
     );
-    if (remaining.isEmpty) {
-      t = removeLeaf(t, srcPaneId);
-    } else {
-      t = updateLeaf(
-        t,
-        srcPaneId,
-        (p) => p.copyWith(
-          tabs: remaining,
-          active: _activeAfter(src, tabId, remaining),
-        ),
-      );
-    }
-    _setActiveTree(t);
-    _setFocusedPane(projectId, targetPaneId);
-    _ensureFocusValid();
-    notifyListeners();
-  }
-
-  /// Qual aba fica ativa numa folha após [removedId] sair (mantém a ativa se não
-  /// for a removida; senão pega a anterior).
-  String _activeAfter(LeafPane leaf, String removedId, List<String> remaining) {
-    if (leaf.active != removedId) return leaf.active;
-    final idx = leaf.tabs.indexOf(removedId);
-    return remaining[(idx - 1).clamp(0, remaining.length - 1)];
   }
 
   /// Preenche uma pane vazia: troca o placeholder por um agente ou terminal.
@@ -1180,86 +1079,61 @@ class CockpitViewModel extends ChangeNotifier {
     String subRelative, {
     bool terminal = false,
   }) {
-    final tree = _activeTree;
-    if (tree == null) return;
+    final project = selectedProject;
+    if (project == null) return;
     final s = _spawn(subRelative, terminal: terminal);
-    _setActiveTree(
-      updateLeaf(tree, paneId, (p) {
-        final tabs = p.tabs.map((t) => t == emptyId ? s.id : t).toList();
-        return p.copyWith(tabs: tabs, active: s.id);
-      }),
+    final applied = _applyWorkspaceCommand(
+      (document) => WorkspaceDocumentCommands.fillEmpty(
+        document,
+        paneId: paneId,
+        emptyTabId: emptyId,
+        replacement: _sessionToWorkspaceTab(s, project),
+      ),
     );
-    _disposeSession(emptyId);
-    _setFocusedPane(_selectedProjectId!, paneId);
-    notifyListeners();
+    if (!applied) _disposeSession(s.id);
   }
 
   void closeTab(String paneId, String agentId) {
     final projectId = _selectedProjectId;
-    final tree = _activeTree;
-    if (projectId == null || tree == null) return;
-    final leaf = findLeaf(tree, paneId);
-    if (leaf == null) return;
-    final tabs = leaf.tabs.where((t) => t != agentId).toList();
-    if (tabs.isEmpty) {
-      if (leaves(tree).length == 1) {
-        final empty = _makeEmpty(projectId);
-        _setActiveTree(
-          updateLeaf(
-            tree,
-            paneId,
-            (p) => p.copyWith(tabs: [empty.id], active: empty.id),
-          ),
-        );
-      } else {
-        _setActiveTree(removeLeaf(tree, paneId));
-      }
-    } else {
-      var active = leaf.active;
-      if (active == agentId) {
-        final idx = leaf.tabs.indexOf(agentId);
-        active = tabs[(idx - 1).clamp(0, tabs.length - 1)];
-      }
-      _setActiveTree(
-        updateLeaf(tree, paneId, (p) => p.copyWith(tabs: tabs, active: active)),
-      );
+    if (projectId == null) return;
+    final empty = _emptyTabDescriptor(projectId);
+    final applied = _applyWorkspaceCommand(
+      (document) => WorkspaceDocumentCommands.closeTab(
+        document,
+        paneId: paneId,
+        tabId: agentId,
+        emptyTab: empty,
+      ),
+    );
+    if (!applied || !(_activeDocument?.tabs.containsKey(empty.id) ?? false)) {
+      _disposeSession(empty.id);
     }
-    _disposeSession(agentId);
-    _ensureFocusValid();
-    notifyListeners();
   }
 
   void closePane(String paneId) {
     final projectId = _selectedProjectId;
-    final tree = _activeTree;
-    if (projectId == null || tree == null) return;
-    final leaf = findLeaf(tree, paneId);
-    if (leaf == null) return;
-    final ids = [...leaf.tabs];
-    if (leaves(tree).length == 1) {
-      final empty = _makeEmpty(projectId);
-      _setActiveTree(
-        updateLeaf(
-          tree,
-          paneId,
-          (p) => p.copyWith(tabs: [empty.id], active: empty.id),
-        ),
-      );
-    } else {
-      _setActiveTree(removeLeaf(tree, paneId));
+    if (projectId == null) return;
+    final empty = _emptyTabDescriptor(projectId);
+    final applied = _applyWorkspaceCommand(
+      (document) => WorkspaceDocumentCommands.closePane(
+        document,
+        paneId: paneId,
+        emptyTab: empty,
+      ),
+    );
+    if (!applied || !(_activeDocument?.tabs.containsKey(empty.id) ?? false)) {
+      _disposeSession(empty.id);
     }
-    for (final id in ids) {
-      _disposeSession(id);
-    }
-    _ensureFocusValid();
-    notifyListeners();
   }
 
   void resizeSplit(String splitId, double frac) {
-    final tree = _activeTree;
-    if (tree == null) return;
-    _setActiveTree(setFrac(tree, splitId, frac.clamp(0.16, 0.84)));
-    notifyListeners();
+    _applyWorkspaceCommand(
+      (document) => WorkspaceDocumentCommands.resizeSplit(
+        document,
+        splitId: splitId,
+        frac: frac,
+      ),
+    );
   }
 
   void toggleRail() {
@@ -1292,23 +1166,23 @@ class CockpitViewModel extends ChangeNotifier {
     _documents[document.projectId] = document.ensureFocusValid();
   }
 
-  void _setActiveTree(PaneNode tree) {
-    final id = _selectedProjectId;
-    if (id != null) _setProjectTree(id, tree);
-  }
-
-  void _setProjectTree(String projectId, PaneNode tree) {
-    final document = _documents[projectId];
-    if (document == null) return;
-    _setDocument(
-      _documentWithLiveTabs(projectId, document.copyWith(root: tree)),
-    );
-  }
-
-  void _setFocusedPane(String projectId, String paneId) {
-    final document = _documents[projectId];
-    if (document == null) return;
-    _setDocument(document.copyWith(focusedPaneId: paneId));
+  bool _applyWorkspaceCommand(
+    WorkspaceCommandResult Function(WorkspaceDocument document) command,
+  ) {
+    final document = _activeDocument;
+    if (document == null) return false;
+    final result = command(document);
+    final changed =
+        !identical(result.document, document) ||
+        result.disposeTabIds.isNotEmpty;
+    if (!changed) return false;
+    _setDocument(result.document);
+    for (final id in result.disposeTabIds) {
+      _disposeSession(id);
+    }
+    _clearFocusedNotification();
+    notifyListeners();
+    return true;
   }
 
   void _initDocument(String projectId) {
@@ -1929,14 +1803,6 @@ class CockpitViewModel extends ChangeNotifier {
 
     if (switched) await _activateProject(_selectedProjectId!);
     if (switched || !listEquals(oldSig, newSig)) notifyListeners();
-  }
-
-  void _ensureFocusValid() {
-    final id = _selectedProjectId;
-    if (id == null) return;
-    final document = _documents[id];
-    if (document == null) return;
-    _setDocument(document);
   }
 
   String _basename(String path) {

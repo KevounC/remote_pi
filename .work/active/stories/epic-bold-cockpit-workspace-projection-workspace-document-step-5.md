@@ -1,14 +1,14 @@
 ---
 id: epic-bold-cockpit-workspace-projection-workspace-document-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-workspace-document
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Route all `CockpitViewModel` pane mutations through document commands
@@ -66,12 +66,19 @@ void _applyWorkspaceCommand(WorkspaceCommandResult Function(WorkspaceDocument do
 - Do not alter UI widgets except imports if needed.
 
 ## Acceptance Criteria
-- [ ] `CockpitViewModel` no longer calls `updateLeaf`, `splitLeaf`, `removeLeaf`, `reorderTabs`, or `setFrac` directly in public pane/tab mutation methods.
-- [ ] Existing UI behavior for split, close pane, close tab, drag-to-pane, drag-to-split, drag-to-index, resize, tab select, empty fill, and file preview replacement is covered by ViewModel tests or existing widget/domain tests.
-- [ ] Commands remain pure and domain-only; live `PaneItem.dispose()` calls remain outside the domain layer.
-- [ ] Debounced layout save still fires after structural mutations and not during restore.
-- [ ] `flutter test test/domain/workspace_document_commands_test.dart test/ui/cockpit_viewmodel_workspace_commands_test.dart` passes.
-- [ ] `flutter analyze` passes.
+- [x] `CockpitViewModel` no longer calls `updateLeaf`, `splitLeaf`, `removeLeaf`, `reorderTabs`, or `setFrac` directly in public pane/tab mutation methods.
+- [x] Existing UI behavior for split, close pane, close tab, drag-to-pane, drag-to-split, drag-to-index, resize, tab select, empty fill, and file preview replacement is covered by ViewModel tests or existing widget/domain tests.
+- [x] Commands remain pure and domain-only; live `PaneItem.dispose()` calls remain outside the domain layer.
+- [x] Debounced layout save still fires after structural mutations and not during restore.
+- [x] `flutter test test/domain/workspace_document_commands_test.dart test/ui/cockpit_viewmodel_workspace_commands_test.dart` passes.
+- [x] `flutter analyze` passes.
 
 ## Rollback
 Restore the direct ViewModel mutation bodies from before this step and keep the pure command layer unused while preserving Steps 1-4.
+
+## Implementation notes
+- Routed `focus`, tab selection, tab creation/replacement, split, drag/drop/index moves, close tab/pane, resize, empty fill, and `openFile` preview replacement through `_applyWorkspaceCommand`.
+- Added command helpers for focus and active-tab replacement so ViewModel code no longer performs pane tree surgery directly.
+- `_applyWorkspaceCommand` applies the pure document result, disposes returned tab ids after document update, clears the focused notification, and notifies/schedules save once per applied mutation.
+- Added `cockpit_viewmodel_workspace_commands_test.dart` coverage for command purity, notification clearing, session disposal, pane layout/focus behavior, debounced save, and file preview replacement.
+- Verification: `flutter pub get --offline`, `flutter analyze`, and `flutter test test/domain/workspace_document_commands_test.dart test/ui/cockpit_viewmodel_workspace_commands_test.dart test/ui/cockpit_viewmodel_workspace_document_test.dart` passed with `PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache`.
