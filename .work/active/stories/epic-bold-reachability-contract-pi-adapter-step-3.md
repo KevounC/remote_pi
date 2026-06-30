@@ -1,14 +1,14 @@
 ---
 id: epic-bold-reachability-contract-pi-adapter-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract-pi-adapter
 depends_on: [epic-bold-reachability-contract-pi-adapter-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Consume shared backoff policy in MeshNode relay reconnect
@@ -50,3 +50,20 @@ outage.
 ## Rollback
 Remove projection imports and restore `RELAY_RECONNECT_BACKOFFS_MS` and local
 indexing logic.
+
+## Implementation notes
+- Replaced `MeshNode`-local reconnect backoff constant and indexing in
+  `pi-extension/src/session/mesh_node.ts` with shared reachability contract values.
+  - Added imports for `REACHABILITY_BACKOFF_MS` and `reachabilityBackoffMs` from
+    `pi-extension/src/reachability/reachability_contract`.
+  - Removed `RELAY_RECONNECT_BACKOFFS_MS` static constant.
+  - Replaced `_scheduleRelayReconnect()` delay calculation with
+    `reachabilityBackoffMs(this.relayBackoffIdx)` while keeping all reconnect
+    wiring, flags, and detach ordering intact.
+- Added `pi-extension/src/session/mesh_node.test.ts` to lock behavior:
+  - validates relay reconnect schedule delays remain
+    `1_000, 2_000, 5_000, 10_000, 30_000` with cap.
+  - validates successful bridge rebuild resets `relayBackoffIdx` to `0`.
+- Verification:
+  - `corepack pnpm typecheck`
+  - `corepack pnpm exec vitest run src/reachability src/session/mesh_node`

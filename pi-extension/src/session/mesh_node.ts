@@ -9,6 +9,10 @@ import { getOrCreateEd25519Keypair } from "../pairing/storage.js";
 import type { Ed25519Keypair } from "./../pairing/crypto.js";
 import { roomIdFor } from "../rooms.js";
 import { toWebSocketUrl } from "../config.js";
+import {
+  REACHABILITY_BACKOFF_MS,
+  reachabilityBackoffMs,
+} from "../reachability/reachability_contract.js";
 
 /**
  * MeshNode — the single composition point for "join the agent mesh".
@@ -97,7 +101,6 @@ export class MeshNode {
    *  owns its own reconnect upstream, so these stay idle there. */
   private relayReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private relayBackoffIdx = 0;
-  private static readonly RELAY_RECONNECT_BACKOFFS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 
   constructor(opts: MeshNodeOptions) {
     this.log = opts.log ?? ((): void => {});
@@ -256,8 +259,10 @@ export class MeshNode {
   private _scheduleRelayReconnect(): void {
     if (this.relayReconnectTimer) return;                       // already pending
     if (!this.bridgeParams || this.bridgeParams.injectedRelay) return;  // self-managed only
-    const backoffs = MeshNode.RELAY_RECONNECT_BACKOFFS_MS;
-    const delay = backoffs[Math.min(this.relayBackoffIdx, backoffs.length - 1)]!;
+    const backoffPolicy = REACHABILITY_BACKOFF_MS;
+    const delay = reachabilityBackoffMs(
+      Math.min(this.relayBackoffIdx, backoffPolicy.length - 1),
+    );
     const timer = setTimeout(() => {
       this.relayReconnectTimer = null;
       void this._attemptRelayReconnect();
