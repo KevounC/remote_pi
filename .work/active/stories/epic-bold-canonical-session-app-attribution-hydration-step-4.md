@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-app-attribution-hydration-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-canonical-session-app-attribution-hydration
 depends_on: [epic-bold-canonical-session-app-attribution-hydration-step-3]
@@ -78,3 +78,32 @@ Revert `_applyHistory` to the current diff-to-desired implementation while keepi
 - Idempotency guarantee: duplicate history event ids are deduped before projection; identical replay produces no additional Hive writes, while partial same-session replay preserves older local rows and local pending submissions.
 - Test coverage: focused direct `_applyHistory` foreign-session bypass regression; same-session duplicate replay/no-churn; replay missing older rows; pending + authoritative echo; late confirm after timeout; tool request/result collapse; compaction replay; and working/streaming convergence false after terminal live and replay paths available in the current event model.
 - Deferred scope: `SessionHistoryEvent` currently has no explicit done/error/cancel history variants; replay convergence is covered through `AgentMessageEvt` and `CompactionEvt`, while live done/error/cancel convergence remains covered by sync tests.
+
+## Review
+
+Approved (2026-06-30) with deeper verification — HIGH-risk hydration reducer.
+Independently re-ran: `flutter test test/data/sync/sync_service_test.dart` →
+55/55; `flutter test test/domain/transcript/` → 11/11. `flutter analyze` clean
+in owned files (only known `axisAlignment` info).
+
+Read the reducer directly and confirmed each load-bearing invariant:
+- **Foreign-session drop**: `if (h.sessionId != ref.sessionId) return;` defensive
+  check present (defends direct/bypassed call sites, not just upstream gating).
+- **Idempotency / no box churn**: `_appendTranscriptEvents` dedupes by
+  `event.eventId` via `_transcriptEventIds.add(...)`; on duplicate `changed`
+  stays false → no `_writeProjectionDiff` → identical replay produces zero Hive
+  writes. Genuinely implemented, not just tested.
+- **Pending preservation**: `_seedExistingTranscriptEvents` re-reads the box and
+  preserves `pending` user rows as `UserMessageSubmitted` (late authoritative
+  confirm wins).
+- **Omitted-rows preservation**: additive append/dedupe never deletes rows absent
+  from a replay payload.
+- **High-water mark**: `sessionStartedAt` compared as ordering metadata, not
+  identity — stale replays rejected.
+
+Test coverage directly maps to every acceptance criterion (foreign bypass,
+idempotent identical replay/no-churn, omitted older rows, pending+echo, late
+confirm, compaction replay, convergence). Commit `4d294c4` scoped to owned
+app files; no collision with parallel Wave-5 bundles (correctly left others'
+unstaged). Deferred scope (no explicit done/error/cancel `SessionHistoryEvent`
+variants) is a legitimate event-model limitation, clearly recorded.
