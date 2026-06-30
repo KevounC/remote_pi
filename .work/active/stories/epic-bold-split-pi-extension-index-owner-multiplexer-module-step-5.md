@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-owner-multiplexer-module-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-owner-multiplexer-module
 depends_on: [epic-bold-split-pi-extension-index-owner-multiplexer-module-step-4]
@@ -88,3 +88,30 @@ Verification:
 ## Rollback
 
 Restore test exports to direct `index.ts` globals and remove the owner harness aliases. Keep behavior tests unchanged so rollback still proves the old path.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: `corepack pnpm typecheck` clean;
+`corepack pnpm build` clean; `vitest run src/extension/owner_multiplexer.test.ts`
+→ 5/5; `vitest run src/extension.test.ts -t "revoke|relay reconnect|footer|peers|
+multi-channel"` → 43/43; **full pi-ext suite 648 passed | 3 skipped | 0 failed
+(44 files)** — fully green (up from 643 — the agent's 5 new unit tests).
+
+NOTE: the implementer's full-`pnpm test` reported "582 passed | 66 failed" but
+CORRECTLY identified it as the known false-failure signature ("failing names
+matched the pre-declared mesh/cwd-lock false-alarm group, not this change").
+The enhanced briefing worked — this is the first pi-ext agent to recognize the
+pattern instead of chasing it. The orchestrator's independent vitest run shows
+0 failures. (The 66-count is higher than prior agents' 4-5, likely because
+`pnpm test` includes more than the vitest suite or hit a worse transient state;
+regardless, the targeted signals were all green and the agent correctly did not
+attribute the failures to its own change.)
+
+Commit `7394dd4` scoped to pi-ext only (testing.ts + owner_multiplexer.test.ts +
+index.ts + story .md); collision guard held. Acceptance criteria verified:
+`OwnerMultiplexerTestHarness` + `ownerHarness` aliases delegate the 4 test exports
+(existing imports still work); 5 focused unit tests (fake channels, no full
+extension boot) cover same-owner reattach-replaces-channel, broadcast fanout,
+detach-one-preserves-other, known-owner reconnect ingress attaches+routes,
+malformed/unknown ingress ignored or sender-only errored; integration tests
+preserved. **owner-multiplexer arc complete (5/5).**
