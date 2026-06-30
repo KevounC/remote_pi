@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-composition-root-step-3
 kind: story
-stage: review
+stage: implementing
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-composition-root
 depends_on: [epic-bold-split-pi-extension-index-composition-root-step-2]
@@ -79,3 +79,16 @@ Inline adapter wiring back into `index.ts` and remove `legacy_ports.ts`; no prot
 - Tests added: none; this is a type-level wrapper seam.
 - Discrepancies from design: the existing `index.ts` still contains legacy globals and has not yet been rewired through the new adapter in this story; the adapter seam is grouped by future module ownership so sibling extraction stories can replace one port at a time without importing god-file globals.
 - Adjacent issues parked: none.
+
+## Review bounce (2026-06-29)
+
+**Verdict**: Request changes
+
+**Blockers**:
+- `pi-extension/src/index.ts:1405`: the default extension factory still owns the inline god-file wiring and never imports or calls `createLegacyIndexPorts` / constructs a `LegacyIndexDeps` object (repo grep found no `createLegacyIndexPorts` or `LegacyIndexDeps` usage outside `legacy_ports.ts`). This fails the acceptance criterion that the adapter dependency object is the composition-root wiring point for today's globals; the new adapters exist only as an unused type-level seam.
+- Acceptance criteria check: four adapters satisfy `RemotePiRuntimePorts` — pass by `legacy_ports.ts:63` and typecheck; dependency object as the only composition-root wiring point for god-file globals — fail because no concrete index/composition-root wiring exists; pairing/reconnect/session sync/app actions/commands still route through existing implementations — pass only because runtime behavior is unchanged and the adapters are unused; `corepack pnpm typecheck` — pass.
+
+**Verification run**:
+- `cd /home/agent/forks/remote_pi/pi-extension && corepack pnpm typecheck` — passed (`tsc --noEmit`; pnpm warned about unreadable `/home/agent/.npmrc` and ignored legacy package `pnpm` field).
+- `cd /home/agent/forks/remote_pi/pi-extension && corepack pnpm test` — failed, apparently pre-existing/environmental UDS issues: 5 files failed, 98 tests failed, 522 passed, 3 skipped; representative failures are `listen EPERM` on `/tmp/claude/.../supervisor.sock`, cwd-lock first-acquire expectations false, and leader-election failures under `/tmp/claude/.../broker.sock`.
+- `cd /home/agent/forks/remote_pi/pi-extension && corepack pnpm build` — passed (`tsc`; same pnpm warnings).
