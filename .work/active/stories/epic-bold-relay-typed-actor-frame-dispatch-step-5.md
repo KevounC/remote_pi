@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-frame-dispatch-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-frame-dispatch
 depends_on: [epic-bold-relay-typed-actor-frame-dispatch-step-4]
@@ -97,3 +97,25 @@ Reintroduce the raw string match in `handle_peer` while keeping the actor shell 
 - Test counts: `cargo test` passed 148 relay tests total (93 lib, 3 integration, 13 mesh, 8 pi_forward, 10 presence, 2 protocol parity, 19 rooms; 0 doctests). Full verification also passed `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo build` from `relay/`.
 - Discrepancies from design: handler methods were already extracted into `handlers/control.rs` by the landed control-handlers work; this implementation respected the explicit collision guard not to edit that file and focused on final-route coverage and verification.
 - Adjacent issues parked: none.
+
+## Review
+
+Approved (2026-06-30) with HIGH-risk final-switch-over verification. Independently
+re-ran: relay `cargo fmt --check` clean; `cargo clippy -- -D warnings` clean;
+`cargo test` 148 passed / 0 failed (93 lib + 3 integ + 13 mesh + 8 pi_forward +
+10 presence + 2 parity + 19 rooms; +4 new coverage tests). Commit `4494197` scoped
+to connection_actor.rs + story .md; relay-only, no generated/control.rs touched
+(collision guard held — the exhaustive per-variant match already lived in
+control.rs from the done control-handlers epic; this step correctly focused on
+final-route coverage + switch-over verification rather than re-editing that file).
+
+Raw-switch removal verified: `peer.rs` has NO `frame.get("type")` control switch
+and no stringly-typed relay-control routing — the socket loop only decodes via
+`decode_relay_frame` and calls `actor.dispatch(frame)`. Exhaustive coverage test
+`generated_control_dispatch_coverage_tracks_all_variants` compares constructed
+representative RelayControlFrame variants against `RELAY_CONTROL_FRAME_TYPES` —
+adding a generated variant without updating coverage now fails tests, and the
+production match remains Rust-exhaustive. Malformed-control fail-fast confirmed
+(rejects at decode_relay_frame before dispatch; valid `peers: []` still decodes).
+Dedup/rate-limit/merge-patch semantics preserved (existing presence/rooms/meta
+tests green). frame-dispatch arc complete (5/5).
