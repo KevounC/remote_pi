@@ -191,6 +191,7 @@ class SyncService extends Service {
           text: text,
           image: image,
         ),
+        preserveTurnState: isSteer,
       );
       if (!isSteer) {
         _setWorking(true, preview: _preview(text, image), replyTo: id);
@@ -444,6 +445,7 @@ class SyncService extends Service {
       _idToSeq.clear();
       _nextSeq = 0;
       _indexLoaded = true;
+      _clearTranscriptEventBuffer();
     });
   }
 
@@ -600,6 +602,8 @@ class SyncService extends Service {
                 : MessageImage(data: image.data, mime: image.mime),
             streamingBehavior: streamingBehavior,
           ),
+          preserveTurnState:
+              streamingBehavior == UserMessageStreamingBehavior.steer,
         );
         // Steering input should not start/replace the working turn bubble.
         if (streamingBehavior == UserMessageStreamingBehavior.steer) {
@@ -640,7 +644,7 @@ class SyncService extends Service {
             ts: DateTime.now(),
             toolCallId: toolCallId,
             tool: tool,
-            args: args,
+            args: _objectMap(args),
           ),
         );
 
@@ -756,12 +760,57 @@ class SyncService extends Service {
     return 'compat:$epk:$_activeRoomId';
   }
 
-  Future<void> _appendTranscriptEvent(TranscriptEvent event) =>
-      _appendTranscriptEvents(<TranscriptEvent>[event]);
+  Future<void> _appendTranscriptEvent(
+    TranscriptEvent event, {
+    bool preserveTurnState = false,
+  }) => _appendTranscriptEvents(<TranscriptEvent>[
+    event,
+  ], preserveTurnState: preserveTurnState);
 
-  Future<void> _appendTranscriptEvents(Iterable<TranscriptEvent> events) async {
+  Future<void> _appendTranscriptEvents(
+    Iterable<TranscriptEvent> events, {
+    bool preserveTurnState = false,
+  }) async {
     final sessionId = _activeTranscriptSessionId();
     var changed = false;
+    for (final event in events) {
+      if (event.sessionId != sessionId) continue;
+      if (_transcriptEventIds.add(event.eventId)) {
+        _transcriptEvents.add(event);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    final projection = deriveTranscriptProjection(
+      sessionId: sessionId,
+      events: _transcriptEvents,
+    );
+    if (!preserveTurnState) {
+      _emitStreaming(projection.streaming);
+      final turn = projection.turn;
+      _setWorking(
+        turn.status == TranscriptTurnStatus.working ||
+            turn.status == TranscriptTurnStatus.streaming,
+        replyTo: turn.replyTo,
+      );
+    }
+    await _writeProjectionDiff(projection);
+  }
+
+  Future<void> _replaceHistoryTranscriptEvents(
+    Iterable<TranscriptEvent> events,
+  ) async {
+    final sessionId = _activeTranscriptSessionId();
+    var changed = false;
+    _transcriptEvents.removeWhere((event) {
+      final remove =
+          event.sessionId == sessionId && event.eventId.startsWith('history:');
+      if (remove) {
+        _transcriptEventIds.remove(event.eventId);
+        changed = true;
+      }
+      return remove;
+    });
     for (final event in events) {
       if (event.sessionId != sessionId) continue;
       if (_transcriptEventIds.add(event.eventId)) {
@@ -784,6 +833,11 @@ class SyncService extends Service {
     await _writeProjectionDiff(projection);
   }
 
+  void _clearTranscriptEventBuffer() {
+    _transcriptEvents.clear();
+    _transcriptEventIds.clear();
+  }
+
   Future<void> _writeProjectionDiff(TranscriptProjection projection) async {
     final epk = _activeEpk;
     if (epk == null) return;
@@ -803,10 +857,10 @@ class SyncService extends Service {
       for (var i = 0; i < desired.length; i++) {
         final newJson = desired[i].toJson();
         final curRaw = box.get(i);
-        final curNorm = curRaw == null
+        final curJson = curRaw == null
             ? null
-            : jsonEncode(MessageRecord.fromJson(_coerce(curRaw)).toJson());
-        if (curNorm != jsonEncode(newJson)) {
+            : MessageRecord.fromJson(_coerce(curRaw)).toJson();
+        if (curJson == null || !_sameMessageRecordJson(curJson, newJson)) {
           await box.put(i, newJson);
         }
       }
@@ -878,7 +932,7 @@ class SyncService extends Service {
 
     final sessionId = _activeTranscriptSessionId();
     await _seedPendingTranscriptEvents(epk, room, sessionId);
-    await _appendTranscriptEvents(
+    await _replaceHistoryTranscriptEvents(
       _historyToTranscriptEvents(h.events, sessionId),
     );
 
@@ -955,7 +1009,7 @@ class SyncService extends Service {
             ts: ts,
             toolCallId: toolCallId,
             tool: tool,
-            args: args,
+            args: _objectMap(args),
           );
         case ToolResultEvt(:final toolCallId, :final result, :final error):
           yield ToolFinished(
@@ -1174,6 +1228,29 @@ class SyncService extends Service {
     if (raw is Map<String, dynamic>) return raw;
     if (raw is Map) return raw.cast<String, dynamic>();
     return <String, dynamic>{};
+  }
+
+  static bool _sameMessageRecordJson(
+    Map<String, dynamic> left,
+    Map<String, dynamic> right,
+  ) {
+    final normalizedLeft = Map<String, dynamic>.of(left)..remove('ts');
+    final normalizedRight = Map<String, dynamic>.of(right)..remove('ts');
+    return jsonEncode(normalizedLeft) == jsonEncode(normalizedRight);
+  }
+
+  static Map<String, Object?> _objectMap(Object? raw) {
+    if (raw == null) return <String, Object?>{};
+    if (raw is Map<String, Object?>) return raw;
+    if (raw is Map) {
+      return raw.map((key, value) {
+        if (key is! String) {
+          throw const FormatException('Tool request args keys must be strings');
+        }
+        return MapEntry(key, value as Object?);
+      });
+    }
+    throw const FormatException('Tool request args must be an object');
   }
 
   static String _preview(String text, MessageImage? image) {

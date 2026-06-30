@@ -980,6 +980,46 @@ void main() {
   );
 
   test(
+    'clearActiveSession clears projection buffer before later replay',
+    () async {
+      final s = await setup();
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-base-buffer',
+          sessionStartedAt: 1000,
+          events: const [UserInputEvt(ts: 1, id: 'base', text: 'base row')],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(messages(s.epk).map((r) => r.id), ['base']);
+
+      await s.sync.clearActiveSession();
+      await _settle();
+      expect(messages(s.epk), isEmpty);
+
+      s.ch.push(
+        SessionHistory(
+          inReplyTo: 'sync-replay-after-clear',
+          sessionStartedAt: 1000,
+          events: const [UserInputEvt(ts: 2, id: 'fresh', text: 'fresh row')],
+          eos: true,
+        ),
+      );
+      await _settle();
+
+      expect(
+        messages(s.epk).map((r) => r.id),
+        ['fresh'],
+        reason: 'pre-clear event-log rows must not be resurrected',
+      );
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
     'clearActiveSession with no-index session accepts replay after clear',
     () async {
       final s = await setup();

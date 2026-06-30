@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Route `SyncService` live writes through the projection seam
@@ -109,4 +109,19 @@ Revert `SyncService` to direct `_upsert` / `_applyHistory` mutation. Projection 
 **Verification run**:
 - `cd /home/agent/forks/remote_pi/app && HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter analyze` exited 1 with only the known-unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802`.
 - `cd /home/agent/forks/remote_pi/app && HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter test test/data/sync/sync_service_test.dart` exited 1: 29 tests passed, 7 failed. The three new efb2fea7 coverage tests ran and passed, so the prior bounce's missing-coverage blocker is addressed, but the required file-level regression suite is still red.
+
+## Implementation notes (rework 2026-06-30)
+- Files changed: `app/lib/data/sync/sync_service.dart`, `app/test/data/sync/sync_service_test.dart`.
+- Tests added: `clearActiveSession clears projection buffer before later replay`, proving pre-clear in-memory projection events do not resurrect after a same-boundary replay.
+- Fixes:
+  - Preserved the active turn target for steer submissions/echoes by letting projection writes update rows without replacing the current in-memory streaming/working state.
+  - Narrowed live and history tool-request `args` through a boundary helper: `null` becomes an empty map, `Map<dynamic, dynamic>` with string keys is accepted/cast, and non-object/non-string-key payloads fail fast with `FormatException`.
+  - Cleared `_transcriptEvents` and `_transcriptEventIds` inside `clearActiveSession()` after the active Hive rows are wiped, preventing later replay from resurrecting cleared rows.
+  - Replaced prior `history:` transcript events on accepted `SessionHistory` replay and ignored derived-row `ts` changes when diffing, preserving no-Hive-churn duplicate replay semantics while allowing same-boundary authoritative replay to replace prior history rows.
+- Discrepancies from design: none for the bounce spec; the extra history replay replacement/diff normalization was required to keep the existing `sync_service_test.dart` suite green after clearing/replay fixes.
+- Adjacent issues parked: none.
+- Verification:
+  - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && FLUTTER=/home/agent/projects/remote_pi/.tools/flutter/bin/flutter && $FLUTTER pub get` completed successfully.
+  - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && FLUTTER=/home/agent/projects/remote_pi/.tools/flutter/bin/flutter && $FLUTTER test test/data/sync/sync_service_test.dart` passed: 37 tests passed.
+  - `cd /home/agent/projects/remote_pi/app && export PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache && FLUTTER=/home/agent/projects/remote_pi/.tools/flutter/bin/flutter && $FLUTTER analyze` exited 1 with only the known-unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802`.
 
