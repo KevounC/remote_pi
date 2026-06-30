@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-projection-derive-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-3]
@@ -90,3 +90,19 @@ Restore `_messageBuffer` as the direct `session_history` input and leave app/coc
 - Environment ceiling: full `extension.test.ts` is not a green signal in this sandbox because Unix domain socket `bind()` is blocked with `EPERM`, causing cwd-lock/mesh setup failures; this matches the UDS-EPERM triage in the task prompt.
 - Discrepancies from design: none for runtime shape; test fixtures that route session-scoped `session_sync`/`user_message` through the router now include the current `session_id` so they exercise the canonical session gate instead of receiving `session_mismatch`.
 - Adjacent issues parked: none.
+
+## Review (2026-06-30, fast-lane; env-ceiling-aware verification)
+
+**Verdict**: Approve — fast-lane advance; orchestrator independently verified (env-aware signal).
+
+**Findings**: none above nit level.
+
+**Verification run (orchestrator)**:
+- `git show --stat 6df733d` — only owned files: `index.ts` (sole writer this wave), `transcript_projection.ts`, `transcript_projection.test.ts`, `extension.test.ts` (transcript-history sections). No collision with other pi-ext agents.
+- Confirmed `_messageBuffer` removed from production state → replaced by `_transcriptEvents: TranscriptEvent[]`; `_buildSessionHistoryMessage` now projects via `projectSessionHistory({sessionId, events, limit})`; `_mapAgentMessagesToEvents` reduced to a legacy adapter shim (`mapLegacyAgentMessagesToTranscriptEvents`); outgoing wire shape preserved (`session_started_at` from `_remoteSession.startedAt`).
+- **Env-aware verification (sandbox blocks UDS bind → EPERM, so full extension.test.ts is not a green signal):**
+  - `corepack pnpm typecheck` — clean.
+  - `corepack pnpm exec vitest run src/session/transcript_projection.test.ts` — 6/6 pass (limit/truncated, image replay, compaction replay, event-id dedupe, session filtering, legacy adaptation).
+  - `corepack pnpm exec vitest run src/extension.test.ts -t "session sync|cumulative transcript event log|session_compact|SDK user message lands|user_message with an image|late owner attach"` — 23/23 pass (all session-sync convergence incl. limit/truncated, image replay, compaction replay, late-attach sync).
+- Agent ran full extension.test.ts once: 25 failures (DOWN from the known 37 baseline — the session-id routing it added FIXED 12 pre-existing failures, broke 0). No transcript-history regression; remaining failures are the documented UDS-EPERM cwd-lock/mesh-setup ceiling + pre-existing fixture drift.
+- Acceptance criteria satisfied: extension session-sync tests pass (via `-t` filter); `_mapAgentMessagesToEvents` retired to a legacy adapter; relay stays opaque (no relay-side session parsing).
