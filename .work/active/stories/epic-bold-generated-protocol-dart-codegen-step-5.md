@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen-step-5
 kind: story
-stage: review
+stage: done
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: [epic-bold-generated-protocol-dart-codegen-step-4]
 tags: [refactor]
@@ -99,3 +99,14 @@ test('generated server type registry matches schema variants', () {
 ## Rollback
 
 Remove the new parity tests and handoff note changes. Runtime generated protocol remains controlled by Step 4.
+
+## Review
+
+Fast-lane approved (2026-06-30). Independently re-ran `flutter test
+test/protocol_codegen/` → 15/15 pass; `flutter analyze` clean in owned files
+(only the known unrelated `axisAlignment` info at input_bar.dart:802). Commit
+`d7443fe` scoped to parity tests + feature/story .md — no collision with the
+parallel app-attribution-hydration-step-4 (transcript_event.dart left
+correctly unstaged). Key acceptance criterion — the feasibility verdict (Dart
+custom generator feasible, no hand-maintained mirror fallback) — documented in
+the parent feature. Deferred relay-control scope recorded.
