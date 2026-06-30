@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-rust-codegen-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-generated-protocol-rust-codegen
 depends_on: [epic-bold-generated-protocol-rust-codegen-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Generate cross-PC and mesh wire types, then add parity checks
@@ -86,11 +86,21 @@ pub struct MeshEnvelopeWire { pub blob: String, pub sig: String }
 
 ## Acceptance Criteria
 
-- [ ] `pi_envelope`, `pi_envelope_in`, generic `AgentEnvelope`, and mesh HTTP wire DTOs are generated from the shared schema/IR.
-- [ ] `pi_forward.rs` and `mesh/types.rs` consume generated wire DTOs or re-export them rather than redefining them by hand.
-- [ ] Cross-PC `body` and app↔Pi `ct` remain opaque to the relay.
-- [ ] Rust parity tests validate relay/cross-PC fixtures and catch omitted generated variants.
-- [ ] `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` pass from `relay/`.
+- [x] `pi_envelope`, `pi_envelope_in`, generic `AgentEnvelope`, and mesh HTTP wire DTOs are generated from the shared schema/IR.
+- [x] `pi_forward.rs` and `mesh/types.rs` consume generated wire DTOs or re-export them rather than redefining them by hand.
+- [x] Cross-PC `body` and app↔Pi `ct` remain opaque to the relay.
+- [x] Rust parity tests validate relay/cross-PC fixtures and catch omitted generated variants.
+- [x] `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` pass from `relay/`.
+
+## Implementation
+
+- Updated `tools/protocol-codegen/` so Rust generation emits the generated `CrossPcFrame` enum, `AgentEnvelope`, `PiEnvelopeFrame`, `PiEnvelopeInFrame`, and mesh HTTP DTOs (`MeshEnvelopeWire`, `MeshPostResponse`, `MeshGetResponse`, `MeshGetQuery`), then regenerated `relay/src/protocol/generated/`.
+- `pi_forward.rs` now deserializes `pi_envelope` through generated cross-PC types and serializes `pi_envelope_in`/transport errors through generated types. `AgentEnvelope.body` stays `serde_json::Value`; body-level `session_id` remains endpoint-owned opaque data and is only forwarded.
+- `mesh/types.rs` re-exports generated mesh wire DTOs while keeping decoded/internal `MeshEnvelope`, `MeshHeader`, and `MeshRecord` handwritten.
+- Preserved peer-wide cross-PC forwarding with `forward_to_peer`; no relay-owned room target is added to `pi_envelope` or `pi_envelope_in` in this slice. Preserved `transport_error` as `_relay` with `re` and `body.type = "transport_error"`.
+- Added `relay/tests/protocol_parity_test.rs` plus `protocol/fixtures/relay/mesh-http.jsonl`. Parity coverage deserializes cross-PC and mesh fixtures through generated Rust types, round-trips representative frames unchanged, and compares cross-PC fixture coverage to `CROSS_PC_TYPES` so omitted generated variants fail.
+- Regen verdict: `--check` passed; deterministic double-run to two temp dirs had empty `diff -ru`; temp output vs `relay/src/protocol/generated` also had empty diff.
+- Verification: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build` passed from `relay/`. `cargo test` ran 131 tests (76 lib, 3 integration, 13 mesh, 8 pi_forward, 10 presence, 2 protocol_parity, 19 rooms; doc tests 0).
 
 ## Risk
 

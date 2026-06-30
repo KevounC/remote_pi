@@ -3,22 +3,22 @@
 //! Pi-A sends a control frame:
 //!
 //! ```jsonc
-//! { "type": "pi_envelope", "to_pc": "<Pi-B-pubkey-b64>", "to_room": "<room>", "envelope": { ... } }
+//! { "type": "pi_envelope", "to_pc": "<Pi-B-pubkey-b64>", "envelope": { ... } }
 //! ```
 //!
 //! The relay authenticates Pi-A via the existing challenge-response (so we
 //! already trust `sender_peer_id` here), looks up the `mesh_versions` blob
 //! that lists Pi-A and confirms Pi-B is in the same Owner's member list, then
-//! forwards to Pi-B's addressed room as:
+//! forwards to all live Pi-B connections as:
 //!
 //! ```jsonc
-//! { "type": "pi_envelope_in", "from_pc": "<Pi-A-pubkey>", "to_room": "<room>", "envelope": <verbatim> }
+//! { "type": "pi_envelope_in", "from_pc": "<Pi-A-pubkey>", "envelope": <verbatim> }
 //! ```
 //!
-//! Cross-PC data-plane forwarding is always room-targeted by relay-owned
-//! `(to_pc, to_room)` metadata. Any `session_id` inside `ct`, room metadata, or
-//! the generic `AgentEnvelope.body` is endpoint-owned opaque data: this module
-//! does not parse it, derive targets from it, log it, or use it as a metric key.
+//! Cross-PC data-plane forwarding is peer-wide in this slice. Any `session_id`
+//! inside `ct`, room metadata, or the generic `AgentEnvelope.body` is
+//! endpoint-owned opaque data: this module does not parse it, derive targets
+//! from it, log it, or use it as a metric key.
 //!
 //! Failures don't use a custom error frame — the relay synthesizes an envelope
 //! with `body.type = "transport_error"` (per the plan's ACK protocol section),
@@ -35,6 +35,7 @@ use tracing::warn;
 
 use crate::mesh::{MeshStore, owner_pk_hash, verify_envelope};
 use crate::peers::registry::PeerRegistry;
+use crate::protocol::generated::cross_pc::{AgentEnvelope, CrossPcFrame, PiEnvelopeInFrame};
 
 /// Time-to-live for a positive membership lookup. The plan calls for 60 s.
 /// Negative lookups are NOT cached (so adding a Pi to a mesh blob takes
@@ -161,47 +162,54 @@ pub async fn handle_pi_envelope(
     mesh: &MeshStore,
     cache: &MeshAuthCache,
 ) -> PiForwardResult {
-    let to_pc = frame.get("to_pc").and_then(|v| v.as_str());
-    let to_room = frame.get("to_room").and_then(|v| v.as_str());
-    let envelope = frame.get("envelope");
-
-    let (to_pc, to_room, envelope) = match (to_pc, to_room, envelope) {
-        (Some(pc), Some(room), Some(e)) if !pc.is_empty() && !room.is_empty() && e.is_object() => {
-            (pc, room, e)
-        }
+    let parsed = match serde_json::from_value::<CrossPcFrame>(frame.clone()) {
+        Ok(CrossPcFrame::PiEnvelope(frame)) if !frame.to_pc.is_empty() => frame,
         _ => {
-            return PiForwardResult::TransportError(make_transport_error(
+            return PiForwardResult::TransportError(make_transport_error_from_raw(
                 frame.get("envelope"),
                 "bad_envelope",
             ));
         }
     };
 
-    if !cache.is_authorized(sender_peer_id, to_pc, mesh) {
-        return PiForwardResult::TransportError(make_transport_error(
-            Some(envelope),
+    if !cache.is_authorized(sender_peer_id, &parsed.to_pc, mesh) {
+        return PiForwardResult::TransportError(make_transport_error_from_agent(
+            Some(&parsed.envelope),
             "not_authorized",
         ));
     }
 
-    let outbound = serde_json::json!({
-        "type": "pi_envelope_in",
-        "from_pc": sender_peer_id,
-        "to_room": to_room,
-        "envelope": envelope, // verbatim
-    });
-    let msg = Message::Text(outbound.to_string());
+    let msg = make_pi_envelope_in(sender_peer_id, parsed.envelope.clone());
 
-    if registry.forward_to_room(to_pc, to_room, msg) {
+    if registry.forward_to_peer(&parsed.to_pc, msg) {
         PiForwardResult::Forwarded
     } else {
-        PiForwardResult::TransportError(make_transport_error(Some(envelope), "offline"))
+        PiForwardResult::TransportError(make_transport_error_from_agent(
+            Some(&parsed.envelope),
+            "offline",
+        ))
     }
+}
+
+fn make_pi_envelope_in(from_pc: &str, envelope: AgentEnvelope) -> Message {
+    let frame = CrossPcFrame::PiEnvelopeIn(PiEnvelopeInFrame {
+        from_pc: from_pc.to_string(),
+        envelope,
+    });
+    Message::Text(serde_json::to_string(&frame).expect("generated pi_envelope_in must serialize"))
 }
 
 /// Builds a `pi_envelope_in` frame whose inner envelope carries
 /// `body.type = "transport_error"`, correlated to the original via `re`.
-fn make_transport_error(envelope: Option<&serde_json::Value>, reason: &str) -> Message {
+fn make_transport_error_from_agent(envelope: Option<&AgentEnvelope>, reason: &str) -> Message {
+    let (re, to_addr) = match envelope {
+        Some(envelope) => (Some(envelope.id.clone()), envelope.from.clone()),
+        None => (None, "_unknown".to_string()),
+    };
+    make_transport_error(re, to_addr, reason)
+}
+
+fn make_transport_error_from_raw(envelope: Option<&serde_json::Value>, reason: &str) -> Message {
     let (re, to_addr) = match envelope {
         Some(e) => (
             e.get("id").and_then(|v| v.as_str()).map(String::from),
@@ -212,23 +220,18 @@ fn make_transport_error(envelope: Option<&serde_json::Value>, reason: &str) -> M
         ),
         None => (None, "_unknown".to_string()),
     };
+    make_transport_error(re, to_addr, reason)
+}
 
-    let new_id = make_relay_envelope_id();
-
-    let err_envelope = serde_json::json!({
-        "from": "_relay",
-        "to": to_addr,
-        "id": new_id,
-        "re": re,
-        "body": { "type": "transport_error", "reason": reason },
-    });
-
-    let frame = serde_json::json!({
-        "type": "pi_envelope_in",
-        "from_pc": "_relay",
-        "envelope": err_envelope,
-    });
-    Message::Text(frame.to_string())
+fn make_transport_error(re: Option<String>, to_addr: String, reason: &str) -> Message {
+    let err_envelope = AgentEnvelope {
+        from: "_relay".to_string(),
+        to: serde_json::Value::String(to_addr),
+        id: make_relay_envelope_id(),
+        re,
+        body: serde_json::json!({ "type": "transport_error", "reason": reason }),
+    };
+    make_pi_envelope_in("_relay", err_envelope)
 }
 
 fn make_relay_envelope_id() -> String {
@@ -445,7 +448,6 @@ mod tests {
         let frame = serde_json::json!({
             "type": "pi_envelope",
             "to_pc": "pi_b",
-            "to_room": "main",
             "envelope": {
                 "from": "a:sess",
                 "to": "b:agent",
@@ -479,7 +481,6 @@ mod tests {
         serde_json::json!({
             "type": "pi_envelope",
             "to_pc": "pi_b",
-            "to_room": "main",
             "envelope": {
                 "from": "a:sess",
                 "to": "b:agent",
@@ -517,20 +518,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bad_envelope_when_missing_to_room() {
-        let mut frame = valid_frame();
-        frame.as_object_mut().unwrap().remove("to_room");
-        assert_eq!(transport_error_reason(frame).await, "bad_envelope");
-    }
-
-    #[tokio::test]
-    async fn bad_envelope_when_to_room_is_empty() {
-        let mut frame = valid_frame();
-        frame["to_room"] = serde_json::Value::String(String::new());
-        assert_eq!(transport_error_reason(frame).await, "bad_envelope");
-    }
-
-    #[tokio::test]
     async fn bad_envelope_when_envelope_is_not_object() {
         let mut frame = valid_frame();
         frame["envelope"] = serde_json::Value::String("not-an-envelope".to_string());
@@ -538,13 +525,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn valid_room_target_reaches_authorization_without_reading_body_session_id() {
+    async fn valid_frame_reaches_authorization_without_reading_body_session_id() {
         let frame = valid_frame();
         assert_eq!(transport_error_reason(frame).await, "not_authorized");
     }
 
     #[tokio::test]
-    async fn authorized_forward_targets_only_to_room() {
+    async fn authorized_forward_targets_all_live_peer_rooms() {
         let registry = make_registry();
         let (tx_main, mut rx_main) = tokio::sync::mpsc::unbounded_channel::<Message>();
         let (tx_work, mut rx_work) = tokio::sync::mpsc::unbounded_channel::<Message>();
@@ -585,24 +572,27 @@ mod tests {
         let cache = MeshAuthCache::new();
         let owner = make_owner_key();
         write_owner_blob(&store, &owner, &["pi_a", "pi_b"], 1);
-        let mut frame = valid_frame();
-        frame["to_room"] = serde_json::Value::String("work".to_string());
+        let frame = valid_frame();
 
         match handle_pi_envelope("pi_a", &frame, &registry, &store, &cache).await {
             PiForwardResult::Forwarded => {}
-            PiForwardResult::TransportError(_) => panic!("authorized room target should forward"),
+            PiForwardResult::TransportError(_) => {
+                panic!("authorized peer-wide forward should deliver")
+            }
         }
 
-        assert!(
-            rx_main.try_recv().is_err(),
-            "main room must not receive work target"
-        );
-        let Message::Text(text) = rx_work.try_recv().unwrap() else {
-            panic!("forwarded message must be text");
-        };
-        let forwarded: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(forwarded["type"], "pi_envelope_in");
-        assert_eq!(forwarded["to_room"], "work");
-        assert_eq!(forwarded["envelope"], frame["envelope"]);
+        for (label, rx) in [("main", &mut rx_main), ("work", &mut rx_work)] {
+            let Message::Text(text) = rx.try_recv().unwrap() else {
+                panic!("forwarded message to {label} must be text");
+            };
+            let forwarded: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(forwarded["type"], "pi_envelope_in");
+            assert_eq!(forwarded["from_pc"], "pi_a");
+            assert_eq!(forwarded["envelope"], frame["envelope"]);
+            assert!(
+                forwarded.get("to_room").is_none(),
+                "cross-PC generated wrapper must not add relay-owned room targeting in this slice"
+            );
+        }
     }
 }

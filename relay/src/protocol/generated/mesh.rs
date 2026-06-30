@@ -13,9 +13,20 @@ pub struct MeshEnvelopeWire {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeshPostResponse {
+    pub version: u64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeshGetResponse {
     pub blob: String,
     pub sig: String,
     pub version: u64,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeshGetQuery {
+    pub since: Option<u64>,
 }

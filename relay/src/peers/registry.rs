@@ -373,19 +373,30 @@ impl PeerRegistry {
     /// `room_announced`/`room_ended`, `room_meta_updated`) where the
     /// subscriber's room isn't known in advance.
     fn forward_to_all_rooms_of(&self, peer_id: &str, msg: Message) {
+        let _ = self.forward_to_peer(peer_id, msg);
+    }
+
+    /// Sends `msg` to every live connection of `peer_id` across all rooms.
+    /// Returns true when at least one live connection was present. Cross-PC
+    /// data-plane forwarding uses this peer-wide behavior until canonical
+    /// session/room targeting lands as a separate protocol change.
+    pub fn forward_to_peer(&self, peer_id: &str, msg: Message) -> bool {
+        let mut sent = false;
         let lock = self.senders.lock().unwrap();
         for ((p, _), v) in lock.iter() {
             if p == peer_id {
                 for (_, _, tx) in v.iter() {
                     let _ = tx.send(msg.clone());
+                    sent = true;
                 }
             }
         }
+        sent
     }
 
     /// Sends `msg` to every live connection at one explicit `(peer, room)`.
-    /// Cross-PC data-plane forwarding must be room-targeted; peer-wide fanout
-    /// is reserved for private control-plane subscription pushes above.
+    /// Reserved for protocol paths that explicitly carry a relay-owned room
+    /// target; cross-PC forwarding stays peer-wide until that target is added.
     pub fn forward_to_room(&self, peer_id: &str, room_id: &str, msg: Message) -> bool {
         const EXTERNAL_CONN_ID: u64 = u64::MAX;
         self.forward(peer_id, room_id, msg, EXTERNAL_CONN_ID)

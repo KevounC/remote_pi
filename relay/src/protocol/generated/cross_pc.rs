@@ -28,4 +28,13 @@ pub struct PiEnvelopeInFrame {
     pub envelope: AgentEnvelope,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CrossPcFrame {
+    #[serde(rename = "pi_envelope")]
+    PiEnvelope(PiEnvelopeFrame),
+    #[serde(rename = "pi_envelope_in")]
+    PiEnvelopeIn(PiEnvelopeInFrame),
+}
+
 pub const CROSS_PC_TYPES: &[&str] = &["pi_envelope", "pi_envelope_in"];

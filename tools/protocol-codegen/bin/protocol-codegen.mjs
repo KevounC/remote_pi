@@ -899,8 +899,25 @@ function emitRustControl(entries, schemaPath) {
   return `${lines.join('\n')}\n`;
 }
 
-function emitRustCrossPc(entries) {
+function emitRustCrossPc(entries, schemaPath) {
   const lines = rustHeader('cross_pc');
+  const byType = new Map(entries.map((entry) => [entry.type, entry]));
+  const schemasByType = new Map(entries.map((entry) => [entry.type, schemaForCatalogEntry(entry, schemaPath)]));
+  const hasType = (type) => byType.has(type);
+
+  if (!hasType('pi_envelope')) throw new Error('crossPc schema must declare pi_envelope');
+  if (!hasType('pi_envelope_in')) throw new Error('crossPc schema must declare pi_envelope_in');
+  for (const [type, schema] of schemasByType.entries()) {
+    if (!schemaHasProperty(schema, 'type')) throw new Error(`${type} schema must declare type`);
+    if (type === 'pi_envelope' && !schemaHasProperty(schema, 'to_pc')) {
+      throw new Error('pi_envelope schema must declare to_pc');
+    }
+    if (type === 'pi_envelope_in' && !schemaHasProperty(schema, 'from_pc')) {
+      throw new Error('pi_envelope_in schema must declare from_pc');
+    }
+    if (!schemaHasProperty(schema, 'envelope')) throw new Error(`${type} schema must declare envelope`);
+  }
+
   lines.push('use serde::{Deserialize, Serialize};');
   lines.push('use serde_json::Value;');
   lines.push('');
@@ -923,6 +940,19 @@ function emitRustCrossPc(entries) {
   lines.push('pub struct PiEnvelopeInFrame {');
   lines.push('    pub from_pc: String,');
   lines.push('    pub envelope: AgentEnvelope,');
+  lines.push('}');
+  lines.push('');
+  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
+  lines.push('#[serde(tag = "type", rename_all = "snake_case")]');
+  lines.push('pub enum CrossPcFrame {');
+  if (hasType('pi_envelope')) {
+    lines.push('    #[serde(rename = "pi_envelope")]');
+    lines.push('    PiEnvelope(PiEnvelopeFrame),');
+  }
+  if (hasType('pi_envelope_in')) {
+    lines.push('    #[serde(rename = "pi_envelope_in")]');
+    lines.push('    PiEnvelopeIn(PiEnvelopeInFrame),');
+  }
   lines.push('}');
   lines.push('');
   lines.push('pub const CROSS_PC_TYPES: &[&str] = &[');
@@ -1221,11 +1251,22 @@ function emitRustMesh() {
   lines.push('}');
   lines.push('');
   lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
+  lines.push('pub struct MeshPostResponse {');
+  lines.push('    pub version: u64,');
+  lines.push('    pub updated_at: i64,');
+  lines.push('}');
+  lines.push('');
+  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
   lines.push('pub struct MeshGetResponse {');
   lines.push('    pub blob: String,');
   lines.push('    pub sig: String,');
   lines.push('    pub version: u64,');
   lines.push('    pub updated_at: i64,');
+  lines.push('}');
+  lines.push('');
+  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
+  lines.push('pub struct MeshGetQuery {');
+  lines.push('    pub since: Option<u64>,');
   lines.push('}');
   lines.push('');
   return `${lines.join('\n')}\n`;
@@ -1260,7 +1301,7 @@ function emitRust(schema, schemaPath) {
     ['outer.rs', emitRustOuter(schema, schemaPath)],
     ['room.rs', emitRustRoom(entries, schemaPath)],
     ['control.rs', emitRustControl((byModule.get('control') ?? []).sort((a, b) => a.type.localeCompare(b.type)), schemaPath)],
-    ['cross_pc.rs', emitRustCrossPc((byModule.get('cross_pc') ?? []).sort((a, b) => a.type.localeCompare(b.type)))],
+    ['cross_pc.rs', emitRustCrossPc((byModule.get('cross_pc') ?? []).sort((a, b) => a.type.localeCompare(b.type)), schemaPath)],
     ['mesh.rs', emitRustMesh()],
   ]);
 }
