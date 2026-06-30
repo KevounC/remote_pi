@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-rust-codegen-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-generated-protocol-rust-codegen
 depends_on: [epic-bold-generated-protocol-rust-codegen-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Generate auth and relay control-frame serde types
@@ -88,3 +88,18 @@ High. The control switch is broad; malformed-frame compatibility and room-meta p
 ## Rollback
 
 Revert generated control-frame consumption and restore `auth/challenge.rs` plus `handle_peer` to the raw JSON control parsing path. Earlier generated outer-envelope work can remain.
+
+## Implementation
+
+Generated `relay/src/protocol/generated/control.rs` now owns the relay auth/challenge and post-auth control-frame serde boundary from the shared protocol schema catalog: `ClientAuthMsg`, `ServerAuthMsg`, `HelloRoomMeta`, typed presence/rooms control variants, typed `RoomMetaUpdate`, and the generated control-frame type registry. `auth/challenge.rs` consumes the generated auth types while retaining nonce generation and Ed25519 verification. The relay parses known control frames into generated types before handwritten behavior runs; `pi_envelope` remains outside `RelayControlFrame` on the cross-PC path.
+
+Regen-diff verdict: clean and deterministic. I ran the Rust generator twice from the schema catalog and compared `git diff -- relay/src/protocol/generated` before/after each run; the generated diff was unchanged after both runs, with no hand edits to generated output.
+
+Verification:
+
+- `cargo fmt --check` — passed.
+- `cargo clippy -- -D warnings` — passed.
+- `cargo test` — passed: 122 tests total (68 lib unit, 3 integration, 13 mesh, 9 pi_forward, 10 presence, 19 rooms; 0 main/doc tests).
+- `cargo build` — passed.
+
+Deferred scope: none.

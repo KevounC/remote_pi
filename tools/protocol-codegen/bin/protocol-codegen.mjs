@@ -760,29 +760,153 @@ function rustVariantName(type) {
   return name.length > 0 ? name : 'Unknown';
 }
 
-function emitRustControl(entries) {
+const RELAY_CLIENT_CONTROL_TYPES = [
+  'subscribe_presence',
+  'unsubscribe_presence',
+  'presence_check',
+  'subscribe_rooms',
+  'unsubscribe_rooms',
+  'rooms_check',
+  'room_meta_update',
+];
+
+function schemaForCatalogEntry(entry, schemaPath) {
+  if (typeof entry.schemaRef !== 'string') {
+    throw new Error(`Catalog entry ${entry.type} is missing schemaRef`);
+  }
+  return requireObject(readJsonSchemaRef(entry.schemaRef, schemaPath), `${entry.type} schema`);
+}
+
+function schemaHasProperty(schema, propertyName) {
+  return Object.hasOwn(requireObject(schema.properties, `${schema.title ?? 'schema'}.properties`), propertyName);
+}
+
+function emitRustControlPeerVariant(lines, type, schema) {
+  if (!schemaHasProperty(schema, 'peers')) {
+    throw new Error(`Relay control frame ${type} must declare a peers property in schema`);
+  }
+  lines.push(`    #[serde(rename = "${type}")]`);
+  lines.push(`    ${rustVariantName(type)} {`);
+  lines.push('        #[serde(default)]');
+  lines.push('        peers: Vec<String>,');
+  lines.push('    },');
+}
+
+function emitRustControl(entries, schemaPath) {
   const lines = rustHeader('control');
-  lines.push('use serde::{Deserialize, Serialize};');
-  lines.push('use serde_json::{Map, Value};');
+  const byType = new Map(entries.map((entry) => [entry.type, entry]));
+  const schemasByType = new Map(entries.map((entry) => [entry.type, schemaForCatalogEntry(entry, schemaPath)]));
+  const hasType = (type) => byType.has(type);
+  const clientControlTypes = RELAY_CLIENT_CONTROL_TYPES.filter(hasType);
+
+  lines.push('use serde::{Deserialize, Deserializer, Serialize};');
   lines.push('');
-  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
-  lines.push('pub struct RawRelayControlFrame {');
-  lines.push('    #[serde(rename = "type")]');
-  lines.push('    pub frame_type: String,');
-  lines.push('    #[serde(flatten)]');
-  lines.push('    pub fields: Map<String, Value>,');
-  lines.push('}');
-  lines.push('');
-  lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
+
+  if (hasType('hello') || hasType('auth')) {
+    lines.push('#[derive(Debug, Clone, Deserialize)]');
+    lines.push('#[serde(tag = "type", rename_all = "snake_case")]');
+    lines.push('pub enum ClientAuthMsg {');
+    if (hasType('hello')) {
+      const helloSchema = schemasByType.get('hello');
+      if (!schemaHasProperty(helloSchema, 'pubkey')) throw new Error('hello schema must declare pubkey');
+      if (!schemaHasProperty(helloSchema, 'room_id')) throw new Error('hello schema must declare room_id');
+      if (!schemaHasProperty(helloSchema, 'room_meta')) throw new Error('hello schema must declare room_meta');
+      lines.push('    Hello {');
+      lines.push('        pubkey: String,');
+      lines.push('        #[serde(default = "default_room")]');
+      lines.push('        room_id: String,');
+      lines.push('        #[serde(default)]');
+      lines.push('        room_meta: Option<HelloRoomMeta>,');
+      lines.push('    },');
+    }
+    if (hasType('auth')) {
+      const authSchema = schemasByType.get('auth');
+      if (!schemaHasProperty(authSchema, 'sig')) throw new Error('auth schema must declare sig');
+      lines.push('    Auth { sig: String },');
+    }
+    lines.push('}');
+    lines.push('');
+  }
+
+  if (hasType('hello')) {
+    lines.push('#[derive(Debug, Default, Clone, Deserialize)]');
+    lines.push('pub struct HelloRoomMeta {');
+    lines.push('    pub name: Option<String>,');
+    lines.push('    pub cwd: Option<String>,');
+    lines.push('    pub model: Option<String>,');
+    lines.push('    pub thinking: Option<String>,');
+    lines.push('    pub session_id: Option<String>,');
+    lines.push('    #[serde(default)]');
+    lines.push('    pub working: bool,');
+    lines.push('}');
+    lines.push('');
+    lines.push('fn default_room() -> String {');
+    lines.push('    "main".to_string()');
+    lines.push('}');
+    lines.push('');
+  }
+
+  if (hasType('challenge')) {
+    const challengeSchema = schemasByType.get('challenge');
+    if (!schemaHasProperty(challengeSchema, 'nonce')) throw new Error('challenge schema must declare nonce');
+    lines.push('#[derive(Debug, Clone, Serialize)]');
+    lines.push('#[serde(tag = "type", rename_all = "snake_case")]');
+    lines.push('pub enum ServerAuthMsg {');
+    lines.push('    Challenge { nonce: String },');
+    lines.push('}');
+    lines.push('');
+  }
+
+  if (hasType('room_meta_update')) {
+    const updateSchema = schemasByType.get('room_meta_update');
+    if (!schemaHasProperty(updateSchema, 'meta')) throw new Error('room_meta_update schema must declare meta');
+    lines.push('#[derive(Debug, Default, Clone, Deserialize)]');
+    lines.push('pub struct RoomMetaPatch {');
+    lines.push('    #[serde(default, deserialize_with = "deserialize_nullable_string_patch")]');
+    lines.push('    pub model: Option<Option<String>>,');
+    lines.push('    #[serde(default, deserialize_with = "deserialize_nullable_string_patch")]');
+    lines.push('    pub thinking: Option<Option<String>>,');
+    lines.push('    #[serde(default, deserialize_with = "deserialize_nullable_string_patch")]');
+    lines.push('    pub session_id: Option<Option<String>>,');
+    lines.push('    pub working: Option<bool>,');
+    lines.push('}');
+    lines.push('');
+    lines.push('fn deserialize_nullable_string_patch<\'de, D>(');
+    lines.push('    deserializer: D,');
+    lines.push(') -> Result<Option<Option<String>>, D::Error>');
+    lines.push('where');
+    lines.push('    D: Deserializer<\'de>,');
+    lines.push('{');
+    lines.push('    Option::<String>::deserialize(deserializer).map(Some)');
+    lines.push('}');
+    lines.push('');
+  }
+
+  lines.push('#[derive(Debug, Clone, Deserialize)]');
   lines.push('#[serde(tag = "type", rename_all = "snake_case")]');
   lines.push('pub enum RelayControlFrame {');
-  for (const entry of entries) {
-    lines.push(`    #[serde(rename = "${entry.type}")]`);
-    lines.push(`    ${rustVariantName(entry.type)} {`);
-    lines.push('        #[serde(flatten)]');
-    lines.push('        fields: Map<String, Value>,');
-    lines.push('    },');
+  for (const type of clientControlTypes) {
+    const schema = schemasByType.get(type);
+    if (type === 'room_meta_update') {
+      if (!schemaHasProperty(schema, 'room_id')) throw new Error('room_meta_update schema must declare room_id');
+      lines.push('    #[serde(rename = "room_meta_update")]');
+      lines.push('    RoomMetaUpdate {');
+      lines.push('        #[serde(default)]');
+      lines.push('        room_id: Option<String>,');
+      lines.push('        meta: RoomMetaPatch,');
+      lines.push('    },');
+    } else {
+      emitRustControlPeerVariant(lines, type, schema);
+    }
   }
+  lines.push('}');
+  lines.push('');
+  lines.push('pub const RELAY_CONTROL_FRAME_TYPES: &[&str] = &[');
+  for (const type of clientControlTypes) lines.push(`    "${type}",`);
+  lines.push('];');
+  lines.push('');
+  lines.push('pub fn is_relay_control_frame_type(frame_type: &str) -> bool {');
+  lines.push('    RELAY_CONTROL_FRAME_TYPES.contains(&frame_type)');
   lines.push('}');
   lines.push('');
   return `${lines.join('\n')}\n`;
@@ -859,6 +983,7 @@ function readJsonSchemaRef(ref, schemaPath) {
   } else {
     if (schemaPath && schemaPath !== '-') candidates.push(join(dirname(schemaPath), refPath));
     candidates.push(join(process.cwd(), refPath));
+    candidates.push(join(process.cwd(), 'protocol', refPath));
     if (refPath.startsWith('./')) {
       candidates.push(join(process.cwd(), 'schema', refPath.slice(2)));
       candidates.push(join(process.cwd(), 'protocol', 'schema', refPath.slice(2)));
@@ -1019,7 +1144,7 @@ function emitRust(schema, schemaPath) {
     ['mod.rs', emitRustMod()],
     ['outer.rs', emitRustOuter(schema, schemaPath)],
     ['room.rs', emitRustRoom()],
-    ['control.rs', emitRustControl((byModule.get('control') ?? []).sort((a, b) => a.type.localeCompare(b.type)))],
+    ['control.rs', emitRustControl((byModule.get('control') ?? []).sort((a, b) => a.type.localeCompare(b.type)), schemaPath)],
     ['cross_pc.rs', emitRustCrossPc((byModule.get('cross_pc') ?? []).sort((a, b) => a.type.localeCompare(b.type)))],
     ['mesh.rs', emitRustMesh()],
   ]);

@@ -1,54 +1,17 @@
-// Types not yet wired into the WS handler — will be connected in routing step.
-#![allow(dead_code)]
-
+use crate::protocol::generated::control::{ClientAuthMsg, ServerAuthMsg};
+use crate::rooms::RoomMeta;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use ed25519_dalek::{Signature, VerifyingKey};
 use rand::RngCore as _;
-use serde::{Deserialize, Serialize};
-
-use crate::rooms::RoomMeta;
 
 /// Max milliseconds to wait for a "hello" before closing the connection.
 pub const HELLO_TIMEOUT_MS: u64 = 5_000;
-
-/// Messages that a peer sends during the auth handshake.
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ClientAuthMsg {
-    Hello {
-        pubkey: String,
-        #[serde(default)]
-        room_id: Option<String>,
-        #[serde(default)]
-        room_meta: Option<ClientHelloRoomMeta>,
-    },
-    Auth {
-        sig: String,
-    },
-}
-
-#[derive(Debug, Default, Deserialize)]
-pub struct ClientHelloRoomMeta {
-    pub name: Option<String>,
-    pub cwd: Option<String>,
-    pub model: Option<String>,
-    pub thinking: Option<String>,
-    #[serde(default)]
-    pub working: bool,
-}
 
 #[derive(Debug)]
 pub struct AuthenticatedPeer {
     pub verifying_key: VerifyingKey,
     pub peer_id: String,
     pub room_meta: RoomMeta,
-}
-
-/// Messages that the relay sends during the auth handshake.
-#[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ServerAuthMsg {
-    Challenge { nonce: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -101,7 +64,7 @@ pub fn parse_hello_bootstrap(line: &str, now_ms: i64) -> Result<AuthenticatedPee
                 verifying_key,
                 peer_id,
                 room_meta: RoomMeta {
-                    room_id: room_id.unwrap_or_else(|| "main".to_string()),
+                    room_id,
                     name: meta.name,
                     cwd: meta.cwd,
                     model: meta.model,

@@ -1,4 +1,3 @@
-use serde_json::{Map, Value};
 use thiserror::Error;
 use tracing::warn;
 
@@ -14,10 +13,6 @@ pub enum ControlFrameError {
         requested: usize,
         limit: usize,
     },
-    #[error("control frame {frame_type} peers field must be an array")]
-    PeersNotArray { frame_type: String },
-    #[error("control frame {frame_type} peers[{index}] must be a string")]
-    PeerNotString { frame_type: String, index: usize },
 }
 
 /// Validates the peer-list shape shared by presence/rooms control frames.
@@ -27,47 +22,17 @@ pub enum ControlFrameError {
 /// empty list; malformed or oversized values are dropped by the typed handler.
 pub fn bounded_peer_list(
     frame_type: &str,
-    peers: Option<&serde_json::Value>,
+    peers: Vec<String>,
 ) -> Result<Vec<String>, ControlFrameError> {
-    let Some(peers_value) = peers else {
-        return Ok(Vec::new());
-    };
-    let Some(peer_array) = peers_value.as_array() else {
-        return Err(ControlFrameError::PeersNotArray {
-            frame_type: frame_type.to_owned(),
-        });
-    };
-    if peer_array.len() > MAX_CONTROL_FRAME_PEERS {
+    if peers.len() > MAX_CONTROL_FRAME_PEERS {
         return Err(ControlFrameError::TooManyPeers {
             frame_type: frame_type.to_owned(),
-            requested: peer_array.len(),
+            requested: peers.len(),
             limit: MAX_CONTROL_FRAME_PEERS,
         });
     }
 
-    let mut out = Vec::with_capacity(peer_array.len());
-    for (index, value) in peer_array.iter().enumerate() {
-        let Some(peer) = value.as_str() else {
-            return Err(ControlFrameError::PeerNotString {
-                frame_type: frame_type.to_owned(),
-                index,
-            });
-        };
-        out.push(peer.to_owned());
-    }
-    Ok(out)
-}
-
-pub(crate) fn is_presence_rooms_control_frame(frame_type: &str) -> bool {
-    matches!(
-        frame_type,
-        "subscribe_presence"
-            | "unsubscribe_presence"
-            | "presence_check"
-            | "subscribe_rooms"
-            | "unsubscribe_rooms"
-            | "rooms_check"
-    )
+    Ok(peers)
 }
 
 pub(crate) struct ControlHandlers<'actor> {
@@ -87,28 +52,26 @@ impl<'actor> ControlHandlers<'actor> {
 
     pub(crate) async fn handle(&mut self, frame: RelayControlFrame) -> ActorDispatch {
         match frame {
-            RelayControlFrame::SubscribePresence { fields } => {
-                self.subscribe_presence(fields).await
+            RelayControlFrame::SubscribePresence { peers } => self.subscribe_presence(peers).await,
+            RelayControlFrame::UnsubscribePresence { peers } => {
+                self.unsubscribe_presence(peers).await
             }
-            RelayControlFrame::UnsubscribePresence { fields } => {
-                self.unsubscribe_presence(fields).await
-            }
-            RelayControlFrame::PresenceCheck { fields } => self.presence_check(fields).await,
-            RelayControlFrame::SubscribeRooms { fields } => self.subscribe_rooms(fields).await,
-            RelayControlFrame::UnsubscribeRooms { fields } => self.unsubscribe_rooms(fields).await,
-            RelayControlFrame::RoomsCheck { fields } => self.rooms_check(fields).await,
-            _ => {
+            RelayControlFrame::PresenceCheck { peers } => self.presence_check(peers).await,
+            RelayControlFrame::SubscribeRooms { peers } => self.subscribe_rooms(peers).await,
+            RelayControlFrame::UnsubscribeRooms { peers } => self.unsubscribe_rooms(peers).await,
+            RelayControlFrame::RoomsCheck { peers } => self.rooms_check(peers).await,
+            RelayControlFrame::RoomMetaUpdate { .. } => {
                 warn!(
                     peer = %self.actor.peer_short,
-                    "unsupported relay control frame reached presence/rooms handler, dropping"
+                    "room_meta_update reached presence/rooms handler, dropping"
                 );
                 ActorDispatch::Continue
             }
         }
     }
 
-    async fn subscribe_presence(&mut self, fields: Map<String, Value>) -> ActorDispatch {
-        let Some(peers) = self.bounded_peers("subscribe_presence", &fields) else {
+    async fn subscribe_presence(&mut self, peers: Vec<String>) -> ActorDispatch {
+        let Some(peers) = self.bounded_peers("subscribe_presence", peers) else {
             return ActorDispatch::Continue;
         };
         self.actor
@@ -121,8 +84,8 @@ impl<'actor> ControlHandlers<'actor> {
         ActorDispatch::Continue
     }
 
-    async fn unsubscribe_presence(&mut self, fields: Map<String, Value>) -> ActorDispatch {
-        let Some(peers) = self.bounded_peers("unsubscribe_presence", &fields) else {
+    async fn unsubscribe_presence(&mut self, peers: Vec<String>) -> ActorDispatch {
+        let Some(peers) = self.bounded_peers("unsubscribe_presence", peers) else {
             return ActorDispatch::Continue;
         };
         self.actor
@@ -132,8 +95,8 @@ impl<'actor> ControlHandlers<'actor> {
         ActorDispatch::Continue
     }
 
-    async fn presence_check(&mut self, fields: Map<String, Value>) -> ActorDispatch {
-        let Some(peers) = self.bounded_peers("presence_check", &fields) else {
+    async fn presence_check(&mut self, peers: Vec<String>) -> ActorDispatch {
+        let Some(peers) = self.bounded_peers("presence_check", peers) else {
             return ActorDispatch::Continue;
         };
         if !self.actor.allow_control_check("presence_check", &peers) {
@@ -147,8 +110,8 @@ impl<'actor> ControlHandlers<'actor> {
         self.actor.emit_deduped_presence(states)
     }
 
-    async fn subscribe_rooms(&mut self, fields: Map<String, Value>) -> ActorDispatch {
-        let Some(peers) = self.bounded_peers("subscribe_rooms", &fields) else {
+    async fn subscribe_rooms(&mut self, peers: Vec<String>) -> ActorDispatch {
+        let Some(peers) = self.bounded_peers("subscribe_rooms", peers) else {
             return ActorDispatch::Continue;
         };
         self.actor
@@ -158,8 +121,8 @@ impl<'actor> ControlHandlers<'actor> {
         ActorDispatch::Continue
     }
 
-    async fn unsubscribe_rooms(&mut self, fields: Map<String, Value>) -> ActorDispatch {
-        let Some(peers) = self.bounded_peers("unsubscribe_rooms", &fields) else {
+    async fn unsubscribe_rooms(&mut self, peers: Vec<String>) -> ActorDispatch {
+        let Some(peers) = self.bounded_peers("unsubscribe_rooms", peers) else {
             return ActorDispatch::Continue;
         };
         self.actor
@@ -169,8 +132,8 @@ impl<'actor> ControlHandlers<'actor> {
         ActorDispatch::Continue
     }
 
-    async fn rooms_check(&mut self, fields: Map<String, Value>) -> ActorDispatch {
-        let Some(peers) = self.bounded_peers("rooms_check", &fields) else {
+    async fn rooms_check(&mut self, peers: Vec<String>) -> ActorDispatch {
+        let Some(peers) = self.bounded_peers("rooms_check", peers) else {
             return ActorDispatch::Continue;
         };
         if !self.actor.allow_control_check("rooms_check", &peers) {
@@ -179,8 +142,8 @@ impl<'actor> ControlHandlers<'actor> {
         self.actor.emit_deduped_room_snapshots(peers)
     }
 
-    fn bounded_peers(&self, frame_type: &str, fields: &Map<String, Value>) -> Option<Vec<String>> {
-        match bounded_peer_list(frame_type, fields.get("peers")) {
+    fn bounded_peers(&self, frame_type: &str, peers: Vec<String>) -> Option<Vec<String>> {
+        match bounded_peer_list(frame_type, peers) {
             Ok(peers) => Some(peers),
             Err(ControlFrameError::TooManyPeers {
                 requested, limit, ..
@@ -191,15 +154,6 @@ impl<'actor> ControlHandlers<'actor> {
                     requested_peers = requested,
                     limit,
                     "control frame peer limit exceeded, dropping"
-                );
-                None
-            }
-            Err(err) => {
-                warn!(
-                    peer = %self.actor.peer_short,
-                    frame_type = %frame_type,
-                    err = %err,
-                    "malformed control frame peer list, dropping"
                 );
                 None
             }
@@ -223,10 +177,6 @@ mod tests {
     use crate::presence::PresenceManager;
     use crate::protocol::generated::control::RelayControlFrame;
     use crate::rooms::{RoomManager, RoomMeta};
-
-    fn fields(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
-        value.as_object().expect("fields object").clone()
-    }
 
     fn make_meta(room_id: &str) -> RoomMeta {
         RoomMeta {
@@ -278,32 +228,37 @@ mod tests {
     }
 
     #[test]
-    fn missing_peers_defaults_to_empty_list() {
-        assert_eq!(
-            bounded_peer_list("subscribe_presence", None),
-            Ok(Vec::new())
+    fn missing_peers_defaults_to_empty_list_at_generated_boundary() {
+        let frame: RelayControlFrame = serde_json::from_value(json!({
+            "type": "subscribe_presence"
+        }))
+        .expect("generated control frame parses default peers");
+
+        assert!(
+            matches!(frame, RelayControlFrame::SubscribePresence { peers } if peers.is_empty())
         );
     }
 
     #[test]
-    fn rejects_non_array_peer_list() {
-        assert_eq!(
-            bounded_peer_list("subscribe_presence", Some(&json!("peer-a"))),
-            Err(ControlFrameError::PeersNotArray {
-                frame_type: "subscribe_presence".to_owned()
-            }),
-        );
+    fn rejects_non_array_peer_list_at_generated_boundary() {
+        let err = serde_json::from_value::<RelayControlFrame>(json!({
+            "type": "subscribe_presence",
+            "peers": "peer-a"
+        }))
+        .expect_err("generated control frame rejects non-array peers");
+
+        assert!(err.to_string().contains("invalid type"));
     }
 
     #[test]
-    fn rejects_mixed_type_peer_list() {
-        assert_eq!(
-            bounded_peer_list("subscribe_presence", Some(&json!(["peer-a", 1]))),
-            Err(ControlFrameError::PeerNotString {
-                frame_type: "subscribe_presence".to_owned(),
-                index: 1
-            }),
-        );
+    fn rejects_mixed_type_peer_list_at_generated_boundary() {
+        let err = serde_json::from_value::<RelayControlFrame>(json!({
+            "type": "subscribe_presence",
+            "peers": ["peer-a", 1]
+        }))
+        .expect_err("generated control frame rejects non-string peers");
+
+        assert!(err.to_string().contains("invalid type"));
     }
 
     #[test]
@@ -312,24 +267,25 @@ mod tests {
             .map(|idx| format!("peer-{idx}"))
             .collect::<Vec<_>>();
         assert!(matches!(
-            bounded_peer_list("presence_check", Some(&json!(peers))),
+            bounded_peer_list("presence_check", peers),
             Err(ControlFrameError::TooManyPeers { requested, .. }) if requested == MAX_CONTROL_FRAME_PEERS + 1
         ));
     }
 
     #[tokio::test]
-    async fn malformed_subscribe_presence_does_not_mutate_subscriptions() {
+    async fn oversized_subscribe_presence_does_not_mutate_subscriptions() {
         let fixture = Fixture::new();
         let mut actor = fixture.actor("app");
+        let peers = (0..=MAX_CONTROL_FRAME_PEERS)
+            .map(|idx| format!("peer-{idx}"))
+            .collect();
 
         let dispatch = actor
-            .dispatch_control(RelayControlFrame::SubscribePresence {
-                fields: fields(json!({"peers": "pi"})),
-            })
+            .dispatch_control(RelayControlFrame::SubscribePresence { peers })
             .await;
 
         assert!(matches!(dispatch, ActorDispatch::Continue));
-        assert!(fixture.presence.subscribers_of("pi").await.is_empty());
+        assert!(fixture.presence.subscribers_of("peer-0").await.is_empty());
     }
 
     #[tokio::test]
@@ -349,7 +305,7 @@ mod tests {
 
         let dispatch = actor
             .dispatch_control(RelayControlFrame::SubscribePresence {
-                fields: fields(json!({"peers": ["pi"]})),
+                peers: vec!["pi".to_string()],
             })
             .await;
 
@@ -371,7 +327,7 @@ mod tests {
         let fixture = Fixture::new();
         let mut actor = fixture.actor("app");
         let frame = || RelayControlFrame::PresenceCheck {
-            fields: fields(json!({"peers": ["pi"]})),
+            peers: vec!["pi".to_string()],
         };
 
         let first = actor.dispatch_control(frame()).await;
@@ -394,7 +350,7 @@ mod tests {
             .await;
         let mut actor = fixture.actor("app");
         let frame = || RelayControlFrame::RoomsCheck {
-            fields: fields(json!({"peers": ["pi"]})),
+            peers: vec!["pi".to_string()],
         };
 
         let first = actor.dispatch_control(frame()).await;

@@ -16,9 +16,8 @@ use crate::auth::challenge::{
 #[path = "connection_actor.rs"]
 pub(crate) mod connection_actor;
 
-use crate::handlers::control::is_presence_rooms_control_frame;
 use crate::handlers::peer::connection_actor::{ActorDispatch, ConnectionActor};
-use crate::protocol::generated::control::RelayControlFrame;
+use crate::protocol::generated::control::{RelayControlFrame, is_relay_control_frame_type};
 use crate::protocol::outer::{OuterEnvelope, parse_line};
 use crate::reachability::RELAY_WS_PING_INTERVAL;
 use crate::rooms::RoomMetaPatch;
@@ -161,7 +160,7 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
                             .and_then(|v| v.as_str())
                             .map(str::to_owned)
                         {
-                            if is_presence_rooms_control_frame(&t) {
+                            if is_relay_control_frame_type(&t) {
                                 let control_frame = match serde_json::from_value::<RelayControlFrame>(frame) {
                                     Ok(frame) => frame,
                                     Err(err) => {
@@ -173,6 +172,29 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
                                         );
                                         continue;
                                     }
+                                };
+
+                                let control_frame = match control_frame {
+                                    RelayControlFrame::RoomMetaUpdate { room_id: target_room, meta } => {
+                                        let target_room = target_room.unwrap_or_else(|| room_id.clone());
+                                        let patch = RoomMetaPatch {
+                                            model: meta.model,
+                                            thinking: meta.thinking,
+                                            working: meta.working,
+                                        };
+                                        if !registry
+                                            .update_room_meta(&peer_id, &target_room, patch)
+                                            .await
+                                        {
+                                            warn!(
+                                                peer = %peer_short,
+                                                room = %target_room,
+                                                "room_meta_update for unknown (peer, room), dropping"
+                                            );
+                                        }
+                                        continue;
+                                    }
+                                    control_frame => control_frame,
                                 };
 
                                 match actor.dispatch_control(control_frame).await {
@@ -194,51 +216,6 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
                             }
 
                             match t.as_str() {
-                                // ── room meta update (plano 18 + 28 + 32) ──
-                                // `meta.model`, `meta.thinking` and
-                                // `meta.working` are patched independently: a
-                                // field absent from `meta` is *left alone* on
-                                // the room (not cleared). For the nullable
-                                // string fields, an explicit `null` clears
-                                // them. `working` is a plain bool, so it only
-                                // ever toggles — a non-bool/absent value leaves
-                                // it untouched. Mirrors the JSON Merge Patch
-                                // shape clients already produce.
-                                "room_meta_update" => {
-                                    let target_room = frame
-                                        .get("room_id")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or(&room_id)
-                                        .to_string();
-                                    let meta_obj = frame
-                                        .get("meta")
-                                        .and_then(|v| v.as_object());
-                                    let model_patch = meta_obj
-                                        .and_then(|m| m.get("model"))
-                                        .map(|v| v.as_str().map(String::from));
-                                    let thinking_patch = meta_obj
-                                        .and_then(|m| m.get("thinking"))
-                                        .map(|v| v.as_str().map(String::from));
-                                    let working_patch = meta_obj
-                                        .and_then(|m| m.get("working"))
-                                        .and_then(|v| v.as_bool());
-                                    let patch = RoomMetaPatch {
-                                        model: model_patch,
-                                        thinking: thinking_patch,
-                                        working: working_patch,
-                                    };
-                                    if !registry
-                                        .update_room_meta(&peer_id, &target_room, patch)
-                                        .await
-                                    {
-                                        warn!(
-                                            peer = %peer_short,
-                                            room = %target_room,
-                                            "room_meta_update for unknown (peer, room), dropping"
-                                        );
-                                    }
-                                }
-
                                 // ── Pi-to-Pi envelope forward (plano 25 W-A) ──
                                 "pi_envelope" => {
                                     use crate::handlers::pi_forward::{
