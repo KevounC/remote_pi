@@ -11,7 +11,6 @@ function ports(): RemotePiRuntimePorts {
       stop: vi.fn(),
       sendRoomMeta: vi.fn(),
       onOuterMessage: vi.fn(() => vi.fn()),
-      createPeerChannel: vi.fn(() => ({ send: vi.fn(), detach: vi.fn() })),
       attachCrossPcBridge: vi.fn(),
       detachCrossPcBridge: vi.fn(),
     },

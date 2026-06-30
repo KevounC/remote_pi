@@ -49,24 +49,12 @@ export interface CrossPcBridgeInput {
   keypair(): Ed25519Keypair | null;
 }
 
-export interface RelayPeerChannel extends PeerChannel {
-  detach(): void;
-}
-
-export interface RelayPeerChannelInput {
-  peerId: string;
-  roomId?: string;
-  onMessage(message: ClientMessage): void | Promise<void>;
-  onDisconnect(peerId: string): void;
-}
-
 export interface RelayTransportPort {
   status(): RelayConnectivity;
   start(input: RelayStartInput): Promise<RelayStartResult>;
   stop(reason?: ByeReason): void;
   sendRoomMeta(patch: Partial<RoomMeta> & { working?: boolean; thinking?: ThinkingLevel }): void;
   onOuterMessage(handler: (line: string) => void | Promise<void>): () => void;
-  createPeerChannel(input: RelayPeerChannelInput): RelayPeerChannel;
   attachCrossPcBridge(input: CrossPcBridgeInput): Promise<void>;
   detachCrossPcBridge(): void;
 }

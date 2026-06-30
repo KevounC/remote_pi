@@ -6,11 +6,8 @@ import {
   reachabilityBackoffMs,
 } from "../reachability/reachability_contract.js";
 import type { RelayClient, RoomMeta } from "../transport/relay_client.js";
-import { PlainPeerChannel } from "../transport/peer_channel.js";
 import type {
   CrossPcBridgeInput,
-  RelayPeerChannel,
-  RelayPeerChannelInput,
   RelayStartInput,
   RelayStartResult,
   RelayTransportPort,
@@ -53,9 +50,9 @@ export interface RelayTransportAdapter extends Omit<RelayTransportPort, "start">
   hasPendingReconnect(): boolean;
   currentRelayUrl(): string | null;
   /**
-   * @internal Temporary legacy status/current-epoch bridge for command-surface
-   * checks while owner channel construction is routed through this port.
-   * Remove when the pairing coordinator is fully retired behind owner ports.
+   * @internal Temporary owner-channel bridge while legacy call sites still need
+   * direct access to the live RelayClient. Remove when owner ingress is fully
+   * routed through RelayTransportPort.
    */
   currentRelayForOwnerChannels(): RelayClient | null;
 }
@@ -253,18 +250,6 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
     };
   }
 
-  function createPeerChannel(input: RelayPeerChannelInput): RelayPeerChannel {
-    const current = relay;
-    if (!current) throw new Error("relay transport is not connected");
-    return new PlainPeerChannel(
-      current,
-      input.peerId,
-      input.roomId ?? roomId ?? undefined,
-      (message) => { void input.onMessage(message); },
-      () => input.onDisconnect(input.peerId),
-    );
-  }
-
   async function attachCrossPcBridge(input: CrossPcBridgeInput): Promise<void> {
     crossPcBridgeInput = input;
     const currentRelay = relay;
@@ -298,7 +283,6 @@ export function createRelayTransportPort(deps: RelayTransportDeps): RelayTranspo
     stop,
     sendRoomMeta,
     onOuterMessage,
-    createPeerChannel,
     attachCrossPcBridge,
     detachCrossPcBridge,
     emitRelayState,

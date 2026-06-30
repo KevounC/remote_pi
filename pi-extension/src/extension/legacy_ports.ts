@@ -6,7 +6,6 @@ import type {
   CommandSurfacePort,
   CrossPcBridgeInput,
   OwnerMultiplexerPort,
-  RelayPeerChannelInput,
   RelayStartInput,
   RelayStartResult,
   RelayTransportPort,
@@ -24,7 +23,6 @@ export interface LegacyRelayTransportDeps {
   stop(reason?: ByeReason): void;
   sendRoomMeta: RelayTransportPort["sendRoomMeta"];
   onOuterMessage(handler: (line: string) => void | Promise<void>): () => void;
-  createPeerChannel(input: RelayPeerChannelInput): ReturnType<RelayTransportPort["createPeerChannel"]>;
   attachCrossPcBridge(input: CrossPcBridgeInput): Promise<void>;
   detachCrossPcBridge(): void;
   relay(): RelayClient | null;
@@ -81,7 +79,6 @@ function createLegacyRelayTransport(deps: LegacyRelayTransportDeps): RelayTransp
     stop: (reason) => deps.stop(reason),
     sendRoomMeta: (patch) => deps.sendRoomMeta(patch),
     onOuterMessage: (handler) => deps.onOuterMessage(handler),
-    createPeerChannel: (input) => deps.createPeerChannel(input),
     attachCrossPcBridge: (input) => deps.attachCrossPcBridge(input),
     detachCrossPcBridge: () => deps.detachCrossPcBridge(),
   };

@@ -65,7 +65,7 @@ import {
   type LegacyAgentMessage,
 } from "./session/transcript_projection.js";
 import { RelayClient, RoomAlreadyOpenError } from "./transport/relay_client.js";
-import type { PlainPeerChannel, PeerChannel } from "./transport/peer_channel.js";
+import { PlainPeerChannel } from "./transport/peer_channel.js";
 import { OwnerMultiplexer } from "./extension/owner_multiplexer.js";
 import {
   createRemotePiCommandSurfaceHarness,
@@ -187,12 +187,13 @@ const _relayTransport = createRelayTransportPort({
 });
 
 const _owners = new OwnerMultiplexer({
-  createChannel: (input) => _relayTransport.createPeerChannel({
-    peerId: input.peerId,
-    roomId: input.roomId ?? _myRoomId ?? undefined,
-    onMessage: input.onMessage,
-    onDisconnect: input.onDisconnect,
-  }),
+  createChannel: (input) => new PlainPeerChannel(
+    input.relay,
+    input.peerId,
+    input.roomId ?? _myRoomId ?? undefined,
+    input.onMessage,
+    () => input.onDisconnect(input.peerId),
+  ),
   refreshFooter: () => _refreshFooter(),
   listPeers: () => listPeers(),
   findKnownPeer: async (peerId) => {
@@ -247,66 +248,6 @@ const ownerHarness: OwnerMultiplexerTestHarness = {
     _routeClientMessageFrom(fallback as PlainPeerChannel, message, ctx);
   },
 };
-
-let _stopOwnerIngress: (() => void) | null = null;
-
-function _ensureOwnerIngressListener(): void {
-  if (_stopOwnerIngress) return;
-  _stopOwnerIngress = _relayTransport.onOuterMessage((line) => {
-    void _handleOwnerOuterLine(line);
-  });
-}
-
-function _stopOwnerIngressListener(): void {
-  _stopOwnerIngress?.();
-  _stopOwnerIngress = null;
-}
-
-async function _handleOwnerOuterLine(line: string): Promise<void> {
-  const currentRelay = _relayTransport.currentRelayForOwnerChannels();
-  if (!currentRelay) return;
-  await _owners.handleOuterLine({
-    line,
-    relay: currentRelay,
-    roomId: _myRoomId ?? undefined,
-    turnActive: () => _turnProjection().working,
-    isCurrent: () => (
-      !_disposed &&
-      _state === "started" &&
-      currentRelay === _relayTransport.currentRelayForOwnerChannels()
-    ),
-    onMessage: (message, sender) => _routeClientMessageFrom(
-      sender as PlainPeerChannel,
-      message,
-      _lastEventCtx ?? _lastCtx ?? _noopCtx,
-    ),
-    onDisconnect: (peerId) => _onPeerDisconnect(peerId),
-    sendToPeer: (peerId, message) => _sendOwnerMessageToPeer(peerId, message),
-  });
-}
-
-function _sendOwnerMessageToPeer(peerId: string, message: ServerMessage): void {
-  const existing = _owners.get(peerId);
-  if (existing) {
-    existing.send(message);
-    return;
-  }
-
-  let transient: (PeerChannel & { detach(): void }) | null = null;
-  try {
-    transient = _relayTransport.createPeerChannel({
-      peerId,
-      roomId: _myRoomId ?? undefined,
-      onMessage: () => undefined,
-      onDisconnect: () => undefined,
-    });
-    transient.send(message);
-  } catch {
-    // Best-effort error/pair response: relay reconnect + app session_sync recover.
-  } finally {
-    try { transient?.detach(); } catch { /* best-effort transient channel cleanup */ }
-  }
-}
 
 const _pairingCoordinator = new PairingCoordinator({
   getState: () => _state,
@@ -1049,7 +990,7 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
     _owners.broadcast({ type: "bye", reason: byeReason });
   }
 
-  _stopOwnerIngressListener();
+  _pairingCoordinator.stopListener();
 
   // Tear down every per-owner channel and clear the multiplexer registry.
   _owners.detachAll();
@@ -1089,9 +1030,7 @@ function _goIdle(byeReason?: import("./protocol/types.js").ByeReason): void {
 function _onRelayClose(): void {
   if (_state === "idle") return;  // already torn down (e.g. /remote-pi stop)
 
-  // Keep owner ingress subscribed through the relay transport so the fresh
-  // reconnect socket can reattach known peers from their first post-reconnect
-  // message. Only the per-owner channels are relay-socket-specific.
+  _pairingCoordinator.stopListener();
 
   // Detach every per-owner channel — relay is gone, none can route. The
   // auto-listener re-attaches owners after `_attemptReconnect` succeeds
@@ -1544,15 +1483,15 @@ function createIndexDeps(): LegacyIndexDeps {
   return {
     relay: {
       status: _relayStatus,
-      start: (input) => {
-        _ensureOwnerIngressListener();
-        return _relayTransport.start({
-          ...input,
-          keypair: input.keypair ?? _pairingCoordinator.currentKeypair() ?? undefined,
-          isDisposed: () => _disposed,
-          onUnexpectedClose: () => _onRelayClose(),
-        });
-      },
+      start: (input) => _relayTransport.start({
+        ...input,
+        keypair: input.keypair ?? _pairingCoordinator.currentKeypair() ?? undefined,
+        isDisposed: () => _disposed,
+        onUnexpectedClose: () => _onRelayClose(),
+        onConnected: (relay) => {
+          _pairingCoordinator.listenOn(relay);
+        },
+      }),
       stop: (reason) => { _goIdle(reason); },
       sendRoomMeta: (patch) => {
         _publishRoomMetaPatch({
@@ -1563,7 +1502,6 @@ function createIndexDeps(): LegacyIndexDeps {
         });
       },
       onOuterMessage: (handler) => _relayTransport.onOuterMessage(handler),
-      createPeerChannel: (input) => _relayTransport.createPeerChannel(input),
       attachCrossPcBridge: (input) => _relayTransport.attachCrossPcBridge(input),
       detachCrossPcBridge: () => { _relayTransport.detachCrossPcBridge(); },
       relay: () => _relayTransport.currentRelayForOwnerChannels(),
@@ -1852,7 +1790,6 @@ async function _startRelayViaTransport(ctx: Pick<ExtensionContext, "ui" | "cwd">
   ctx.ui.notify(`[remote-pi] Connecting to relay ${relayUrl} (source: ${source}, room: ${roomId})…`, "info");
 
   try {
-    _ensureOwnerIngressListener();
     await _relayTransport.start({
       relayUrl,
       keypair: edKp,
@@ -1860,6 +1797,9 @@ async function _startRelayViaTransport(ctx: Pick<ExtensionContext, "ui" | "cwd">
       roomMeta,
       isDisposed: () => _disposed,
       onUnexpectedClose: () => _onRelayClose(),
+      onConnected: (relay) => {
+        _pairingCoordinator.listenOn(relay);
+      },
     });
   } catch (err) {
     if (err instanceof RelayStartAbortedError) return;
