@@ -23,10 +23,24 @@ Protocolo, identidades, ACK, roteamento cross-PC e trust model: ver
 
 ## Comandos
 
-- `pnpm install` — instala deps
-- `pnpm typecheck` — `tsc --noEmit`, deve passar zero erros
-- `pnpm build` — `tsc`, gera `dist/`
-- `pnpm dev` — `tsx src/index.ts`, executa direto sem build
+No sandbox (`codebox`), `/home/agent/.cache` é read-only e o pnpm 11.x falha com
+`[ERR_SQLITE_ERROR] unable to open database file` se não redirecionar store/caches.
+`/home/agent/.npmrc` é um char device quebrado (aviso `EACCES` inofensivo — ignore).
+Sempre prefixe com env repo-local:
+
+```bash
+cd pi-extension
+export PNPM_HOME=~/projects/remote_pi/.pnpm-store
+export npm_config_cache=~/projects/remote_pi/.npm-cache
+export XDG_CACHE_HOME=~/projects/remote_pi/.xdg-cache
+corepack pnpm install --store-dir ~/projects/remote_pi/.pnpm-store   # se faltar node_modules
+corepack pnpm typecheck   # tsc --noEmit, deve passar zero erros
+corepack pnpm build      # tsc -> dist/
+corepack pnpm dev        # tsx src/index.ts
+corepack pnpm exec vitest run <caminho/do/teste.ts>   # tests alvo; `pnpm test` completo tem falhas env conhecidas (EPERM em /tmp/claude/*.sock)
+```
+
+Veja [`../.agents/skills/pi-extension-typescript/SKILL.md`](../.agents/skills/pi-extension-typescript/SKILL.md) para o porquê.
 
 ## Configuração do relay
 

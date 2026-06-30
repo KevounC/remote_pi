@@ -16,8 +16,17 @@ bundling/wave width.
   https→ssh, no SSH key; bare mirrors in .pub-cache/git/cache/ resolve offline).
 - Known-unrelated analyze info: `axisAlignment` deprecated at
   `app/lib/ui/chat/widgets/input_bar.dart:802` — do not fail reviews on it.
-- pi-extension full `pnpm test` has known env UDS/cwd-lock failures
-  (EPERM on /tmp/claude/*.sock); rely on typecheck + targeted tests.
+- **pi-extension pnpm**: `/home/agent/.cache` is read-only; pnpm 11.x fails with
+  `[ERR_SQLITE_ERROR]` unless store/caches are redirected. Use:
+  `export PNPM_HOME=~/projects/remote_pi/.pnpm-store npm_config_cache=~/projects/remote_pi/.npm-cache XDG_CACHE_HOME=~/projects/remote_pi/.xdg-cache`
+  + `corepack pnpm install --store-dir ~/projects/remote_pi/.pnpm-store` if
+  node_modules missing. `/home/agent/.npmrc` is a broken char device (harmless
+  EACCES warning — ignore). `pnpm test` full suite has known env UDS/cwd-lock
+  failures (EPERM on /tmp/claude/*.sock); rely on typecheck + targeted vitest.
+- **relay cargo**: clean `cargo clippy --all-targets` passes (a stale build
+  artifact can make first-run clippy look red; rebuild clears it).
+- node codegen (`tools/protocol-codegen/bin/protocol-codegen.mjs`): works,
+  node v24.18.0.
 
 ## Wave 1 — launched 2026-06-30 (5 parallel, openai-codex/gpt-5.5)
 

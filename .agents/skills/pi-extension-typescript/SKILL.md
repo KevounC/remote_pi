@@ -28,6 +28,28 @@ corepack pnpm test      # vitest run
 corepack pnpm build     # tsc -> dist/
 ```
 
+### Sandbox toolchain (dev VM / `codebox`)
+
+`/home/agent/.cache` is mounted **read-only** on this sandbox, so pnpm 11.x
+fails with `[ERR_SQLITE_ERROR] unable to open database file` unless the store
+and caches are redirected off it. `/home/agent/.npmrc` is a broken char device
+(a harmless `EACCES` warning is emitted — ignore it). Always prefix pnpm with
+repo-local env:
+
+```bash
+cd pi-extension
+export PNPM_HOME=~/projects/remote_pi/.pnpm-store
+export npm_config_cache=~/projects/remote_pi/.npm-cache
+export XDG_CACHE_HOME=~/projects/remote_pi/.xdg-cache
+# if node_modules is missing, install once with the explicit store-dir:
+corepack pnpm install --store-dir ~/projects/remote_pi/.pnpm-store
+corepack pnpm typecheck
+corepack pnpm exec vitest run <path/to/test.ts>   # targeted; full `pnpm test` has known env UDS/cwd-lock failures (EPERM on /tmp/claude/*.sock)
+```
+
+`node_modules/` and the `.pnpm-store`/`.npm-cache`/`.xdg-cache` dirs are
+gitignored local state; do not commit them.
+
 Do not commit `dist/`, `node_modules/`, local `.pi/`, secrets, or generated build output.
 
 ## Module and TypeScript conventions
