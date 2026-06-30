@@ -12,4 +12,8 @@ abstract class PaneItem extends ChangeNotifier {
   /// Resultado novo não visto (só agentes); terminais retornam `false`.
   bool get unseenFinish => false;
   void clearUnseen() {}
+
+  /// Public change hook for the workspace projection, which owns live tab
+  /// resources but is not itself a [ChangeNotifier] subclass.
+  void notifyItemChanged() => notifyListeners();
 }

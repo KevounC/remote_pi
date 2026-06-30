@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io' show Directory, FileSystemEvent;
 import 'dart:math' show max;
 
@@ -18,13 +17,11 @@ import 'package:cockpit/app/cockpit/domain/contracts/terminal_gateway_factory.da
 import 'package:cockpit/app/cockpit/domain/contracts/workspace_layout_store.dart';
 import 'package:cockpit/app/cockpit/domain/contracts/worktree_manager.dart';
 import 'package:cockpit/app/cockpit/domain/entities/file_node.dart';
-import 'package:cockpit/app/cockpit/domain/entities/file_view.dart';
 import 'package:cockpit/app/cockpit/domain/entities/git_file_status.dart';
 import 'package:cockpit/app/cockpit/domain/entities/git_info.dart';
 import 'package:cockpit/app/cockpit/domain/entities/launchable_app.dart';
 import 'package:cockpit/app/cockpit/domain/entities/project.dart';
 import 'package:cockpit/app/cockpit/domain/entities/session_info.dart';
-import 'package:cockpit/app/cockpit/domain/entities/thinking_level.dart';
 import 'package:cockpit/app/cockpit/domain/entities/workspace_document.dart';
 import 'package:cockpit/app/cockpit/domain/entities/workspace_document_commands.dart';
 import 'package:cockpit/app/cockpit/domain/entities/workspace_tab.dart';
@@ -38,46 +35,64 @@ import 'package:cockpit/app/cockpit/ui/session/file_viewer_session.dart';
 import 'package:cockpit/app/cockpit/ui/session/pane_item.dart';
 import 'package:cockpit/app/cockpit/ui/session/terminal_session.dart';
 import 'package:cockpit/app/cockpit/ui/states/pane_node.dart';
+import 'package:cockpit/app/cockpit/ui/viewmodels/workspace_projection.dart';
 import 'package:flutter/foundation.dart';
-import 'package:window_manager/window_manager.dart';
 
 /// Controlador do shell: projetos, árvore de splits **por projeto**, sessões de
 /// agente, foco.
 ///
 /// Cada projeto (workspace) tem o seu próprio documento ([WorkspaceDocument] em
 /// [_documents]); trocar de projeto só troca qual árvore é exibida (o `IndexedStack`
-/// na página mantém todas montadas → estado preservado). As sessões (processos
-/// `pi`) vivem em [_sessions] e seguem rodando independente da UI.
+/// na página mantém todas montadas → estado preservado). As abas/processos vivos
+/// vivem em [_workspace] e seguem rodando independente da UI.
 ///
 /// As operações de pane agem no **projeto ativo** ([_selectedProjectId]) — o
 /// `IndexedStack` garante que só o projeto ativo é interativo.
 class CockpitViewModel extends ChangeNotifier {
   CockpitViewModel(
-    this._projects,
-    this._factory,
-    this._folders,
-    this._history,
-    this._notifier,
-    this._fileSystem,
-    this._terminalFactory,
-    this._fileReader,
-    this._layoutStore,
-    this._gitReader,
-    this._fileSearcher,
-    this._launcher,
-    this._worktreeMgr,
-    this._fileMutator,
-    this._lsp,
-  );
+    ProjectRepository projects,
+    RpcGatewayFactory rpcFactory,
+    FolderLister folders,
+    SessionHistory history,
+    Notifier notifier,
+    FileSystemReader fileSystem,
+    TerminalGatewayFactory terminalFactory,
+    FileReader fileReader,
+    WorkspaceLayoutStore layoutStore,
+    GitStatusReader gitReader,
+    FileSearcher fileSearcher,
+    AppLauncherGateway launcher,
+    WorktreeManager worktreeMgr,
+    FileSystemMutator fileMutator,
+    LspServerPool lsp,
+  ) : _projects = projects,
+      _folders = folders,
+      _history = history,
+      _fileSystem = fileSystem,
+      _layoutStore = layoutStore,
+      _gitReader = gitReader,
+      _fileSearcher = fileSearcher,
+      _launcher = launcher,
+      _worktreeMgr = worktreeMgr,
+      _fileMutator = fileMutator,
+      _lsp = lsp {
+    _workspace = WorkspaceProjection(
+      rpcFactory: rpcFactory,
+      terminalFactory: terminalFactory,
+      fileReader: fileReader,
+      history: history,
+      notifier: notifier,
+      lsp: lsp,
+      onChanged: notifyListeners,
+      onAgentTurnEnd: _onAgentTurnEnd,
+      onPreferenceChanged: _scheduleSave,
+    );
+  }
 
   final ProjectRepository _projects;
-  final RpcGatewayFactory _factory;
   final FolderLister _folders;
   final SessionHistory _history;
-  final Notifier _notifier;
   final FileSystemReader _fileSystem;
-  final TerminalGatewayFactory _terminalFactory;
-  final FileReader _fileReader;
   final WorkspaceLayoutStore _layoutStore;
   final GitStatusReader _gitReader;
   final FileSearcher _fileSearcher;
@@ -85,19 +100,12 @@ class CockpitViewModel extends ChangeNotifier {
   final WorktreeManager _worktreeMgr;
   final FileSystemMutator _fileMutator;
   final LspServerPool _lsp;
+  late final WorkspaceProjection _workspace;
 
   List<LaunchableApp> _availableApps = const [];
 
   final List<Project> _projectList = <Project>[];
   String? _selectedProjectId;
-  final Map<String, PaneItem> _sessions = <String, PaneItem>{};
-
-  /// Watcher por aba de arquivo: relê o conteúdo ao vivo quando o disco muda
-  /// (o agente edita o arquivo). Chaveado pelo id da sessão; cancelado no
-  /// `_disposeSession`. O [_fileWatchDebounce] junta rajadas de eventos do editor.
-  final Map<String, StreamSubscription<void>> _fileWatchers =
-      <String, StreamSubscription<void>>{};
-  final Map<String, Timer> _fileWatchDebounce = <String, Timer>{};
 
   /// Documento de workspace por projeto (pane tree + foco + descritores de abas).
   final Map<String, WorkspaceDocument> _documents =
@@ -208,7 +216,7 @@ class CockpitViewModel extends ChangeNotifier {
   bool get treeVisible => _treeVisible;
   List<LaunchableApp> get availableApps =>
       List<LaunchableApp>.unmodifiable(_availableApps);
-  PaneItem? session(String id) => _sessions[id];
+  PaneItem? session(String id) => _workspace.item(id);
 
   /// Estado git do projeto (branch + sujos), ou `null` se não for repo git.
   GitInfo? gitInfo(String projectId) => _gitInfo[projectId];
@@ -237,7 +245,7 @@ class CockpitViewModel extends ChangeNotifier {
   /// Aba que o usuário está olhando.
   PaneItem? get focusedAgent {
     final id = _focusedAgentId;
-    return id == null ? null : _sessions[id];
+    return id == null ? null : _workspace.item(id);
   }
 
   /// Filhos de uma pasta (lazy-load da árvore de arquivos).
@@ -274,11 +282,11 @@ class CockpitViewModel extends ChangeNotifier {
     // Se não é preview, cria uma aba normal (comportamento original).
     FileViewerSession? previewCandidate;
     for (final tabId in leaf.tabs) {
-      final s = _sessions[tabId];
-      if (s is FileViewerSession) {
+      final item = _workspace.item(tabId);
+      if (item is FileViewerSession) {
         // Se já aberto, só seleciona (mas transforma preview em normal se não é preview).
-        if (s.path == path) {
-          if (!isPreview && s.isPreview) s.pin();
+        if (item.path == path) {
+          if (!isPreview && item.isPreview) item.pin();
           _applyWorkspaceCommand(
             (doc) => WorkspaceDocumentCommands.selectTab(
               doc,
@@ -289,21 +297,19 @@ class CockpitViewModel extends ChangeNotifier {
           return;
         }
         // Guarda o primeiro preview encontrado para possível reutilização.
-        if (isPreview && s.isPreview && previewCandidate == null) {
-          previewCandidate = s;
+        if (isPreview && item.isPreview && previewCandidate == null) {
+          previewCandidate = item;
         }
       }
     }
 
-    final view = await _fileReader.read(path);
-    if (view is FileViewUnsupported) return; // binário/vídeo: não abre
-
     // Se é preview e temos um candidato, reutiliza (substitui conteúdo).
     if (isPreview && previewCandidate != null) {
-      previewCandidate.path = path;
-      previewCandidate.view = view;
-      previewCandidate.dirty = false;
-      previewCandidate.notifyListeners(); // Força rebuild do FileViewer
+      final replaced = await _workspace.replaceViewerPath(
+        previewCandidate.id,
+        path,
+      );
+      if (!replaced) return;
       _applyWorkspaceCommand(
         (doc) => WorkspaceDocumentCommands.replaceTab(
           doc,
@@ -317,15 +323,13 @@ class CockpitViewModel extends ChangeNotifier {
     }
 
     // Cria nova aba (preview ou normal).
-    final viewer = FileViewerSession(
+    final viewer = await _workspace.createViewer(
       id: _nid('v'),
       projectId: projectId,
       path: path,
-      view: view,
       isPreview: isPreview,
     );
-    _sessions[viewer.id] = viewer;
-    _watchFileViewer(viewer);
+    if (viewer == null) return; // binário/vídeo/grande demais: não abre
     final viewerTab = WorkspaceTab.viewer(id: viewer.id, filePath: path);
 
     // Se a pane só tem o placeholder vazio, substitui; senão adiciona aba.
@@ -333,8 +337,8 @@ class CockpitViewModel extends ChangeNotifier {
     final current = _activeDocument?.root ?? document.root;
     final lf = findLeaf(current, paneId);
     final activeTabId = lf?.active;
-    final activeTab = activeTabId != null ? _sessions[activeTabId] : null;
-    final only = lf?.tabs.length == 1 ? _sessions[lf!.tabs.first] : null;
+    final activeTab = activeTabId == null ? null : _workspace.item(activeTabId);
+    final only = lf?.tabs.length == 1 ? _workspace.item(lf!.tabs.first) : null;
 
     late final bool applied;
     if (isPreview && activeTab is FileViewerSession && !activeTab.isPreview) {
@@ -379,7 +383,7 @@ class CockpitViewModel extends ChangeNotifier {
         ),
       );
     }
-    if (!applied) _disposeSession(viewer.id);
+    if (!applied) _workspace.disposeTab(viewer.id);
   }
 
   /// Seleciona um arquivo no FileTreePanel (atualiza o highlight).
@@ -391,19 +395,8 @@ class CockpitViewModel extends ChangeNotifier {
   /// Grava o conteúdo editado de uma aba de viewer em disco e reclassifica o
   /// `view` (markdown/texto/linguagem) com o conteúdo salvo. Retorna `true` no
   /// sucesso. Sem trava: escrita concorrente do agente é last-write-wins (MVP).
-  Future<bool> saveFile(String sessionId, String content) async {
-    final s = _sessions[sessionId];
-    if (s is! FileViewerSession) return false;
-    final ok = await _fileReader.write(s.path, content);
-    if (!ok) return false;
-    final fresh = await _fileReader.read(s.path);
-    final cur = _sessions[sessionId];
-    if (cur is FileViewerSession && fresh is! FileViewUnsupported) {
-      cur.view = fresh;
-      notifyListeners();
-    }
-    return true;
-  }
+  Future<bool> saveFile(String sessionId, String content) =>
+      _workspace.saveViewer(sessionId, content);
 
   // ---- LSP (diagnostics + formatação) ---------------------------------------
 
@@ -559,20 +552,8 @@ class CockpitViewModel extends ChangeNotifier {
   /// Reaponta as abas de viewer afetadas por um rename de [from] → [to]: o
   /// próprio arquivo e, se [from] for pasta, todos os descendentes (troca de
   /// prefixo). Re-lê o conteúdo e re-arma o watcher no novo caminho.
-  Future<void> _retargetSessions(String from, String to) async {
-    for (final s in _sessions.values) {
-      if (s is! FileViewerSession || !_isUnder(s.path, from)) continue;
-      final newPath = s.path == from
-          ? to
-          : '$to${s.path.substring(from.length)}';
-      s.retarget(newPath);
-      final fresh = await _fileReader.read(newPath);
-      if (fresh is! FileViewUnsupported) s.view = fresh;
-      _fileWatchers.remove(s.id)?.cancel();
-      _watchFileViewer(s);
-    }
-    notifyListeners();
-  }
+  Future<void> _retargetSessions(String from, String to) =>
+      _workspace.retargetViewersUnder(from, to);
 
   /// Fecha (no projeto ativo) toda aba de viewer cujo arquivo está em/sob [path].
   /// Coleta os pares (pane, aba) antes de fechar pra não mutar a árvore durante
@@ -583,7 +564,7 @@ class CockpitViewModel extends ChangeNotifier {
     final targets = <(String, String)>[];
     for (final leaf in leaves(tree)) {
       for (final tabId in leaf.tabs) {
-        final s = _sessions[tabId];
+        final s = _workspace.item(tabId);
         if (s is FileViewerSession && _isUnder(s.path, path)) {
           targets.add((leaf.id, tabId));
         }
@@ -603,9 +584,8 @@ class CockpitViewModel extends ChangeNotifier {
 
   /// Nº de agentes do workspace que terminaram um turno e ainda não foram
   /// vistos (badge de notificações).
-  int notificationCount(String projectId) => _sessions.values
-      .where((s) => s.projectId == projectId && s.unseenFinish)
-      .length;
+  int notificationCount(String projectId) =>
+      _workspace.notificationCount(projectId);
 
   // ---- init -----------------------------------------------------------------
   Future<void> init() async {
@@ -781,9 +761,7 @@ class CockpitViewModel extends ChangeNotifier {
   void _disposeProjectRuntime(String id) {
     final document = _documents.remove(id);
     if (document != null) {
-      for (final sid in document.tabs.keys) {
-        _disposeSession(sid);
-      }
+      _workspace.disposeProject(document);
     }
     _savedLayouts.remove(id);
     _gitInfo.remove(id);
@@ -909,7 +887,7 @@ class CockpitViewModel extends ChangeNotifier {
     required String agentName,
     required bool autoStartRelay,
   }) async {
-    final s = _sessions[sessionId];
+    final s = _workspace.item(sessionId);
     if (s is! AgentSession) return;
 
     final nameChanged = agentName.trim() != s.title;
@@ -954,10 +932,10 @@ class CockpitViewModel extends ChangeNotifier {
       (document) => WorkspaceDocumentCommands.appendTab(
         document,
         paneId: paneId,
-        tab: _sessionToWorkspaceTab(empty, project),
+        tab: _workspace.descriptorFor(empty, project),
       ),
     );
-    if (!applied) _disposeSession(empty.id);
+    if (!applied) _workspace.disposeTab(empty.id);
   }
 
   /// Cria uma aba (agente ou terminal) direto na subpasta [subRelative] do
@@ -971,9 +949,9 @@ class CockpitViewModel extends ChangeNotifier {
     final paneId = focusedPaneId(project.id) ?? leaves(document.root).first.id;
     final leaf = findLeaf(document.root, paneId) ?? leaves(document.root).first;
     final s = _spawn(subRelative, terminal: terminal);
-    final tab = _sessionToWorkspaceTab(s, project);
+    final tab = _workspace.descriptorFor(s, project);
 
-    final active = _sessions[leaf.active];
+    final active = _workspace.item(leaf.active);
     final replaceEmpty =
         active is AgentSession && active.status == AgentStatus.empty;
 
@@ -987,7 +965,7 @@ class CockpitViewModel extends ChangeNotifier {
             )
           : WorkspaceDocumentCommands.appendTab(doc, paneId: leaf.id, tab: tab),
     );
-    if (!applied) _disposeSession(s.id);
+    if (!applied) _workspace.disposeTab(s.id);
   }
 
   /// Divide a pane criando um agente novo ao lado/abaixo.
@@ -997,7 +975,7 @@ class CockpitViewModel extends ChangeNotifier {
     if (document == null || project == null) return;
     // O novo pane espelha o tipo da aba ativa: terminal → terminal, agente → agente.
     final leaf = findLeaf(document.root, paneId);
-    final active = leaf == null ? null : _sessions[leaf.active];
+    final active = leaf == null ? null : _workspace.item(leaf.active);
     final terminal = active is TerminalSession;
     final s = _spawn(subRelative, terminal: terminal);
     final applied = _applyWorkspaceCommand(
@@ -1005,12 +983,12 @@ class CockpitViewModel extends ChangeNotifier {
         doc,
         targetPaneId: paneId,
         dir: dir,
-        tab: _sessionToWorkspaceTab(s, project),
+        tab: _workspace.descriptorFor(s, project),
         newPaneId: _nid('pane'),
         newSplitId: _nid('sp'),
       ),
     );
-    if (!applied) _disposeSession(s.id);
+    if (!applied) _workspace.disposeTab(s.id);
   }
 
   // ---- drag & drop de abas --------------------------------------------------
@@ -1087,10 +1065,10 @@ class CockpitViewModel extends ChangeNotifier {
         document,
         paneId: paneId,
         emptyTabId: emptyId,
-        replacement: _sessionToWorkspaceTab(s, project),
+        replacement: _workspace.descriptorFor(s, project),
       ),
     );
-    if (!applied) _disposeSession(s.id);
+    if (!applied) _workspace.disposeTab(s.id);
   }
 
   void closeTab(String paneId, String agentId) {
@@ -1106,7 +1084,7 @@ class CockpitViewModel extends ChangeNotifier {
       ),
     );
     if (!applied || !(_activeDocument?.tabs.containsKey(empty.id) ?? false)) {
-      _disposeSession(empty.id);
+      _workspace.disposeTab(empty.id);
     }
   }
 
@@ -1122,7 +1100,7 @@ class CockpitViewModel extends ChangeNotifier {
       ),
     );
     if (!applied || !(_activeDocument?.tabs.containsKey(empty.id) ?? false)) {
-      _disposeSession(empty.id);
+      _workspace.disposeTab(empty.id);
     }
   }
 
@@ -1178,7 +1156,7 @@ class CockpitViewModel extends ChangeNotifier {
     if (!changed) return false;
     _setDocument(result.document);
     for (final id in result.disposeTabIds) {
-      _disposeSession(id);
+      _workspace.disposeTab(id);
     }
     _clearFocusedNotification();
     notifyListeners();
@@ -1208,86 +1186,18 @@ class CockpitViewModel extends ChangeNotifier {
       subRelative.isEmpty ? project.name : _basename(subRelative),
     );
     return terminal
-        ? _buildTerminal(_nid('t'), project.id, cwd, title: title)
-        : _buildAgent(_nid('a'), project, cwd, title: title);
-  }
-
-  TerminalSession _buildTerminal(
-    String id,
-    String projectId,
-    String cwd, {
-    String? title,
-  }) {
-    final t = TerminalSession(
-      id: id,
-      projectId: projectId,
-      workingDirectory: cwd,
-      gateway: _terminalFactory.create(),
-      title: title,
-    );
-    _sessions[t.id] = t;
-    return t;
-  }
-
-  /// Cria e boota um agente. [restoreSessionPath] (restauração) faz reanexar a
-  /// conversa salva via `switch_session`; senão, a VM captura o arquivo de
-  /// sessão que o pi criar (no 1º fim de turno) pra poder restaurar depois.
-  /// O nome final é atribuído pelo broker via evento `remote-pi:name-assigned`
-  /// quando houver colisão de mesh — [AgentSession] trata o evento e persiste.
-  AgentSession _buildAgent(
-    String id,
-    Project project,
-    String cwd, {
-    String? title,
-    bool autoStartRelay = false,
-    String? restoreSessionPath,
-    String? preferredModelId,
-    ThinkingLevel preferredThinking = ThinkingLevel.off,
-  }) {
-    final s =
-        AgentSession(
-            id: id,
+        ? _workspace.createTerminal(
+            id: _nid('t'),
             projectId: project.id,
             workingDirectory: cwd,
-            factory: _factory,
             title: title,
-            autoStartRelay: autoStartRelay,
           )
-          ..preferredModelId = preferredModelId
-          ..preferredThinking = preferredThinking;
-    s.onTurnEnd = () => _onAgentTurnEnd(s);
-    s.onPreferenceChanged = () => _scheduleSave(project.id);
-    _sessions[s.id] = s;
-    unawaited(_bootAgent(s, cwd, project, restoreSessionPath));
-    return s;
-  }
-
-  Future<void> _bootAgent(
-    AgentSession s,
-    String cwd,
-    Project project,
-    String? restoreSessionPath,
-  ) async {
-    s.sessionBaseline = (await _history.sessionsFor(
-      cwd,
-    )).map((e) => e.path).toSet();
-    await s.boot(
-      environment: _buildDirectConfig(s, project),
-      restoreSessionPath: restoreSessionPath,
-    );
-  }
-
-  /// Serializa `agent_name`, `auto_start_relay` e `workspace` em
-  /// `REMOTE_PI_DIRECT_CONFIG` para o processo filho.
-  Map<String, String> _buildDirectConfig(AgentSession s, Project project) {
-    return {
-      'REMOTE_PI_DIRECT_CONFIG': jsonEncode(<String, dynamic>{
-        'agent_name': s.title,
-        'workspace': project.name,
-        'auto_start_relay': s.autoStartRelay,
-      }),
-      'REMOTE_PI_DAEMON': '1',
-    };
+        : _workspace.createAgent(
+            id: _nid('a'),
+            project: project,
+            workingDirectory: cwd,
+            title: title,
+          );
   }
 
   // ---- notificações ---------------------------------------------------------
@@ -1307,99 +1217,35 @@ class CockpitViewModel extends ChangeNotifier {
     return ls.isEmpty ? null : ls.first.active;
   }
 
-  void _onAgentTurnEnd(AgentSession s) {
-    if (s.sessionPath == null) unawaited(_captureSessionPath(s));
-    unawaited(_refreshGit(s.projectId));
-    unawaited(_refreshWorktrees(_rootOf(s.projectId)));
-    unawaited(_notifyIfNeeded(s));
-  }
-
-  /// Badge (ponto na aba) → só se o agente NÃO for a aba ativa.
-  /// OS notification → só se a janela não estiver focada.
-  /// Separar as duas responsabilidades evita badge preso: se o usuário já está
-  /// na aba, não há nada a marcar — ele verá a resposta ao olhar para a janela.
-  Future<void> _notifyIfNeeded(AgentSession s) async {
-    final isActiveTab = s.id == _focusedAgentId;
-
-    if (!isActiveTab) {
-      s.markUnseen();
-      notifyListeners();
+  void _onAgentTurnEnd(AgentSession session) {
+    if (session.sessionPath == null) {
+      unawaited(_workspace.captureSessionPath(session));
     }
-
-    if (!_notificationsEnabled) return;
-
-    final windowFocused = await windowManager.isFocused();
-    if (!windowFocused) {
-      final workspace = _projectById(s.projectId)?.name ?? '';
-      await _notifier.agentFinished(agentName: s.title, workspace: workspace);
-    }
+    unawaited(_refreshGit(session.projectId));
+    unawaited(_refreshWorktrees(_rootOf(session.projectId)));
+    unawaited(
+      _workspace.notifyIfNeeded(
+        session,
+        isActiveTab: session.id == _focusedAgentId,
+        notificationsEnabled: _notificationsEnabled,
+        workspace: _projectById(session.projectId)?.name ?? '',
+      ),
+    );
   }
 
   /// Limpa a notificação do agente que acabou de virar o focado.
   void _clearFocusedNotification() {
     final id = _focusedAgentId;
-    final s = id == null ? null : _sessions[id];
-    if (s != null && s.unseenFinish) s.clearUnseen();
+    if (id != null) _workspace.clearUnseen(id);
   }
 
   AgentSession _makeEmpty(String projectId) =>
-      _makeEmptyWithId(_nid('a'), projectId);
+      _workspace.createEmpty(id: _nid('a'), projectId: projectId);
 
   WorkspaceTab _emptyTabDescriptor(String projectId) {
     final id = _nid('a');
-    _makeEmptyWithId(id, projectId);
+    _workspace.createEmpty(id: id, projectId: projectId);
     return WorkspaceTab.empty(id: id);
-  }
-
-  AgentSession _makeEmptyWithId(String id, String projectId) {
-    final s = AgentSession(
-      id: id,
-      projectId: projectId,
-      workingDirectory: '',
-      factory: _factory,
-      title: 'New',
-    );
-    _sessions[s.id] = s;
-    return s;
-  }
-
-  void _disposeSession(String id) {
-    _fileWatchers.remove(id)?.cancel();
-    _fileWatchDebounce.remove(id)?.cancel();
-    final s = _sessions.remove(id);
-    s?.dispose();
-  }
-
-  /// Observa o arquivo de uma aba de viewer e relê o conteúdo ao vivo quando ele
-  /// muda no disco (decisão de UX — antes a aba congelava até fechar/reabrir). O
-  /// debounce junta a rajada de eventos que um editor dispara num save; o re-read
-  /// que volta `FileViewUnsupported` (sumiu/binário transitório) é ignorado pra
-  /// não piscar. Tudo guardado por id de sessão e cancelado no `_disposeSession`.
-  void _watchFileViewer(FileViewerSession viewer) {
-    // A/V: live-reload desligado (plano 46). Recarregar recriaria o player no
-    // meio da reprodução; mídia raramente é reescrita em disco.
-    if (viewer.view is FileViewAudio || viewer.view is FileViewVideo) return;
-    final id = viewer.id;
-    _fileWatchers.remove(id)?.cancel();
-    _fileWatchers[id] = _fileReader.watch(viewer.path).listen(
-      (_) {
-        _fileWatchDebounce[id]?.cancel();
-        _fileWatchDebounce[id] = Timer(
-          const Duration(milliseconds: 120),
-          () async {
-            _fileWatchDebounce.remove(id);
-            if (_sessions[id] is! FileViewerSession) return; // aba fechou
-            final fresh = await _fileReader.read(viewer.path);
-            if (fresh is FileViewUnsupported) return;
-            final s = _sessions[id];
-            if (s is! FileViewerSession) return; // fechou durante o read
-            s.view = fresh;
-            notifyListeners();
-          },
-        );
-      },
-      onError: (_) {}, // watch falhou (sandbox, rename) → sem live-reload
-    );
   }
 
   // ---- persistência do layout ----------------------------------------------
@@ -1448,45 +1294,8 @@ class CockpitViewModel extends ChangeNotifier {
 
   /// Recria uma sessão a partir do descritor. `false` = não deu pra restaurar
   /// (ex.: viewer de arquivo que sumiu) → a aba é descartada no sanitize.
-  Future<bool> _restoreSession(WorkspaceTab tab, Project project) async {
-    String cwdOf() {
-      final sub = tab.relativeSubpath;
-      return sub.isEmpty ? project.path : '${project.path}/$sub';
-    }
-
-    switch (tab.kind) {
-      case WorkspaceTabKind.terminal:
-        _buildTerminal(tab.id, project.id, cwdOf(), title: tab.title);
-        return true;
-      case WorkspaceTabKind.viewer:
-        final path = tab.filePath;
-        if (path == null) return false;
-        final view = await _fileReader.read(path);
-        if (view is FileViewUnsupported) return false;
-        _sessions[tab.id] = FileViewerSession(
-          id: tab.id,
-          projectId: project.id,
-          path: path,
-          view: view,
-        );
-        return true;
-      case WorkspaceTabKind.empty:
-        _makeEmptyWithId(tab.id, project.id);
-        return true;
-      case WorkspaceTabKind.agent:
-        _buildAgent(
-          tab.id,
-          project,
-          cwdOf(),
-          title: tab.title,
-          autoStartRelay: tab.autoStartRelay,
-          restoreSessionPath: tab.sessionPath,
-          preferredModelId: tab.preferredModelId,
-          preferredThinking: tab.preferredThinking,
-        );
-        return true;
-    }
-  }
+  Future<bool> _restoreSession(WorkspaceTab tab, Project project) =>
+      _workspace.realize(tab, project);
 
   /// Avança `_seq` além de qualquer sufixo numérico dos ids restaurados, pra
   /// `_nid` não colidir com ids reaproveitados.
@@ -1513,19 +1322,6 @@ class CockpitViewModel extends ChangeNotifier {
     _seq = maxN;
   }
 
-  /// Descobre, por diferença com a [AgentSession.sessionBaseline], qual arquivo
-  /// de sessão o pi criou pra este agente, e o guarda pra restaurar depois.
-  Future<void> _captureSessionPath(AgentSession s) async {
-    final baseline = s.sessionBaseline;
-    if (baseline == null || s.sessionPath != null) return;
-    final now = await _history.sessionsFor(s.workingDirectory);
-    final fresh = now.where((e) => !baseline.contains(e.path)).toList();
-    if (fresh.isEmpty) return;
-    fresh.sort((a, b) => b.modifiedAt.compareTo(a.modifiedAt));
-    s.sessionPath = fresh.first.path;
-    notifyListeners(); // persiste o path
-  }
-
   Map<String, dynamic> _serializeLayout(String projectId) {
     final document = _documents[projectId];
     if (document == null) return const <String, dynamic>{};
@@ -1539,18 +1335,9 @@ class CockpitViewModel extends ChangeNotifier {
     WorkspaceDocument document,
   ) {
     final project = _projectById(projectId);
-    if (project == null) return document;
-    final tabs = <String, WorkspaceTab>{};
-    for (final leaf in leaves(document.root)) {
-      for (final id in leaf.tabs) {
-        final session = _sessions[id];
-        final tab = session == null
-            ? document.tabs[id]
-            : _sessionToWorkspaceTab(session, project);
-        if (tab != null) tabs[id] = tab;
-      }
-    }
-    return document.copyWith(tabs: tabs);
+    return project == null
+        ? document
+        : _workspace.documentWithLiveTabs(project, document);
   }
 
   /// Clona a estrutura de panes/abas do projeto [rootId] num doc de layout novo:
@@ -1624,32 +1411,6 @@ class CockpitViewModel extends ChangeNotifier {
           b: _remapTreeForClone(node.b, tabIdMap, nodeIdMap),
         );
     }
-  }
-
-  WorkspaceTab _sessionToWorkspaceTab(PaneItem s, Project project) {
-    if (s is TerminalSession) {
-      return WorkspaceTab.terminal(
-        id: s.id,
-        relativeSubpath: _subOf(s.workingDirectory, project.path),
-        title: s.title,
-      );
-    }
-    if (s is FileViewerSession) {
-      return WorkspaceTab.viewer(id: s.id, filePath: s.path);
-    }
-    final a = s as AgentSession;
-    if (a.status == AgentStatus.empty) {
-      return WorkspaceTab.empty(id: a.id, title: a.title);
-    }
-    return WorkspaceTab.agent(
-      id: a.id,
-      relativeSubpath: _subOf(a.workingDirectory, project.path),
-      title: a.title,
-      sessionPath: a.sessionPath,
-      autoStartRelay: a.autoStartRelay,
-      preferredModelId: a.preferredModelId,
-      preferredThinking: a.preferredThinking,
-    );
   }
 
   /// Caminho de [cwd] relativo à raiz [root] do projeto ('' = raiz). Devolve
@@ -1830,18 +1591,7 @@ class CockpitViewModel extends ChangeNotifier {
       t.cancel();
     }
     _saveTimers.clear();
-    for (final w in _fileWatchers.values) {
-      w.cancel();
-    }
-    _fileWatchers.clear();
-    for (final t in _fileWatchDebounce.values) {
-      t.cancel();
-    }
-    _fileWatchDebounce.clear();
-    for (final s in _sessions.values) {
-      s.dispose();
-    }
-    _sessions.clear();
+    _workspace.dispose();
     super.dispose();
   }
 }

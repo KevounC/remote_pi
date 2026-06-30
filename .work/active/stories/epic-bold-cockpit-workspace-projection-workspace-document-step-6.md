@@ -1,14 +1,14 @@
 ---
 id: epic-bold-cockpit-workspace-projection-workspace-document-step-6
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-workspace-document
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document-step-5]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 6: Extract the live workspace projection adapter from `CockpitViewModel`
@@ -64,12 +64,20 @@ final class WorkspaceProjection {
 - This step is what makes `CockpitViewModel` a document coordinator instead of the owner of every live resource.
 
 ## Acceptance Criteria
-- [ ] `CockpitViewModel` delegates live tab lookup, realization, descriptor projection, and disposal to `WorkspaceProjection`.
-- [ ] `WorkspaceProjection` owns file-viewer watchers/debounces and disposes them deterministically.
-- [ ] `WorkspaceProjection` owns live `PaneItem` lifecycle but does not mutate `WorkspaceDocument` directly.
-- [ ] `CockpitViewModel` remains the owner of selected project, project list, git/worktree refresh, and document command application.
-- [ ] `flutter test test/ui/workspace_projection_test.dart test/ui/cockpit_viewmodel_workspace_commands_test.dart` passes.
-- [ ] `flutter analyze` passes.
+- [x] `CockpitViewModel` delegates live tab lookup, realization, descriptor projection, and disposal to `WorkspaceProjection`.
+- [x] `WorkspaceProjection` owns file-viewer watchers/debounces and disposes them deterministically.
+- [x] `WorkspaceProjection` owns live `PaneItem` lifecycle but does not mutate `WorkspaceDocument` directly.
+- [x] `CockpitViewModel` remains the owner of selected project, project list, git/worktree refresh, and document command application.
+- [x] `flutter test test/ui/workspace_projection_test.dart test/ui/cockpit_viewmodel_workspace_commands_test.dart` passes.
+- [x] `flutter analyze` passes.
+
+## Implementation
+- Extracted `WorkspaceProjection` as the UI/viewmodel adapter that owns live `PaneItem` instances, agent/terminal/viewer realization, descriptor projection, session-path capture, notification dispatch, and tab/project disposal.
+- Moved file-viewer watch/debounce ownership into `WorkspaceProjection`; `disposeTab`, `disposeProject`, and `dispose` cancel watchers/debounces before disposing live pane items. Added `PaneItem.notifyItemChanged()` so the projection can notify owned items without reaching into protected `ChangeNotifier` API.
+- Kept `CockpitViewModel` as the document/project coordinator: project selection, git/worktree refresh, workspace command application, layout save debounce, and file tree state remain there. `session(String id)` now delegates to `WorkspaceProjection.item`.
+- Added `cockpit/test/ui/workspace_projection_test.dart` covering viewer watcher debounce/disposal, descriptor projection, and non-mutating document refresh.
+- Verification: `flutter pub get --offline`; `flutter analyze` (0 issues); `flutter test test/ui/workspace_projection_test.dart test/ui/cockpit_viewmodel_workspace_commands_test.dart` (8 tests passed).
+- Collision note: did not edit `agent_session.dart`, transcript entities, or `rpc_data_mapper.dart`; those files are still owned by the parallel Wave-5 agent.
 
 ## Rollback
 Inline `WorkspaceProjection` methods back into `CockpitViewModel`, restore `_sessions`/watcher maps there, and keep the document/command integration from Steps 1-5.
