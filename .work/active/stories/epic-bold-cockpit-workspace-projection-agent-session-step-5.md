@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-agent-session-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-agent-session
 depends_on: [epic-bold-cockpit-workspace-projection-agent-session-step-4]
@@ -93,3 +93,24 @@ Medium. This is mostly consumer migration, but it removes compatibility fields a
 ## Rollback
 
 Restore legacy getters and UI branches (`AgentStatus.streaming`, `isStreaming`, `turnStartedAt`, mutable `ToolEntry`) while keeping the projection code side-by-side. If tests reveal projection drift, fix the projection before re-removing compatibility state.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: whole-cockpit `flutter analyze` →
+No issues found; full `flutter test` → 222/222 (incl. new
+agent_transcript_projection_test.dart). Commit `3c3698e` scoped to cockpit only
+(UI widgets + agent_session + agent_entry + agent_snapshot + tests + story .md);
+no cross-subproject collision.
+
+Compat retirement verified directly: `AgentStatus` enum is now
+`{empty, booting, idle, crashed}` (no `streaming` variant); `AgentSession.
+isStreaming`/`turnStartedAt` + `AgentSnapshot.isStreaming` + mutable transcript
+entries (`UserEntry`/`AssistantTextEntry`/`ThinkingEntry`/`ToolEntry`) removed;
+`RpcDataMapper` retains only the documented short-lived wire adapter from legacy
+`isStreaming` → `AgentTurnProjection` (no UI consumers). UI widgets now read
+`session.projection`/`projection.turn`/`projection.controls` directly. Visible
+behavior preserved across all 7 paths (stop/cancel, disabled-while-working
+controls, elapsed timer start/stop, tab activity spinner, edit-dialog label,
+projected tool card done/error, notification badge count/clear). The 6-file
+pre-existing dart format drift is unowned (outside this story's write set) —
+correctly left unmodified.
