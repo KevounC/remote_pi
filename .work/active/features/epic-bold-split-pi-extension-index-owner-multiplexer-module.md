@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-owner-multiplexer-module
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-split-pi-extension-index
 depends_on: [epic-bold-split-pi-extension-index-composition-root]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Split pi-extension index — owner multiplexer module
@@ -398,3 +398,11 @@ No step intentionally changes public protocol, relay frame shape, CLI command na
 - Rollback is step-local. Steps first add a shell, then move channel registry, then ingress, then projections, then test aliases. If a later step fails, revert that step while keeping earlier extraction if tests pass.
 - Observable behavior remains pinned by existing multi-owner tests: N Owners attach, broadcasts reach every Owner, sender-specific replies stay sender-only, and revoking/disconnecting one Owner leaves others running.
 
+
+## Review — advanced to done (2026-06-30)
+
+All 5 child steps `done` (channel registry/fanout → owner ingress/pairing/reconnect
+→ lifecycle projections/revocation → test harness + unit tests). The owner-channel
+registry, fanout, pairing, reconnect, revocation, and display projections are now
+behind `OwnerMultiplexer`; `index.ts` test exports delegate through a harness.
+Epic complete.
