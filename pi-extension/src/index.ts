@@ -86,7 +86,7 @@ export { restartSupervisorCommand as _restartSupervisorCommand } from "./extensi
 export type { RestartStep } from "./extension/command_surface/supervisor_restart.js";
 import { createRemotePiExtensionRuntime, registerLifecycleHooks } from "./extension/composition_root.js";
 import { createLegacyIndexPorts, type LegacyIndexDeps } from "./extension/legacy_ports.js";
-import type { CommandSurfacePort } from "./extension/ports.js";
+import type { CommandSurfacePort, WakeAgentResult } from "./extension/ports.js";
 import { SdkSessionProjection } from "./session/sdk_session_projection.js";
 import { roomIdFor } from "./rooms.js";
 import { registerAgentTools } from "./session/tools.js";
@@ -532,33 +532,9 @@ function _sendPiMessage(
   options?: Parameters<ExtensionAPI["sendMessage"]>[1],
   label = "sendMessage",
 ): boolean {
-  const candidates = Array.from(new Set<AgentMessageApi | null>([_messageApi, _pi]));
-  let lastDetail = "agent session not bound yet";
-  for (const api of candidates) {
-    if (!api || typeof api.sendMessage !== "function") continue;
-    try {
-      const delivered = api.sendMessage(message, options);
-      if (_isPromiseLike(delivered)) {
-        delivered.catch((err: unknown) => {
-          const detail = err instanceof Error ? err.message : String(err);
-          if (_isStaleContextError(err)) _forgetStaleMessageApi(api);
-          console.error(`[remote-pi] ${label}: Pi rejected message: ${detail}`);
-        });
-      }
-      return true;
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      lastDetail = detail;
-      if (_isStaleContextError(err)) {
-        _forgetStaleMessageApi(api);
-        continue;
-      }
-      console.error(`[remote-pi] ${label}: Pi rejected message: ${detail}`);
-      return false;
-    }
-  }
-  console.error(`[remote-pi] ${label}: Pi rejected message: ${lastDetail}`);
-  return false;
+  const delivered = _sdkSessionProjection.sendPiMessage(message, options);
+  if (!delivered) console.error(`[remote-pi] ${label}: Pi rejected message: agent session not bound yet`);
+  return delivered;
 }
 
 /** Refreshes the Pi TUI footer slots from current module state. Safe no-op when ctx lacks ui or is stale. */
@@ -723,6 +699,7 @@ export function _getTurnProjectionForTest(): TurnProjection {
 export function _setPiForTest(pi: unknown): void {
   _pi = pi as typeof _pi;
   _messageApi = _isAgentMessageApi(pi) ? pi : null;
+  _sdkSessionProjection.clearApiBindings();
   if (_pi) _sdkSessionProjection.bindApi(_pi);
 }
 
@@ -1104,10 +1081,6 @@ type AgentMessageApi = {
 };
 let _messageApi: AgentMessageApi | null = null;
 
-function _isPromiseLike(value: unknown): value is PromiseLike<void> {
-  return !!value && (typeof value === "object" || typeof value === "function") && typeof (value as { then?: unknown }).then === "function";
-}
-
 function _isAgentMessageApi(value: unknown): value is AgentMessageApi {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<AgentMessageApi>;
@@ -1479,6 +1452,14 @@ function _rememberCommandCtx(ctx: ExtensionCommandContext): void {
   _sdkSessionProjection.bindCommandContext(ctx);
 }
 
+function _bindReplacementSessionContext(freshCtx: ActionCtx): void {
+  _lastCtx = freshCtx as unknown as typeof _lastCtx;
+  _lastEventCtx = freshCtx as unknown as typeof _lastEventCtx;
+  _pi = null;
+  _sdkSessionProjection.bindReplacementContext(freshCtx);
+  _messageApi = _sdkSessionProjection.messageApiBinding();
+}
+
 function _registerRemotePiCommands(pi: ExtensionAPI): void {
   const runWithCtx = (
     run: (args: string, ctx: ExtensionCommandContext) => void | Promise<void>,
@@ -1824,41 +1805,21 @@ function _deployAgentNetworkSkill(): void {
 type SendUserMessageOptions =
   NonNullable<Parameters<ExtensionAPI["sendUserMessage"]>[1]>;
 
-type WakeAgentResult =
-  | { ok: true }
-  | { ok: false; detail: string };
-
 async function _wakeAgent(
   content: Parameters<ExtensionAPI["sendUserMessage"]>[0],
   label: string,
   steeringBehavior?: SendUserMessageOptions["deliverAs"],
 ): Promise<WakeAgentResult> {
-  const candidates = Array.from(new Set<AgentMessageApi | null>([_messageApi, _pi]));
-  let lastDetail = "agent session not bound yet";
-  for (const api of candidates) {
-    if (!api || typeof api.sendUserMessage !== "function") continue;
-    try {
-      if (steeringBehavior) {
-        await api.sendUserMessage(content, { deliverAs: steeringBehavior });
-      } else {
-        await api.sendUserMessage(content);
-      }
-      return { ok: true };
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      lastDetail = detail;
-      if (_isStaleContextError(err)) {
-        _forgetStaleMessageApi(api);
-        continue;
-      }
-      console.error(`[remote-pi] ${label}: agent rejected incoming message: ${detail}`);
-      _notify(`[remote-pi] failed to process incoming message: ${detail}`, "error");
-      return { ok: false, detail };
-    }
+  const wake = steeringBehavior
+    ? await _sdkSessionProjection.wakeAgent(content, { deliverAs: steeringBehavior })
+    : await _sdkSessionProjection.wakeAgent(content);
+  if (!wake.ok) {
+    const detail = wake.detail ?? "agent session not bound yet";
+    console.error(`[remote-pi] ${label}: agent rejected incoming message: ${detail}`);
+    _notify(`[remote-pi] failed to process incoming message: ${detail}`, "error");
+    return { ok: false, detail };
   }
-  console.error(`[remote-pi] ${label}: agent rejected incoming message: ${lastDetail}`);
-  _notify(`[remote-pi] failed to process incoming message: ${lastDetail}`, "error");
-  return { ok: false, detail: lastDetail };
+  return wake;
 }
 
 /**
@@ -1942,6 +1903,7 @@ function _abortCurrentTurn(
       if (!_isStaleContextError(err)) throw err;
       if (candidate === _lastCtx) _lastCtx = null;
       if (candidate === _lastEventCtx) _lastEventCtx = null;
+      _sdkSessionProjection.forgetStaleBinding(candidate);
     }
   }
 
@@ -2003,7 +1965,7 @@ async function _deliverUserMessage(
     if (seededTurnId) {
       _applyTurnAndPublish({ type: "delivery_error", turnId: msg.id });
     }
-    _sendDeliveryError(sender, msg.id, wake.detail);
+    _sendDeliveryError(sender, msg.id, wake.detail ?? "agent session not bound yet");
     return;
   }
   const sessionId = _currentRemoteSessionId();
@@ -2134,21 +2096,15 @@ export function _routeClientMessageFrom(
       // (Token is already consumed and peer is in peers.json.)
       break;
     // Plan/28 — Typed app actions. Each delegates to the pure handler in
-    // `actions/handlers.ts`; the only thing this layer does is unify the
-    // dep injection (sender, _pi, _lastCtx, registry). `_lastCtx` may be
-    // null or a narrower Pick than the handlers want, so we cast to
-    // `ActionCtx` — fields that aren't present at runtime are surfaced
-    // as `action_error` by the handlers, not as a TypeError.
+    // `actions/handlers.ts`; this adapter now obtains Pi SDK capabilities only
+    // through SdkSessionProjection's fresh bindings. A session replacement clears
+    // stale bindings, so app actions either hit the current SDK context or return
+    // an explicit sender-scoped error.
     case "session_compact":
-      // Route through _lastEventCtx (refreshed on every session_start), NOT the
-      // capturable-stale _lastCtx — compact must never hit a ctx left stale by
-      // a prior New session. compact() is a base-ctx method, so the
-      // session_start ctx suffices. Fall back to _lastCtx defensively if no
-      // session_start has landed yet (keeps the pre-replacement happy path).
-      handleSessionCompact((_lastEventCtx ?? _lastCtx) as ActionCtx | null, sender, msg);
+      handleSessionCompact(_sdkSessionProjection.freshActionCtx(), sender, msg);
       break;
     case "session_new": {
-      const actionCtx = _lastCtx as ActionCtx | null;
+      const actionCtx = _sdkSessionProjection.freshCommandActionCtx();
       if (process.env["REMOTE_PI_DAEMON"] === "1" && !actionCtx?.newSession) {
         // Headless RPC daemon has no ExtensionCommandContext, so ctx.newSession
         // is unavailable. Ack, clear remote-pi's mirror, then exit with a
@@ -2164,17 +2120,11 @@ export function _routeClientMessageFrom(
         sender,
         msg,
         (freshCtx) => {
-          // newSession just made the captured _lastCtx STALE (the SDK throws
-          // if it's reused). Re-capture the fresh command-capable ctx the SDK
-          // passes to withSession so later command ops (another New session,
-          // list_models) run on the current session, not the stale one. The
-          // runtime object also carries ui/abort/cwd, so storing it in the
-          // narrowly-typed _lastCtx slot is sound (mirrors the read-site casts).
-          _lastCtx = freshCtx as unknown as typeof _lastCtx;
-          _lastEventCtx = freshCtx as unknown as typeof _lastEventCtx;
-          _sdkSessionProjection.bindCommandContext(freshCtx as ExtensionCommandContext);
-          _captureRemoteSession(freshCtx);
-          if (_isAgentMessageApi(freshCtx)) _messageApi = freshCtx;
+          // newSession marks every pre-replacement SDK context stale. Re-capture
+          // the fresh command/event/message/action capabilities in one projection
+          // method and drop the old module-level _pi so later app actions cannot
+          // fall back to a known-stale SDK object.
+          _bindReplacementSessionContext(freshCtx);
           if (_disposed && _messageApi) {
             _disposed = false;
             void _cmdRoot(freshCtx as unknown as Pick<ExtensionContext, "ui" | "cwd">);
@@ -2190,29 +2140,33 @@ export function _routeClientMessageFrom(
       });
       break;
     }
-    case "model_set":
-      if (!_pi) {
-        _sessionUnavailable(sender, msg.id, "Pi model API unavailable during session replacement");
+    case "model_set": {
+      const pi = _sdkSessionProjection.currentActionPi("model_set");
+      if (!pi) {
+        _sessionUnavailable(sender, msg.id, "Pi model API unavailable for the current session");
         break;
       }
       void handleModelSet(
-        _pi,
-        (_lastEventCtx ?? _lastCtx) as ActionCtx | null,
+        pi,
+        _sdkSessionProjection.freshActionCtx(),
         ensureModelRegistry(),
         sender,
         msg,
         _persistModelDefault,
       );
       break;
-    case "thinking_set":
-      if (!_pi) {
-        _sessionUnavailable(sender, msg.id, "Pi thinking API unavailable during session replacement");
+    }
+    case "thinking_set": {
+      const pi = _sdkSessionProjection.currentActionPi("thinking_set");
+      if (!pi) {
+        _sessionUnavailable(sender, msg.id, "Pi thinking API unavailable for the current session");
         break;
       }
-      handleThinkingSet(_pi, sender, msg);
+      handleThinkingSet(pi, sender, msg);
       break;
+    }
     case "list_models":
-      handleListModels(((_lastEventCtx ?? _lastCtx) as ActionCtx | null), ensureModelRegistry(), sender, msg);
+      handleListModels(_sdkSessionProjection.freshActionCtx(), ensureModelRegistry(), sender, msg);
       break;
   }
 }

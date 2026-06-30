@@ -6,6 +6,7 @@ import type {
 import type { ClientMessage, ServerMessage, ThinkingLevel, SessionHistoryEvent } from "../protocol/types.js";
 import type { PeerChannel } from "../transport/peer_channel.js";
 import type { SdkSessionProjectionPort, WakeAgentResult } from "../extension/ports.js";
+import type { ActionCtx, ActionPi, SdkModelLike } from "../actions/handlers.js";
 import { RemoteSessionIssuer, type RemoteSessionId } from "./remote_session.js";
 import type { TranscriptEvent } from "./transcript_event.js";
 import {
@@ -23,6 +24,8 @@ export type AgentMessageApi = {
   sendMessage: (...args: Parameters<ExtensionAPI["sendMessage"]>) => void | Promise<void>;
   sendUserMessage: (...args: Parameters<ExtensionAPI["sendUserMessage"]>) => void | Promise<void>;
 };
+
+export type FreshActionApi = Partial<AgentMessageApi> & Partial<ActionPi> & Partial<ActionCtx>;
 
 type RoomMetaPatch = {
   session_id?: string;
@@ -73,6 +76,13 @@ export function isAgentMessageApi(value: unknown): value is AgentMessageApi {
     typeof candidate.sendUserMessage === "function";
 }
 
+function isFreshActionApi(value: unknown): value is FreshActionApi {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as FreshActionApi;
+  return typeof candidate.setModel === "function" ||
+    typeof candidate.setThinkingLevel === "function";
+}
+
 function isStaleContextError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return message.includes("stale after session replacement or reload");
@@ -101,6 +111,7 @@ export class SdkSessionProjection implements SdkSessionProjectionPort {
   private commandCtx: ExtensionCommandContext | null = null;
   private eventCtx: ExtensionContext | null = null;
   private messageApi: AgentMessageApi | null = null;
+  private actionApi: FreshActionApi | null = null;
 
   constructor(private readonly opts: SdkSessionProjectionOptions) {}
 
@@ -115,7 +126,19 @@ export class SdkSessionProjection implements SdkSessionProjectionPort {
 
   bindSessionContext(ctx: ExtensionContext): void {
     this.eventCtx = ctx;
-    this.bindCapabilities(ctx);
+    this.replaceSessionCapabilities(ctx);
+  }
+
+  bindReplacementContext(ctx: ActionCtx): RemoteSessionId {
+    this.commandCtx = ctx as unknown as ExtensionCommandContext;
+    this.eventCtx = ctx as unknown as ExtensionContext;
+    this.replaceSessionCapabilities(ctx);
+    return this.captureRemoteSession(ctx);
+  }
+
+  clearApiBindings(): void {
+    this.messageApi = null;
+    this.actionApi = null;
   }
 
   clearStaleContexts(): void {
@@ -123,6 +146,7 @@ export class SdkSessionProjection implements SdkSessionProjectionPort {
     this.commandCtx = null;
     this.eventCtx = null;
     this.messageApi = null;
+    this.actionApi = null;
   }
 
   captureRemoteSession(ctx: unknown): RemoteSessionId {
@@ -408,14 +432,115 @@ export class SdkSessionProjection implements SdkSessionProjectionPort {
     return this.messageApi;
   }
 
+  currentActionPi(action: "model_set" | "thinking_set"): ActionPi | null {
+    const api = this.actionApi;
+    if (!api) return null;
+    if (action === "model_set" && typeof api.setModel !== "function") return null;
+    if (action === "thinking_set" && typeof api.setThinkingLevel !== "function") return null;
+    return this.wrapActionPi(api);
+  }
+
+  freshActionCtx(): ActionCtx | null {
+    const ctx = this.eventCtx ?? this.commandCtx;
+    return ctx ? this.wrapActionCtx(ctx as unknown as ActionCtx) : null;
+  }
+
+  freshCommandActionCtx(): ActionCtx | null {
+    return this.commandCtx ? this.wrapActionCtx(this.commandCtx as unknown as ActionCtx) : null;
+  }
+
+  forgetStaleBinding(value: unknown): void {
+    if (value === this.commandCtx) this.commandCtx = null;
+    if (value === this.eventCtx) this.eventCtx = null;
+    if (value === this.messageApi) {
+      this.messageApi = null;
+      this.opts.outputs.onStaleMessageApi?.(value as AgentMessageApi);
+    }
+    if (value === this.actionApi) this.actionApi = null;
+  }
+
   private bindCapabilities(value: unknown): void {
     if (isAgentMessageApi(value)) this.messageApi = value;
+    if (isFreshActionApi(value)) this.actionApi = value;
+  }
+
+  private replaceSessionCapabilities(value: unknown): void {
+    this.messageApi = isAgentMessageApi(value) ? value : null;
+    this.actionApi = isFreshActionApi(value) ? value : null;
   }
 
   private forget(api: AgentMessageApi): void {
     if (api !== this.messageApi) return;
     this.messageApi = null;
+    if (api === this.actionApi) this.actionApi = null;
     this.opts.outputs.onStaleMessageApi?.(api);
+  }
+
+  private forgetActionApi(api: FreshActionApi): void {
+    if (api === this.actionApi) this.actionApi = null;
+    if (api === this.messageApi) {
+      this.messageApi = null;
+      this.opts.outputs.onStaleMessageApi?.(api as AgentMessageApi);
+    }
+  }
+
+  private wrapActionPi(api: FreshActionApi): ActionPi {
+    return {
+      setModel: async (model: SdkModelLike) => {
+        if (typeof api.setModel !== "function") throw new Error("Pi model API unavailable for the current session");
+        try {
+          return await api.setModel(model);
+        } catch (err) {
+          if (isStaleContextError(err)) this.forgetActionApi(api);
+          throw err;
+        }
+      },
+      setThinkingLevel: (level: ThinkingLevel) => {
+        if (typeof api.setThinkingLevel !== "function") throw new Error("Pi thinking API unavailable for the current session");
+        try {
+          api.setThinkingLevel(level);
+        } catch (err) {
+          if (isStaleContextError(err)) this.forgetActionApi(api);
+          throw err;
+        }
+      },
+    };
+  }
+
+  private wrapActionCtx(ctx: ActionCtx): ActionCtx {
+    const wrapped: ActionCtx = {};
+    if (typeof ctx.compact === "function") {
+      wrapped.compact = (options?: object) => {
+        try {
+          return ctx.compact?.(options);
+        } catch (err) {
+          if (isStaleContextError(err)) this.forgetStaleBinding(ctx);
+          throw err;
+        }
+      };
+    }
+    if (typeof ctx.newSession === "function") {
+      wrapped.newSession = async (options) => {
+        try {
+          return await ctx.newSession!(options);
+        } catch (err) {
+          if (isStaleContextError(err)) this.forgetStaleBinding(ctx);
+          throw err;
+        }
+      };
+    }
+    if (typeof ctx.getModel === "function") {
+      wrapped.getModel = () => {
+        try {
+          return ctx.getModel?.();
+        } catch (err) {
+          if (isStaleContextError(err)) this.forgetStaleBinding(ctx);
+          throw err;
+        }
+      };
+    }
+    if (ctx.modelRegistry) wrapped.modelRegistry = ctx.modelRegistry;
+    return wrapped;
   }
 
   private consumeDeliveredUserEvent(

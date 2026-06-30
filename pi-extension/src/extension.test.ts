@@ -250,6 +250,21 @@ function currentSessionIdFromSends(): string {
   return sessionId;
 }
 
+function emitClientMessage(peer: string, inner: object): void {
+  relayRef.current!.emit("message", JSON.stringify({
+    peer,
+    ct: Buffer.from(JSON.stringify(inner)).toString("base64"),
+  }));
+}
+
+function sentToPeerSince(index: number, peer: string): Array<{ peer: string; inner: { type: string; [k: string]: unknown } }> {
+  return relayRef.current!.send.mock.calls
+    .slice(index)
+    .map((c) => c[0] as string)
+    .map(decodeSentCt)
+    .filter((d) => d.peer === peer);
+}
+
 // ── Registration tests ────────────────────────────────────────────────────────
 
 describe("extension default export", () => {
@@ -1788,6 +1803,276 @@ describe("multi-channel broadcast (W2D)", () => {
       code: "internal_error",
     });
     expect((error?.inner as { message?: string } | undefined)?.message).toContain("fresh async rejected");
+  });
+
+  test("model_set and thinking_set after app session_new use fresh action API, never stale _pi", async () => {
+    const peer = "owner-fresh-actions";
+    await _pairForTest(peer);
+    const sessionId = currentSessionIdFromSends();
+
+    const staleSetModel = vi.fn(async () => { throw new Error("stale _pi setModel must not run"); });
+    const staleSetThinkingLevel = vi.fn(() => { throw new Error("stale _pi setThinkingLevel must not run"); });
+    _setPiForTest({
+      sendUserMessage: vi.fn(() => { throw new Error("This extension ctx is stale after session replacement or reload."); }),
+      sendMessage: vi.fn(() => { throw new Error("This extension ctx is stale after session replacement or reload."); }),
+      setModel: staleSetModel,
+      setThinkingLevel: staleSetThinkingLevel,
+    });
+
+    const model = {
+      id: "gpt-5.3-codex-spark",
+      name: "GPT 5.3 Codex Spark",
+      provider: "openai-codex",
+      reasoning: true,
+      contextWindow: 128000,
+      input: ["text"],
+    };
+    const freshSetModel = vi.fn(async () => true);
+    const freshSetThinkingLevel = vi.fn();
+    const ctx = {
+      ...makeMockCtx("/tmp/remote-pi-session-new-fresh-action-api"),
+      newSession: vi.fn(async (opts?: { withSession?: (freshCtx: unknown) => Promise<void> }) => {
+        await opts?.withSession?.({
+          ...makeMockCtx("/tmp/remote-pi-session-new-fresh-action-api"),
+          newSession: vi.fn(),
+          sessionManager: { getSessionId: () => "fresh-action-session-after-new" },
+          sendUserMessage: vi.fn(async () => undefined),
+          sendMessage: vi.fn(async () => undefined),
+          setModel: freshSetModel,
+          setThinkingLevel: freshSetThinkingLevel,
+          modelRegistry: {
+            refresh: vi.fn(),
+            getAvailable: vi.fn(() => [model]),
+            find: vi.fn((provider: string, modelId: string) =>
+              provider === model.provider && modelId === model.id ? model : undefined,
+            ),
+          },
+          getModel: vi.fn(() => model),
+        });
+        return { cancelled: false };
+      }),
+    };
+    const status = captureHandler("remote-pi status");
+    await status("", ctx);
+
+    emitClientMessage(peer, { type: "session_new", id: "fresh-action-new", session_id: sessionId });
+    await new Promise<void>((r) => setImmediate(r));
+    const freshSessionId = _getRemoteSessionIdForTest()!;
+    expect(freshSessionId).toBe("fresh-action-session-after-new");
+
+    const sendsBefore = relayRef.current!.send.mock.calls.length;
+    emitClientMessage(peer, {
+      type: "model_set",
+      id: "model-after-new",
+      session_id: freshSessionId,
+      provider: model.provider,
+      model_id: model.id,
+    });
+    emitClientMessage(peer, {
+      type: "thinking_set",
+      id: "thinking-after-new",
+      session_id: freshSessionId,
+      level: "high",
+    });
+    await new Promise<void>((r) => setImmediate(r));
+
+    expect(staleSetModel).not.toHaveBeenCalled();
+    expect(staleSetThinkingLevel).not.toHaveBeenCalled();
+    expect(freshSetModel).toHaveBeenCalledTimes(1);
+    expect(freshSetModel).toHaveBeenCalledWith(model);
+    expect(freshSetThinkingLevel).toHaveBeenCalledTimes(1);
+    expect(freshSetThinkingLevel).toHaveBeenCalledWith("high");
+    const sent = sentToPeerSince(sendsBefore, peer);
+    expect(sent.some((d) => d.inner.type === "action_ok" && d.inner["action"] === "model_set")).toBe(true);
+    expect(sent.some((d) => d.inner.type === "action_ok" && d.inner["action"] === "thinking_set")).toBe(true);
+  });
+
+  test("model_set and thinking_set after replacement without fresh action API return unavailable errors", async () => {
+    const peer = "owner-no-fresh-actions";
+    await _pairForTest(peer);
+    const sessionId = currentSessionIdFromSends();
+
+    const staleSetModel = vi.fn(async () => { throw new Error("stale _pi setModel must not run"); });
+    const staleSetThinkingLevel = vi.fn(() => { throw new Error("stale _pi setThinkingLevel must not run"); });
+    _setPiForTest({
+      sendUserMessage: vi.fn(() => { throw new Error("This extension ctx is stale after session replacement or reload."); }),
+      sendMessage: vi.fn(() => { throw new Error("This extension ctx is stale after session replacement or reload."); }),
+      setModel: staleSetModel,
+      setThinkingLevel: staleSetThinkingLevel,
+    });
+
+    const ctx = {
+      ...makeMockCtx("/tmp/remote-pi-session-new-no-action-api"),
+      newSession: vi.fn(async (opts?: { withSession?: (freshCtx: unknown) => Promise<void> }) => {
+        await opts?.withSession?.({
+          ...makeMockCtx("/tmp/remote-pi-session-new-no-action-api"),
+          newSession: vi.fn(),
+          sessionManager: { getSessionId: () => "fresh-no-action-session" },
+          sendUserMessage: vi.fn(async () => undefined),
+          sendMessage: vi.fn(async () => undefined),
+        });
+        return { cancelled: false };
+      }),
+    };
+    const status = captureHandler("remote-pi status");
+    await status("", ctx);
+
+    emitClientMessage(peer, { type: "session_new", id: "no-action-new", session_id: sessionId });
+    await new Promise<void>((r) => setImmediate(r));
+    const freshSessionId = _getRemoteSessionIdForTest()!;
+
+    const sendsBefore = relayRef.current!.send.mock.calls.length;
+    emitClientMessage(peer, {
+      type: "model_set",
+      id: "model-unavailable-after-new",
+      session_id: freshSessionId,
+      provider: "openai-codex",
+      model_id: "gpt-5.3-codex-spark",
+    });
+    emitClientMessage(peer, {
+      type: "thinking_set",
+      id: "thinking-unavailable-after-new",
+      session_id: freshSessionId,
+      level: "high",
+    });
+    await new Promise<void>((r) => setImmediate(r));
+
+    expect(staleSetModel).not.toHaveBeenCalled();
+    expect(staleSetThinkingLevel).not.toHaveBeenCalled();
+    const sent = sentToPeerSince(sendsBefore, peer);
+    expect(sent.find((d) => d.inner["in_reply_to"] === "model-unavailable-after-new")?.inner).toMatchObject({
+      type: "error",
+      code: "internal_error",
+      message: "Pi model API unavailable for the current session",
+    });
+    expect(sent.find((d) => d.inner["in_reply_to"] === "thinking-unavailable-after-new")?.inner).toMatchObject({
+      type: "error",
+      code: "internal_error",
+      message: "Pi thinking API unavailable for the current session",
+    });
+  });
+
+  test("session_start replacement contexts for new/resume/fork/reload drive prompt and list_models without stale _pi", async () => {
+    const peer = "owner-session-start-fresh";
+    await _pairForTest(peer);
+    const staleSendUserMessage = vi.fn(() => { throw new Error("This extension ctx is stale after session replacement or reload."); });
+    _setPiForTest({
+      sendUserMessage: staleSendUserMessage,
+      sendMessage: vi.fn(() => { throw new Error("This extension ctx is stale after session replacement or reload."); }),
+    });
+
+    const onSessionStart = captureEventHandler("session_start");
+    const onTurnEnd = captureEventHandler("turn_end");
+    for (const reason of ["new", "resume", "fork", "reload"] as const) {
+      const model = {
+        id: `model-${reason}`,
+        name: `Model ${reason}`,
+        provider: "openai-codex",
+        reasoning: true,
+        contextWindow: 100000,
+        input: ["text", "image"],
+      };
+      const freshSendUserMessage = vi.fn(async () => undefined);
+      onSessionStart({ type: "session_start", reason }, {
+        ...makeMockCtx(`/tmp/remote-pi-session-start-${reason}`),
+        sessionManager: { getSessionId: () => `fresh-${reason}-session` },
+        sendUserMessage: freshSendUserMessage,
+        sendMessage: vi.fn(async () => undefined),
+        modelRegistry: {
+          refresh: vi.fn(),
+          getAvailable: vi.fn(() => [model]),
+          find: vi.fn(),
+        },
+        getModel: vi.fn(() => model),
+      });
+      const sessionId = _getRemoteSessionIdForTest()!;
+      expect(sessionId).toBe(`fresh-${reason}-session`);
+
+      const sendsBefore = relayRef.current!.send.mock.calls.length;
+      emitClientMessage(peer, {
+        type: "user_message",
+        id: `prompt-after-${reason}`,
+        session_id: sessionId,
+        text: `hello after ${reason}`,
+      });
+      emitClientMessage(peer, {
+        type: "list_models",
+        id: `list-after-${reason}`,
+        session_id: sessionId,
+      });
+      await new Promise<void>((r) => setImmediate(r));
+
+      expect(staleSendUserMessage).not.toHaveBeenCalled();
+      expect(freshSendUserMessage).toHaveBeenCalledWith(`hello after ${reason}`);
+      const sent = sentToPeerSince(sendsBefore, peer);
+      expect(sent.find((d) => d.inner["id"] === `prompt-after-${reason}`)?.inner).toMatchObject({
+        type: "user_message",
+        text: `hello after ${reason}`,
+      });
+      expect(sent.find((d) => d.inner["in_reply_to"] === `list-after-${reason}`)?.inner).toMatchObject({
+        type: "models_list",
+        current: expect.objectContaining({ id: `model-${reason}`, vision: true }),
+        models: [expect.objectContaining({ id: `model-${reason}`, vision: true })],
+      });
+      onTurnEnd({ type: "turn_end" });
+    }
+  });
+
+  test("compact and cancel after new/resume/fork/reload use freshest session_start ctx", async () => {
+    const peer = "owner-compact-cancel-fresh";
+    const staleAbort = vi.fn(() => { throw new Error("stale abort must not run"); });
+    const staleCompact = vi.fn(() => { throw new Error("stale compact must not run"); });
+    await _pairForTestWithCtx(peer, {
+      ui: { notify: vi.fn() },
+      cwd: "/tmp/remote-pi-stale-compact-cancel",
+      abort: staleAbort,
+    });
+    const status = captureHandler("remote-pi status");
+    await status("", {
+      ui: { notify: vi.fn() },
+      cwd: "/tmp/remote-pi-stale-compact-cancel",
+      abort: staleAbort,
+      compact: staleCompact,
+    } as unknown as ReturnType<typeof makeMockCtx>);
+
+    const onSessionStart = captureEventHandler("session_start");
+    for (const reason of ["new", "resume", "fork", "reload"] as const) {
+      const freshAbort = vi.fn();
+      const freshCompact = vi.fn();
+      onSessionStart({ type: "session_start", reason }, {
+        abort: freshAbort,
+        compact: freshCompact,
+        sessionManager: { getSessionId: () => `fresh-compact-cancel-${reason}` },
+      });
+      const sessionId = _getRemoteSessionIdForTest()!;
+      const sendsBefore = relayRef.current!.send.mock.calls.length;
+      emitClientMessage(peer, {
+        type: "session_compact",
+        id: `compact-after-${reason}`,
+        session_id: sessionId,
+      });
+      emitClientMessage(peer, {
+        type: "cancel",
+        id: `cancel-after-${reason}`,
+        session_id: sessionId,
+        target_id: `turn-${reason}`,
+      });
+      await new Promise<void>((r) => setImmediate(r));
+
+      expect(staleCompact).not.toHaveBeenCalled();
+      expect(staleAbort).not.toHaveBeenCalled();
+      expect(freshCompact).toHaveBeenCalledTimes(1);
+      expect(freshAbort).toHaveBeenCalledTimes(1);
+      const sent = sentToPeerSince(sendsBefore, peer);
+      expect(sent.find((d) => d.inner["in_reply_to"] === `compact-after-${reason}`)?.inner).toMatchObject({
+        type: "action_ok",
+        action: "session_compact",
+      });
+      expect(sent.find((d) => d.inner["in_reply_to"] === `cancel-after-${reason}`)?.inner).toMatchObject({
+        type: "cancelled",
+        target_id: `turn-${reason}`,
+      });
+    }
   });
 
   test("plan/43: steering sendUserMessage throw returns correlated error and no echo", async () => {

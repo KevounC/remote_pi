@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-sdk-session-projection-module-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-sdk-session-projection-module
 depends_on: [epic-bold-split-pi-extension-index-sdk-session-projection-module-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Move app action routing behind fresh SDK capability guards
@@ -83,6 +83,17 @@ handleClientMessage(sender: PeerChannel, msg: ClientMessage): void {
 
 ## Risk
 High. This is the main stale-context bug class. The safe failure mode is an explicit sender-scoped unavailable error, not reuse of a stale SDK object.
+
+## Implementation
+- Added fresh SDK capability bindings to `SdkSessionProjection`: replacement/session-start contexts now own the current message API, action API, command/event context wrappers, sender-safe unavailable fallback, and stale-context binding cleanup.
+- Routed app `session_compact`, `session_new`, `model_set`, `thinking_set`, `list_models`, prompt delivery, and `sendMessage` through projection-owned fresh guards instead of falling back to stale `_pi` after session replacement.
+- `session_new` now recaptures command context, event context, message API, action API, and remote session id through one replacement binding path; `_pi` is deliberately dropped so post-replacement model/thinking actions either use fresh setters or return explicit sender-scoped errors.
+- Added stale-context tests for prompt/list-models after simulated `new`/`resume`/`fork`/`reload`, compact/cancel after the same replacement reasons, model/thinking fresh-action success after app `session_new`, and model/thinking unavailable errors when the replacement context exposes no fresh setters.
+- Verification:
+  - `corepack pnpm typecheck` passed.
+  - `corepack pnpm build` passed.
+  - Targeted stale-context vitest filter passed: 4 passed, 154 skipped, 0 failed.
+  - Full `corepack pnpm exec vitest run src/extension.test.ts` result: 154 passed, 4 failed, 0 skipped in the file's current 158-test run. The four failures match the documented false-alarm/environment bucket by name: `after a clean reset, connect works again (flag is per-instance, not sticky)`, `join emits remote-pi:name-assigned with requested + assigned + changed`, `rename:<name> renames live (broker re-register + relay swap), process/session survive`, and `a second same-name agent joins as <name>#2 instead of being refused`.
 
 ## Rollback
 Restore app action routing in `index.ts` and the prior `_pi`/`_lastCtx`/`_lastEventCtx` helper paths; keep the module shell unused if necessary.
