@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-cli-daemon-pairing-module
 depends_on: [epic-bold-split-pi-extension-index-cli-daemon-pairing-module-step-4]
@@ -80,3 +80,25 @@ export function restartSupervisor(): void { /* existing side-effect body */ }
 
 ## Rollback
 Move the command wrapper classes back into `index.ts` and restore direct imports from `daemon/`. Because daemon runtime modules are not structurally changed, no supervisor state migration is involved.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: `corepack pnpm typecheck` clean;
+`corepack pnpm build` clean; `vitest run src/extension.test.ts -t
+"daemon|cron|service|install|supervisor|create|remove"` → 9/9; **full pi-ext
+suite 648 passed | 3 skipped | 0 failed (44 files)** — fully green.
+
+NOTE: the implementer CORRECTLY identified the false-failure pattern (3rd
+consecutive pi-ext agent to do so) — reported the 23 `supervisor.test.ts`
+failures as "environment/UDS false-failure class (`listen EPERM ...
+supervisor.sock`), not behavior assertion failures from this refactor." The
+orchestrator's independent vitest run confirms 0 failures. The enhanced briefing
+is reliably working.
+
+Commit `aa3bba9` scoped to pi-ext only (new daemon_commands + cron_commands +
+service_commands + supervisor_restart + index.ts shrunk ~620 lines + story .md);
+collision guard held. Command extraction verified: `DaemonCommands`/`CronCommands`/
+`ServiceCommands`/`restartSupervisorCommand` extracted as thin UI/CLI orchestration
+adapters; lifecycle ownership preserved (process spawning/service install/supervisor
+UDS/daemon registry stay in `daemon/` modules); `_restartSupervisorCommand` test
+export kept as alias.
