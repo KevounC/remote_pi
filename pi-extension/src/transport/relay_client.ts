@@ -2,6 +2,10 @@ import { EventEmitter } from "node:events";
 import WebSocket from "ws";
 import { ed25519Sign } from "../pairing/crypto.js";
 import type { Ed25519Keypair } from "../pairing/crypto.js";
+import {
+  REACHABILITY_RELAY_LIVENESS_CHECK_MS,
+  REACHABILITY_RELAY_LIVENESS_TIMEOUT_MS,
+} from "../reachability/reachability_contract.js";
 
 const AUTH_TIMEOUT_MS = 5_000;
 
@@ -14,8 +18,8 @@ const AUTH_TIMEOUT_MS = 5_000;
  * triggers and a background daemon sits "online" but dead after a few idle
  * hours. We force-close on timeout so `close` drives the caller's reconnect.
  */
-const LIVENESS_TIMEOUT_MS = 70_000;  // ~2.8 missed relay pings → confidently dead
-const LIVENESS_CHECK_MS = 20_000;
+const LIVENESS_TIMEOUT_MS = REACHABILITY_RELAY_LIVENESS_TIMEOUT_MS;  // ~2.8 missed relay pings → confidently dead
+const LIVENESS_CHECK_MS = REACHABILITY_RELAY_LIVENESS_CHECK_MS;
 
 /** Relay control messages (sent/received during auth). */
 interface HelloMsg {

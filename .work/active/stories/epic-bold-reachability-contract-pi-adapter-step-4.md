@@ -1,14 +1,14 @@
 ---
 id: epic-bold-reachability-contract-pi-adapter-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract-pi-adapter
 depends_on: [epic-bold-reachability-contract-pi-adapter-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Consume shared liveness timings in RelayClient
@@ -43,6 +43,15 @@ applicable contract field requires migration; keep behavior unchanged this cycle
 
 ## Risk
 Low/Medium. Watchdog behavior is timing-sensitive; preserve numeric identity.
+
+## Implementation notes
+- Updated `pi-extension/src/transport/relay_client.ts` to import and use `REACHABILITY_RELAY_LIVENESS_TIMEOUT_MS` and `REACHABILITY_RELAY_LIVENESS_CHECK_MS` from `../reachability/reachability_contract.js`.
+- Kept existing local constant names (`LIVENESS_TIMEOUT_MS`, `LIVENESS_CHECK_MS`) to avoid logic churn and preserve watchdog scheduling/decision paths.
+- Preserved watchdog numeric identity exactly (no timer behavior changes).
+- AUTH timing and ping/reconnect-related constants were intentionally left unchanged.
+- Verification run:
+  - `corepack pnpm typecheck`
+  - `corepack pnpm exec vitest run src/transport/relay_client src/reachability`
 
 ## Rollback
 Reinstate inline constants in `relay_client.ts`.
