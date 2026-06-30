@@ -1,169 +1,121 @@
-# Session note — 2026-06-30 — bold-refactor autopilot drain (Waves 2-4 done, W5 planned)
+# Session note — 2026-06-30 (cont) — test-debt cleared + Wave 5 dispatched
 
-Transient handoff note at `.work/` root (no frontmatter). Delete when the
+Transient handoff note at `.work/` root (no frontmatter). Supersedes
+`SESSION-NOTE-2026-06-30-waves-2-4.md` for current state. Delete when the
 bold-refactor campaign completes. Per `.agents/rules/agent-discipline.md` this
 is NOT a durable artifact — don't link durable docs at it.
 
-## TL;DR — where the campaign stands after this session
+## TL;DR — where the campaign stands now
 
-Continued the bold-refactor autopilot drain. This session ran Waves 2, 3, and 4
-to completion (17 stories advanced implementing→done), plus an env-ceiling
-triage on one story. **No agents are in flight** — safe exit/resume point.
+Operator asked to clear pre-existing test failures before continuing the drain,
+then keep draining. This session:
 
-**Story stage counts:**
-- Before this session: 51 done / 0 review / 92 implementing / 4 drafting
-- After: **68 done / 0 review / 68 implementing / 4 drafting** (+17 done)
+1. **Cleared all pre-existing pi-extension test debt** (commit `9aa2c42`) — 25
+   failures across 2 files, all from the canonical-session attribution gate
+   tightening (NOT caused by the drain).
+2. **Advanced 2 stranded epics review→done** (commit `7d00e87`) — both had all
+   children done; relay re-verified green (122 tests).
+3. **Dispatched Wave 5** — 5 disjoint bundles, 4 running + 1 queued
+   (max-4-concurrent gate). See dispatch table below.
 
-## ⚠️ ENV FINDING — UPDATED: sandbox UDS ceiling LIFTED on rebuild
+## ⚠️ CRITICAL BASELINE CHANGE: pi-ext suite is now FULLY GREEN
 
-**Original sandbox (2026-06-30 earlier):** the sandbox kernel blocked Unix
- domain socket `bind()` with `EPERM` everywhere, which broke
- `acquireCwdLock` (cwd_lock.ts) and made full `src/extension.test.ts` impossibly
- red (~37 pre-existing failures via the cwd-lock cascade).
+Before this session: `extension.test.ts` 19 failed | 128 passed; `codec.test.ts`
+6 failed. Now: **full pi-ext suite 640 passed | 3 skipped | 0 failed (43 files);
+typecheck clean.**
 
-**After rebuild (2026-06-30 later):** re-ran `corepack pnpm exec vitest run
- src/session/cwd_lock.test.ts` from `pi-extension/` → **7/7 pass**. The UDS
- ceiling is GONE. Full `extension.test.ts` is now a valid signal.
+**Wave 5+ pi-ext agents can now require full `extension.test.ts` GREEN for
+their owned areas** — no more "no new failures beyond 19 baseline" caveat.
+The fragile count-based check is retired. The masking risk on HIGH-risk
+session-attribution stories is gone.
 
-**Current extension.test.ts state at HEAD:** 19 failed | 128 passed (147).
-These 19 are PRE-EXISTING (reverting this session's 4 pi-ext commits yields
-32 failures — the session's work *reduced* failures by 12). They share a
-"relay send mock didn't fire" shape, likely canonical-session attribution
-gating that the test fixtures don't yet satisfy. Parked as
-`.work/backlog/backlog-piext-extension-test-19-failures.md` — NOT caused by
-the drain, out of scope to chase mid-drain. A fixture-count drift (31→36
-from dart-codegen-step-3) was fixed inline (commit f39ba01).
+### What the test-debt fix was (so future agents understand the convention)
 
-**pi-ext verification signal going forward (Wave 5+):**
-1. `corepack pnpm typecheck` (clean).
-2. `corepack pnpm exec vitest run <owned test files>`.
-3. `corepack pnpm exec vitest run src/extension.test.ts` — now valid; agents
-   must confirm they add NO NEW failures beyond the known 19 baseline (and the
-   19 should not be in code they own unless their story touches that area).
-4. `corepack pnpm exec vitest run src/extension.test.ts -t "<fragments>"`
-   remains useful for focused convergence checks.
+The canonical-session gate (`session_gate.ts`, added 2026-06-29 in
+`identity-model-step-3`) requires a matching `session_id` on every
+session-scoped client frame. 19 tests in `extension.test.ts` predated the gate
+and emitted frames without `session_id` → correctly rejected as
+`session_mismatch`. Fixed by routing fixtures through the captured canonical
+session (same convention `transcript-projection-derive-step-4` used on 12
+sibling tests). Three nuances:
+- **session_start re-captures** the session id (fresh uuid when the ctx carries
+  no sessionManager) → cancel cluster reads live id via
+  `_getRemoteSessionIdForTest()`, not `currentSessionIdFromSends()`.
+- **session_new swaps** the session id → post-new `user_message` carries the
+  freshly-captured id.
+- **post-shutdown user_message** → pin via `_setRemoteSessionIdForTest` so the
+  frame reaches the `_disposed` guard the test targets (returns `internal_error`).
+- empty `queued_message_state` now stamps `session_id` (correct); assertions
+  relaxed to `toMatchObject({type})` + no `id`/`text` payload.
 
-## Dev environment incantations (resolved this session, in CLAUDE.md + skills too)
+`codec.test.ts` (6 failures, same family): derived the server-fixture set from
+the `session_scope` registry (single source of truth) so it can't drift again.
+
+Full details in `.work/backlog/backlog-piext-extension-test-19-failures.md`
+(marked resolved).
+
+## Stage counts now
+
+- After test-debt clear + 2 epics advanced: **70 done / 0 review / 68 implementing / 6 drafting** (+2 done).
+- Wave 5 in flight (5 stories) will move 5 implementing→review on completion.
+
+## Wave 5 — dispatched 2026-06-30 (5 disjoint bundles, all openai-codex/gpt-5.5)
+
+Collision map respected: sole relay writer (#1), app split between sync/transcript
+(#2) and protocol_codegen tests (#4, disjoint), cockpit split between
+viewmodel/projection (#3) and transcript entities/mapper (#5, disjoint — #3
+explicitly told NOT to edit agent_session.dart, owned by #5). NO pi-ext stories
+this wave → index.ts god-file serialization doesn't bind.
+
+| Agent ID | Story | Subproject | Thinking | Owns |
+|---|---|---|---|---|
+| c91389c1 | generated-protocol-rust-codegen-step-3 | relay | high | generated/control.rs, auth/challenge.rs, handlers/peer.rs, frame.rs + generator (generated-contract invariant: change generator, regen, clean diff) |
+| 61709628 | canonical-session-app-attribution-hydration-step-4 | app | high | sync_service.dart (_applyHistory reducer), transcript_event.dart, transcript_projection.dart + tests (HIGH risk: hydration reducer rewrite) |
+| 331b8527 | cockpit-workspace-projection-workspace-document-step-6 | cockpit | high | cockpit_viewmodel.dart, workspace_projection.dart (new), pane_item.dart + test |
+| 0b0c0aa9 | generated-protocol-dart-codegen-step-5 | app | medium | app/test/protocol_codegen/ parity tests + fixtures + feature body verdict |
+| 41a3531a | transcript-event-log-projection-derive-step-5 | cockpit | high | transcript_message.dart, transcript_event.dart, rpc_data_mapper.dart, agent_session.dart |
+
+All stop at `stage: review`. Orchestrator runs the review pass (fast-lane for
+stories: confirm green verification + ownership + read code; HIGH-risk #2
+hydratration reducer gets deeper idempotency/pending-message verification).
+
+## Deferred to Wave 6+ (by collision / serialization)
+- relay `peer.rs`/`registry.rs` cluster: `relay-typed-actor-control-handlers-step-5`
+  (collides with W5 #1's peer.rs), `turn-state-machine-projection-consumers-step-3`
+  (cross-cutting app connection_manager.dart + relay).
+- pi-ext `index.ts` god-file front (5 stories still ready:
+  composition-root-step-4, owner-multiplexer-step-2, sdk-session-projection-step-2,
+  cli-daemon-pairing-step-3, turn-state-machine-late-attach-step-3) — serialize
+  ONE writer per wave. Pick `turn-state-machine-late-attach-step-3` first next
+  wave (unblocks the most downstream).
+- `canonical-session-identity-model-step-5` (HIGH-risk re-key; needs
+  projection-consumers-step-3 done first).
+
+## Dev environment incantations (unchanged, still load-bearing)
 
 - **Flutter**: `~/projects/remote_pi/.tools/flutter` (not on PATH; call binary
   directly). `/opt/flutter` is gone.
-- **Pub cache**: `~/projects/remote_pi/.pub-cache` (gitignored, writable).
-  Default `/home/agent/.pub-cache` is READ-ONLY — always set
-  `PUB_CACHE=~/projects/remote_pi/.pub-cache`. If HOME/config writability
-  issues, `HOME=/tmp/pi-dart-home` (mkdir first).
-- **`app/`**: `flutter pub get` online OK (no git deps). 1 known-unrelated
-  analyze info: `axisAlignment` deprecated at
-  `app/lib/ui/chat/widgets/input_bar.dart:802` — do NOT fail reviews on it.
-- **`cockpit/`**: `flutter pub get --offline` REQUIRED (3 git deps from
-  github.com/jacobaraujo7/* can't clone online — global git insteadOf rewrites
-  https→ssh, no SSH key; bare mirrors in `.pub-cache/git/cache/` resolve
-  offline). Keep that cache populated.
-- **`pi-extension/` pnpm**: `/home/agent/.cache` is READ-ONLY; pnpm 11.x fails
-  with `[ERR_SQLITE_ERROR]` unless caches redirected. `/home/agent/.npmrc` is a
-  broken char device (harmless EACCES — ignore). Use:
-  ```
-  export PNPM_HOME=~/projects/remote_pi/.pnpm-store
-  export npm_config_cache=~/projects/remote_pi/.npm-cache
-  export XDG_CACHE_HOME=~/projects/remote_pi/.xdg-cache
-  corepack pnpm typecheck
-  corepack pnpm exec vitest run <path>   # full pnpm test has the UDS env ceiling
-  ```
-- **`relay/` cargo**: clean. `cargo fmt --check && cargo clippy -- -D warnings && cargo test`.
-  (A stale build artifact can make first-run clippy look red; `cargo clippy --all-targets` rebuild clears it.)
-- **node codegen** (`tools/protocol-codegen`): works (node v24.18.0).
+- **Pub cache**: `PUB_CACHE=~/projects/remote_pi/.pub-cache` (default READ-ONLY).
+  `app/` pub get online OK; `cockpit/` pub get `--offline` REQUIRED.
+- **pi-extension pnpm**: `export PNPM_HOME=~/projects/remote_pi/.pnpm-store
+  npm_config_cache=~/projects/remote_pi/.npm-cache XDG_CACHE_HOME=~/projects/remote_pi/.xdg-cache`.
+- **relay cargo**: clean. `cargo fmt --check && cargo clippy -- -D warnings && cargo test`.
+- **node codegen** (`tools/protocol-codegen/bin/protocol-codegen.mjs`): node v24.18.0.
 
-## Waves 2-4 results (all fast-lane verified by orchestrator)
+## Coordination rule (unchanged)
+Do NOT `git add`/`git commit` while parallel write-subagents are in flight —
+agents commit their own work; orchestrator commits only its own notes/docs/
+review-advances when no agents are writing. Stage explicitly (never `-A`/`.`).
+`*.key`/`*.pem` are untracked local secrets — NEVER commit.
 
-### Wave 2 — 9/9 done
-| Story | Commit | Notes |
-|---|---|---|
-| wire-discriminator-step-4 | 8bad735 | land-mode; regen/test lock (forward_to_room already present) |
-| app-attribution-hydration-step-2 | 8efd13e | 5 demux outcomes; 5/5 tests |
-| relay-typed-actor-control-handlers-step-4 | 1f8544c | 120 relay tests; fmt/clippy green |
-| reachability-contract-app-adapter-step-2 (BOUNCED) | 38ab178 | bounce fixed: onRelayConnectionEstablished preserves retryAttempt; 0→1→2 ladder |
-| reachability-contract-pi-adapter-step-3 | 84402d8 | 1,2,5,10,30s ladder+cap |
-| cockpit-settings-split-step-4 | 89658c5 | DaemonSettingsPanel; 7/7 tests |
-| generated-protocol-dart-codegen-step-3 | 4ba0339 | regen-diff EMPTY; 15/15 |
-| cockpit-workspace-document-step-4 | 7201976 | _trees/_focused→_documents; analyze clean |
-| turn-state-machine-algebraic-state-step-3 | b4d8539 | env-ceiling triage (agent refused to commit; orchestrator committed after stash-differential proof: +4 passing, 0 broken) |
-
-### Wave 3 — 4/4 done
-| Story | Commit | Notes |
-|---|---|---|
-| relay-opaque-targeting-step-4 | 62eaef2 | 9 pi_forward tests (session_id opacity + room-targeted); stale comments removed |
-| reachability-pi-adapter-step-4 | a227eaa | liveness constants from contract; 14/14 |
-| turn-state-projection-consumers-step-2 | f890c8c | HIGH-risk convergence core; 55/55; ChatViewModel single projection, no OR logic |
-| cockpit-settings-split-step-5 | b0bdaff | ScheduleSettingsPanel; settings_page pure route shell; 22/22 |
-
-### Wave 4 — 4/4 done
-| Story | Commit | Notes |
-|---|---|---|
-| generated-protocol-dart-codegen-step-4 | 5e24b69 | protocol.dart 1313→20-line facade; regen-diff EMPTY + deterministic; 55/55 |
-| cockpit-workspace-document-step-5 | 85a84eb | pure WorkspaceDocumentCommands + _applyWorkspaceCommand; 8/8; analyze clean |
-| transcript-event-log-projection-derive-step-4 | 6df733d | _messageBuffer→_transcriptEvents; env-aware (6+23 filtered tests); 25 fail vs 37 baseline (fixed 12, broke 0) |
-| canonical-session-app-attribution-hydration-step-3 | 0214c26 | HIGH-risk re-key; RemoteSessionRef; 72/72; rigorous two-session-id + legacy-box-not-deleted test |
-
-## Resume instructions (full autopilot queue drain)
-
-1. **All Waves 2-4 are `done`. No agents in flight. Working tree clean.**
-2. **Re-verify the env ceiling first.** ✅ DONE (2026-06-30 later): the sandbox
-   UDS-EPERM ceiling is LIFTED on rebuild — `cwd_lock.test.ts` 7/7 pass.
-   Full `extension.test.ts` is now a valid signal (19 pre-existing failures
-   remain, parked in backlog; not caused by the drain). pi-ext Wave-5 agents
-   can require full `extension.test.ts` green for THEIR owned areas, confirming
-   no new failures beyond the known 19 baseline.
-3. **Wave 5 ready-set: 14 stories** (probe with `python3 /tmp/full_probe.py` or
-   the inline probe in `.work/WAVE-RUN-NOTES-2026-06-30.md`). Collision map:
-   - **relay `peer.rs`/`registry.rs`/`rooms.rs` cluster** (serialize ONE per
-     wave): `generated-protocol-rust-codegen-step-3`,
-     `relay-typed-actor-control-handlers-step-5`,
-     `turn-state-machine-projection-consumers-step-3` (this one is cross-cutting
-     app `connection_manager.dart` + relay — careful).
-   - **pi-ext `index.ts`** (serialize ONE writer per wave):
-     `turn-state-machine-late-attach-step-3` (mesh_node.ts/bridge.ts/index.ts),
-     plus the 4 deferred split stories (composition-root-step-4,
-     owner-multiplexer-step-2, sdk-session-projection-step-2,
-     cli-daemon-pairing-step-3).
-   - **Newly-unblocked, mostly disjoint**: app-attribution-hydration-step-4
-     (app transcript_event.dart/transcript_projection.dart),
-     workspace-document-step-6 (cockpit viewmodel/workspace_projection/pane_item),
-     dart-codegen-step-5 (app protocol_codegen parity tests + fixtures),
-     transcript-projection-derive-step-5 (cockpit transcript entities + adapters),
-     reachability-contract-app-adapter-step-3 (app reachability_adapter.dart).
-4. **Suggested Wave 5 (5 disjoint bundles):**
-   - `generated-protocol-rust-codegen-step-3` (relay R1 — sole relay writer;
-     generated-contract invariant: change generator, regen, clean diff)
-   - `app-attribution-hydration-step-4` (app transcript seam)
-   - `workspace-document-step-6` (cockpit WorkspaceProjection adapter)
-   - `dart-codegen-step-5` (app parity tests — disjoint from #2's transcript files)
-   - `transcript-projection-derive-step-5` (cockpit transcript entities —
-     disjoint from #3's viewmodel? CHECK: step-6 owns cockpit_viewmodel.dart,
-     step-5 owns agent_session.dart/rpc_data_mapper/transcript entities —
-     disjoint. Confirm at dispatch.)
-   Defers: control-handlers-step-5 + projection-consumers-step-3 (relay
-   collision with #1), late-attach-step-3 (pi-ext index.ts — start it as the
-   ONE pi-ext writer if a slot is free, else W6), the 4 index.ts split stories
-   (serialize after late-attach), reachability-app-adapter-step-3 (app
-   reachability_adapter — disjoint, could swap in for width).
-5. **Generated-contract invariant**: any story touching
-   `relay/src/protocol/generated/*` or `app/lib/protocol/generated/*` must
-   change the GENERATOR (`tools/protocol-codegen`), regenerate, and confirm a
-   clean regen-diff (run twice for determinism). Never hand-edit generated files.
-6. **Coordination rule (learned the hard way)**: do NOT run `git add`/`git
-   commit` while parallel write-subagents are in flight — it can sweep in an
-   agent's in-progress story transition. Agents commit their own work;
-   orchestrator commits only its own notes/docs/review-advances when no agents
-   are writing. Stage review-advance commits explicitly (only the story .md files).
-7. **Reviews**: fast-lane for stories (confirm green verification → advance
-   review→done; review skill authorizes this for stories). Orchestrator
-   independently re-runs tests + reads code + confirms ownership + checks
-   generated-contract invariant where relevant. Bounced/high-risk stories get
-   deeper verification of the specific invariant.
-
-## Detailed dispatch rationale
-Lives in `.work/WAVE-RUN-NOTES-2026-06-30.md` (env incantations, agent IDs,
-collision maps, Wave 2-4 dispatch tables, the env-ceiling finding).
-
-## Untracked secrets
-`*.key` / `*.pem` in the working tree are local secrets — correctly untracked,
-NEVER commit. Every subagent staged files explicitly and left these alone.
+## Resume instructions
+1. **5 Wave-5 agents in flight** (4 running + 1 queued). Wait for completions,
+   then review-pass each (fast-lane stories; deeper verify #2's reducer).
+2. pi-ext suite is now a clean baseline — Wave 6 pi-ext agents can require
+   full `extension.test.ts` green for their owned areas.
+3. After W5 reviews advance to done, probe ready-set again and dispatch W6
+   (start with `turn-state-machine-late-attach-step-3` as the one pi-ext
+   index.ts writer; add the deferred relay + app stories per collision map).
+4. Generated-contract invariant: any story touching `relay/src/protocol/generated/*`
+   or `app/lib/protocol/generated/*` must change the GENERATOR, regenerate,
+   confirm clean regen-diff (run twice for determinism). Never hand-edit.
