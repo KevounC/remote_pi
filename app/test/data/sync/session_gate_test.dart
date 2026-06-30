@@ -1,10 +1,11 @@
 import 'package:app/data/sync/session_gate.dart';
+import 'package:app/domain/entities/remote_session_ref.dart';
 import 'package:app/protocol/protocol.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   const gate = SessionGate();
-  const active = ActiveSessionRef(
+  const active = RemoteSessionRef(
     peerEpk: 'peer-1',
     roomId: 'main',
     sessionId: 'session-1',

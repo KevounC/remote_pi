@@ -24,9 +24,10 @@ class HomeReadRepository extends Repository {
         for (final k in box.keys) {
           final r = box.get(k);
           if (r is Map) {
-            byKey['$k'] = SessionIndexRecord.fromJson(
+            final record = SessionIndexRecord.tryFromJson(
               r.cast<String, dynamic>(),
             );
+            if (record != null) byKey['$k'] = record;
           }
         }
         if (!controller.isClosed) controller.add(byKey.values.toList());
@@ -37,9 +38,14 @@ class HomeReadRepository extends Repository {
           } else {
             final r = box.get(event.key);
             if (r is Map) {
-              byKey[key] = SessionIndexRecord.fromJson(
+              final record = SessionIndexRecord.tryFromJson(
                 r.cast<String, dynamic>(),
               );
+              if (record == null) {
+                byKey.remove(key);
+              } else {
+                byKey[key] = record;
+              }
             }
           }
           if (!controller.isClosed) controller.add(byKey.values.toList());
@@ -59,7 +65,10 @@ class HomeReadRepository extends Repository {
     for (final k in box.keys) {
       final r = box.get(k);
       if (r is Map) {
-        out['$k'] = SessionIndexRecord.fromJson(r.cast<String, dynamic>());
+        final record = SessionIndexRecord.tryFromJson(
+          r.cast<String, dynamic>(),
+        );
+        if (record != null) out['$k'] = record;
       }
     }
     return out;

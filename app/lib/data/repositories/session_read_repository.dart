@@ -9,21 +9,22 @@ import 'package:app/data/local/boxes.dart';
 import 'package:app/data/local/records/message_record.dart';
 import 'package:app/data/local/records/runtime_record.dart';
 import 'package:app/domain/contracts/repository.dart';
+import 'package:app/domain/entities/remote_session_ref.dart';
 
 class SessionReadRepository extends Repository {
   SessionReadRepository(this._boxes);
 
   final LocalBoxes _boxes;
 
-  /// Reactive ordered message list for `(epk, roomId)`. Emits the current
-  /// snapshot on listen, then an updated list per row change.
-  Stream<List<MessageRecord>> watchMessages(String epk, String roomId) {
+  /// Reactive ordered message list for a canonical remote session. Emits the
+  /// current snapshot on listen, then an updated list per row change.
+  Stream<List<MessageRecord>> watchMessages(RemoteSessionRef ref) {
     final byKey = <int, MessageRecord>{};
     StreamSubscription? sub;
     late final StreamController<List<MessageRecord>> controller;
     controller = StreamController<List<MessageRecord>>(
       onListen: () async {
-        final box = await _boxes.msgsBox(epk, roomId);
+        final box = await _boxes.msgsBox(ref);
         for (final k in box.keys) {
           byKey[(k as num).toInt()] = MessageRecord.fromJson(
             _coerce(box.get(k)),
@@ -51,7 +52,7 @@ class SessionReadRepository extends Repository {
   /// Reactive volatile runtime (connection/presence) for `(epk, roomId)`.
   Stream<RuntimeRecord> watchRuntime(String epk, String roomId) {
     final box = _boxes.runtimeBox();
-    final key = LocalBoxes.sessionKey(epk, roomId);
+    final key = LocalBoxes.runtimeKey(epk, roomId);
     RuntimeRecord read() {
       final raw = box.get(key);
       return raw is Map

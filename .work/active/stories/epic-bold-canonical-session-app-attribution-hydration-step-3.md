@@ -1,14 +1,14 @@
 ---
 id: epic-bold-canonical-session-app-attribution-hydration-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-canonical-session-app-attribution-hydration
 depends_on: [epic-bold-canonical-session-app-attribution-hydration-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Key app persistence by canonical session id
@@ -82,3 +82,15 @@ High. This touches persistence and read-side lookup paths. The mitigation is to 
 
 ## Rollback
 Restore `LocalBoxes` and `SessionIndexRecord` keys to `(epk, roomId)`. The new session-scoped boxes can remain on disk; rollback should not delete either old or new boxes.
+
+## Implementation notes
+- Files changed: `app/lib/domain/entities/remote_session_ref.dart`, `app/lib/data/local/boxes.dart`, `app/lib/data/local/records/session_index_record.dart`, `app/lib/data/repositories/home_read_repository.dart`, `app/lib/data/repositories/session_read_repository.dart`, `app/lib/data/sync/session_gate.dart`, `app/lib/data/sync/sync_service.dart`, `app/lib/ui/chat/viewmodels/chat_viewmodel.dart`, and targeted local/read/sync/chat tests.
+- Implemented one canonical app-side `RemoteSessionRef { peerEpk, roomId, sessionId }` with `storageKey`, routed session-scoped message boxes and session-index rows through it, and kept volatile runtime keys room-scoped through `LocalBoxes.runtimeKey(epk, roomId)`.
+- `SessionIndexRecord` now requires `sessionId`, writes `session_id`, derives `key` from `RemoteSessionRef.storageKey`, and treats records without `session_id` as legacy via `tryFromJson`/`fromJson` fail-fast behavior so old rows cannot masquerade as canonical sessions.
+- `SyncService` now binds to a full active `RemoteSessionRef`, opens/reloads session-scoped boxes on session-id rotation, resets streaming/working/queued/pending timers and transcript projection buffers on canonical session switch, and leaves old peer+room message boxes untouched.
+- `ChatViewModel` now refreshes its read subscription from `SyncService.activeSessionRef` and swaps to the new session-scoped message stream when room metadata reports a rotated session id, so the new active chat starts from the new canonical box rather than the prior room cache.
+- Tests added/updated: session-index legacy rejection and key roundtrip, read repository `RemoteSessionRef` watch path, SyncService same-room two-session box/index separation plus legacy-box non-deletion and disconnected runtime assertions, and ChatViewModel same-room session rotation not showing prior messages.
+- Verification: `PUB_CACHE=~/projects/remote_pi/.pub-cache ~/projects/remote_pi/.tools/flutter/bin/flutter pub get` completed; it attempted to update transitive lockfile entries, so `app/pubspec.lock` was reverted because dependency changes are outside this story. `flutter analyze` was run twice and reported only the known unrelated `axisAlignment` deprecation at `app/lib/ui/chat/widgets/input_bar.dart:802` (exit 1 due info-only issue). Targeted `flutter test test/data/local/records_test.dart test/data/repositories/read_repository_test.dart test/data/sync/session_gate_test.dart test/data/sync/sync_service_test.dart test/ui/chat/chat_viewmodel_test.dart` passed (72 tests).
+- Acceptance confirmation: different `session_id`s for the same `(epk, roomId)` now have distinct message boxes and session-index keys; old peer+room boxes are not deleted; same-room session rotation resets in-memory state and loads the new scoped box; runtime reachability remains `(epk, roomId)` and does not report live/working while disconnected.
+- Discrepancies from design: none.
+- Adjacent issues parked: none.

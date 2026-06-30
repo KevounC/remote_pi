@@ -6,11 +6,14 @@ import 'dart:io';
 
 import 'package:app/data/local/boxes.dart';
 import 'package:app/data/local/records/message_record.dart';
+import 'package:app/data/local/records/runtime_record.dart';
 import 'package:app/data/local/records/session_index_record.dart';
 import 'package:app/data/repositories/session_read_repository.dart';
 import 'package:app/data/sync/sync_service.dart';
+import 'package:app/data/transport/epk_encoding.dart';
 import 'package:app/data/transport/channel.dart';
 import 'package:app/data/transport/connection_manager.dart';
+import 'package:app/domain/entities/remote_session_ref.dart';
 import 'package:app/domain/session_state.dart';
 import 'package:app/domain/transcript/transcript_projection.dart';
 import 'package:app/pairing/storage.dart';
@@ -117,6 +120,7 @@ class _FakeStorage extends PairingStorage {
 }
 
 int _counter = 0;
+final Map<String, String> _sessionByEpk = <String, String>{};
 
 late Directory _dir;
 
@@ -156,6 +160,7 @@ void main() {
     );
     final epk = 'epk_sync_${++_counter}';
     final sessionId = 'session_$_counter';
+    _sessionByEpk[epk] = sessionId;
     ch.defaultSessionId = sessionId;
     conn.adopt(
       ch,
@@ -177,11 +182,21 @@ void main() {
       ),
     );
     await _settle(); // ConnectionManager learns active session id
+    await sync.activate(epk, 'main');
+    await _settle();
     return (conn: conn, ch: ch, sync: sync, epk: epk, sessionId: sessionId);
   }
 
-  List<MessageRecord> messages(String epk) {
-    final box = LocalBoxes().openMsgsBox(epk, 'main');
+  RemoteSessionRef refFor(String epk, [String? sessionId]) => RemoteSessionRef(
+    peerEpk: epk,
+    roomId: 'main',
+    sessionId: sessionId ?? _sessionByEpk[epk]!,
+  );
+
+  List<MessageRecord> messages(String epk, [String? sessionId]) {
+    final ref = refFor(epk, sessionId);
+    if (!LocalBoxes().isMsgsBoxOpen(ref)) return const <MessageRecord>[];
+    final box = LocalBoxes().openMsgsBox(ref);
     final out = [
       for (final v in box.values)
         MessageRecord.fromJson((v as Map).cast<String, dynamic>()),
@@ -190,12 +205,107 @@ void main() {
     return out;
   }
 
-  SessionIndexRecord? index(String epk) {
-    final raw = LocalBoxes().sessionsIndexBox().get('$epk:main');
+  SessionIndexRecord? index(String epk, [String? sessionId]) {
+    final raw = LocalBoxes().sessionsIndexBox().get(
+      LocalBoxes.sessionKey(refFor(epk, sessionId)),
+    );
     return raw is Map
         ? SessionIndexRecord.fromJson(raw.cast<String, dynamic>())
         : null;
   }
+
+  test(
+    'two session ids on the same room use different boxes and index keys',
+    () async {
+      final s = await setup();
+      final oldSession = s.sessionId;
+      final oldRef = refFor(s.epk, oldSession);
+      final oldBoxName = LocalBoxes.msgsBoxName(oldRef);
+      final legacyBox = await Hive.openBox<dynamic>(
+        'msgs_${toAppEpk(s.epk)}__main',
+      );
+      await legacyBox.put(0, {'legacy': true});
+
+      s.ch.push(UserInput(id: 'old-u1', text: 'old session row'));
+      await _settle();
+      expect(messages(s.epk, oldSession).map((row) => row.text), [
+        'old session row',
+      ]);
+      expect(index(s.epk, oldSession)?.key, '${s.epk}:main:$oldSession');
+
+      const rotatedSession = 'session-rotated-same-room';
+      _sessionByEpk[s.epk] = rotatedSession;
+      s.ch.defaultSessionId = rotatedSession;
+      s.ch.pushRaw(
+        PairOk(
+          inReplyTo: 'pair-rotated',
+          sessionName: 'Pi',
+          sessionStartedAt: DateTime.now().millisecondsSinceEpoch,
+          roomId: 'main',
+          sessionId: rotatedSession,
+        ),
+      );
+      await _settle();
+      await _settle();
+
+      final newRef = refFor(s.epk, rotatedSession);
+      expect(LocalBoxes.msgsBoxName(newRef), isNot(oldBoxName));
+      expect(messages(s.epk), isEmpty, reason: 'new session box starts empty');
+
+      s.ch.push(UserInput(id: 'new-u1', text: 'new session row'));
+      await _settle();
+
+      expect(messages(s.epk, rotatedSession).map((row) => row.text), [
+        'new session row',
+      ]);
+      expect(messages(s.epk, oldSession).map((row) => row.text), [
+        'old session row',
+      ]);
+      expect(
+        index(s.epk, rotatedSession)?.key,
+        isNot(index(s.epk, oldSession)?.key),
+      );
+      expect(legacyBox.get(0), {
+        'legacy': true,
+      }, reason: 'old peer+room legacy cache box is not deleted');
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
+    'runtime record does not report stale live state while disconnected',
+    () async {
+      final s = await setup();
+      await _settle();
+      RuntimeRecord runtime() {
+        final raw = LocalBoxes().runtimeBox().get(
+          LocalBoxes.runtimeKey(s.epk, 'main'),
+        );
+        return raw is Map
+            ? RuntimeRecord.fromJson(raw.cast<String, dynamic>())
+            : const RuntimeRecord();
+      }
+
+      expect(runtime().connection, RuntimeConnection.online);
+      expect(runtime().presence, RuntimePresence.alive);
+
+      final retrying = s.conn.statusStream.firstWhere(
+        (status) => status is StatusRetrying,
+      );
+      await s.ch.close();
+      await retrying;
+      await _settle();
+
+      expect(runtime().connection, isNot(RuntimeConnection.online));
+      expect(runtime().presence, isNot(RuntimePresence.alive));
+      expect(s.conn.isRoomWorking(s.epk, 'main'), isFalse);
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
 
   test(
     'foreign session_history is dropped before rows or index mutate',
@@ -853,7 +963,7 @@ void main() {
     final s = await setup();
     final read = SessionReadRepository(LocalBoxes());
     var emits = 0;
-    final sub = read.watchMessages(s.epk, 'main').listen((_) => emits++);
+    final sub = read.watchMessages(refFor(s.epk)).listen((_) => emits++);
     await _settle();
 
     SessionHistory hist(String inReplyTo) => SessionHistory(
@@ -928,7 +1038,7 @@ void main() {
       final s = await setup();
       final read = SessionReadRepository(LocalBoxes());
       var emits = 0;
-      final sub = read.watchMessages(s.epk, 'main').listen((_) => emits++);
+      final sub = read.watchMessages(refFor(s.epk)).listen((_) => emits++);
       await _settle();
 
       final history = SessionHistory(
@@ -1008,10 +1118,11 @@ void main() {
       // the old peer's channel down. _activeEpk moves; the old channel (origin
       // = peer A) is still draining.
       const epkB = 'epk_chat2_zzz';
+      _sessionByEpk[epkB] = 'session-chat2';
       final read = SessionReadRepository(LocalBoxes());
       final seenLens = <int>[];
       final sub = read
-          .watchMessages(epkB, 'main')
+          .watchMessages(refFor(epkB))
           .listen((rows) => seenLens.add(rows.length));
       await s.sync.activate(epkB, 'main');
       await _settle();
@@ -1525,25 +1636,24 @@ void main() {
     test(
       '(d) an offline (held-pending) send becomes a visible error too',
       () async {
-        // No channel ever adopted → sendMessage takes the offline path.
-        // Decision: held-pending is timed out after its ts as well (nothing
-        // spins forever), but the user still gets a visible failure rather than
-        // a disappearing row.
-        final conn = ConnectionManager(
-          factory: (_, _) async => _FakeChannel(),
-          storage: _FakeStorage(),
+        // A canonical session was known, then the channel dropped →
+        // sendMessage takes the offline path while keeping the session-scoped
+        // persistence key.
+        final s = await setup(pendingSendTimeout: short);
+        final epk = s.epk;
+        final retrying = s.conn.statusStream.firstWhere(
+          (status) => status is StatusRetrying,
         );
-        final sync = SyncService(conn, LocalBoxes(), pendingSendTimeout: short);
-        final epk = 'epk_offline_${++_counter}';
-        await sync.activate(epk, 'main');
+        await s.ch.close();
+        await retrying;
         await _settle();
 
-        await sync.sendMessage('typed while offline');
+        await s.sync.sendMessage('typed while offline');
         await _settle();
         expect(messages(epk), hasLength(1), reason: 'held pending row written');
         expect(messages(epk).first.pending, isTrue);
         expect(
-          sync.debugPendingSendTimerCount,
+          s.sync.debugPendingSendTimerCount,
           1,
           reason: 'timeout armed offline',
         );
@@ -1554,8 +1664,8 @@ void main() {
         expect(rows, hasLength(1), reason: 'offline failure remains visible');
         expect(rows.single.role, MsgRole.assistant);
         expect(rows.single.text, startsWith('⚠ send_timeout:'));
-        conn.dispose();
-        sync.dispose();
+        s.conn.dispose();
+        s.sync.dispose();
       },
     );
 

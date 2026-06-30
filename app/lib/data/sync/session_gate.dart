@@ -1,16 +1,5 @@
+import 'package:app/domain/entities/remote_session_ref.dart';
 import 'package:app/protocol/protocol.dart';
-
-final class ActiveSessionRef {
-  const ActiveSessionRef({
-    required this.peerEpk,
-    required this.roomId,
-    required this.sessionId,
-  });
-
-  final String peerEpk;
-  final String roomId;
-  final String sessionId;
-}
 
 final class SessionGateDecision {
   const SessionGateDecision._({
@@ -47,7 +36,7 @@ final class SessionGateDecision {
 final class SessionGate {
   const SessionGate();
 
-  SessionGateDecision accepts(ServerMessage message, ActiveSessionRef? active) {
+  SessionGateDecision accepts(ServerMessage message, RemoteSessionRef? active) {
     final messageType = typeOfServerMessage(message);
     if (!isSessionScopedServerType(messageType)) {
       return const SessionGateDecision.accepted();

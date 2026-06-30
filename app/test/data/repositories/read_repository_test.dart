@@ -9,6 +9,7 @@ import 'package:app/data/local/records/runtime_record.dart';
 import 'package:app/data/local/records/session_index_record.dart';
 import 'package:app/data/repositories/home_read_repository.dart';
 import 'package:app/data/repositories/session_read_repository.dart';
+import 'package:app/domain/entities/remote_session_ref.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 
@@ -39,10 +40,15 @@ void main() {
       final boxes = LocalBoxes();
       final repo = SessionReadRepository(boxes);
       final epk = 'epk_read_${++_c}';
-      final box = await boxes.msgsBox(epk, 'main');
+      final ref = RemoteSessionRef(
+        peerEpk: epk,
+        roomId: 'main',
+        sessionId: 'session-a',
+      );
+      final box = await boxes.msgsBox(ref);
       await box.put(0, _msg(0, 'a', 'first').toJson());
 
-      final stream = repo.watchMessages(epk, 'main');
+      final stream = repo.watchMessages(ref);
       final emissions = <List<MessageRecord>>[];
       final sub = stream.listen(emissions.add);
 
@@ -70,7 +76,7 @@ void main() {
     expect(got.last.connection, RuntimeConnection.connecting); // default
 
     await boxes.runtimeBox().put(
-      LocalBoxes.sessionKey(epk, 'main'),
+      LocalBoxes.runtimeKey(epk, 'main'),
       const RuntimeRecord(
         connection: RuntimeConnection.online,
         presence: RuntimePresence.alive,
@@ -92,10 +98,11 @@ void main() {
     final initialCount = got.last.length;
 
     await boxes.sessionsIndexBox().put(
-      '$epk:main',
+      '$epk:main:session-a',
       SessionIndexRecord(
         epk: epk,
         roomId: 'main',
+        sessionId: 'session-a',
         status: SessionActivity.working,
       ).toJson(),
     );

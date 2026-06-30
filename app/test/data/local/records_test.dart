@@ -61,6 +61,7 @@ void main() {
       final r = SessionIndexRecord(
         epk: 'epk1',
         roomId: 'main',
+        sessionId: 'session-1',
         displayName: 'proj',
         status: SessionActivity.working,
         lastMessageAt: DateTime.fromMillisecondsSinceEpoch(99),
@@ -69,7 +70,17 @@ void main() {
       );
       final back = SessionIndexRecord.fromJson(r.toJson());
       expect(back, r);
+      expect(back.key, 'epk1:main:session-1');
       expect(back.status, SessionActivity.working);
+    });
+
+    test('legacy SessionIndexRecord without session_id is rejected', () {
+      final legacy = {'epk': 'epk1', 'room_id': 'main', 'status': 'working'};
+      expect(SessionIndexRecord.tryFromJson(legacy), isNull);
+      expect(
+        () => SessionIndexRecord.fromJson(legacy),
+        throwsA(isA<FormatException>()),
+      );
     });
 
     test('RuntimeRecord survives roundtrip', () {

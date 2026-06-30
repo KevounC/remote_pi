@@ -5,12 +5,15 @@
 // on first boot). The `runtime` box is VOLATILE: wiped on every boot (#3) so
 // connection/presence never report stale online across restarts.
 //
-//   DURABLE  msgs_<epk>__<roomId>   key = seq (int)        → MessageRecord
-//   DURABLE  sessions_index         key = <epk>:<roomId>   → SessionIndexRecord
+//   DURABLE  msgs_<epk>__<roomId>__<sessionId>
+//                                           key = seq (int)  → MessageRecord
+//   DURABLE  sessions_index         key = <epk>:<roomId>:<sessionId>
+//                                                           → SessionIndexRecord
 //   VOLATILE runtime  (wiped@boot)  key = <epk>:<roomId>   → RuntimeRecord
 
 import 'package:app/data/transport/epk_encoding.dart';
 import 'package:app/domain/contracts/transcript_event_store.dart';
+import 'package:app/domain/entities/remote_session_ref.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 const String _kNamespace = 'rp_v2';
@@ -54,15 +57,14 @@ class LocalBoxes {
 
   /// Per-session message box. Lazily opened; idempotent (returns the already
   /// open box on subsequent calls).
-  Future<Box<dynamic>> msgsBox(String epk, String roomId) =>
-      Hive.openBox<dynamic>(msgsBoxName(epk, roomId));
+  Future<Box<dynamic>> msgsBox(RemoteSessionRef ref) =>
+      Hive.openBox<dynamic>(msgsBoxName(ref));
 
   /// Synchronous accessor for a msgs box known to be open already.
-  Box<dynamic> openMsgsBox(String epk, String roomId) =>
-      Hive.box<dynamic>(msgsBoxName(epk, roomId));
+  Box<dynamic> openMsgsBox(RemoteSessionRef ref) =>
+      Hive.box<dynamic>(msgsBoxName(ref));
 
-  bool isMsgsBoxOpen(String epk, String roomId) =>
-      Hive.isBoxOpen(msgsBoxName(epk, roomId));
+  bool isMsgsBoxOpen(RemoteSessionRef ref) => Hive.isBoxOpen(msgsBoxName(ref));
 
   /// Per canonical transcript session event log. Lazily opened; idempotent.
   Future<Box<dynamic>> transcriptEventsBox(TranscriptSessionKey key) =>
@@ -76,13 +78,16 @@ class LocalBoxes {
 
   /// `:` and the epk's `/`+`=` would break the on-disk filename — sanitise to
   /// the url-safe, unpadded epk form (same approach as the v1 store).
-  static String msgsBoxName(String epk, String roomId) =>
-      'msgs_${toAppEpk(epk)}__$roomId';
+  static String msgsBoxName(RemoteSessionRef ref) =>
+      'msgs_${toAppEpk(ref.peerEpk)}__${ref.roomId}__${_safe(ref.sessionId)}';
 
   static String transcriptEventsBoxName(TranscriptSessionKey key) =>
       'transcript_events_${toAppEpk(key.peerId)}__${_safe(key.roomId)}__${_safe(key.sessionId)}';
 
-  static String sessionKey(String epk, String roomId) => '$epk:$roomId';
+  static String sessionKey(RemoteSessionRef ref) => ref.storageKey;
+
+  /// Runtime reachability is room-scoped, not transcript-scoped.
+  static String runtimeKey(String epk, String roomId) => '$epk:$roomId';
 
   static String _safe(String value) => value
       .replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_')

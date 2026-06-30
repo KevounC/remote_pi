@@ -23,6 +23,7 @@ class _FakeChannel implements IChannel, IControlLink {
   final _ctrl = StreamController<ServerMessage>.broadcast();
   final _control = StreamController<ControlInbound>.broadcast();
   final List<ClientMessage> sent = [];
+  String defaultSessionId = '';
   @override
   Stream<ServerMessage> get serverMessages => _ctrl.stream;
   @override
@@ -37,8 +38,39 @@ class _FakeChannel implements IChannel, IControlLink {
     await _control.close();
   }
 
-  void push(ServerMessage m) => _ctrl.add(m);
+  void push(ServerMessage m) => _ctrl.add(_withDefaultSession(m));
+  void pushRaw(ServerMessage m) => _ctrl.add(m);
   void pushControl(ControlInbound m) => _control.add(m);
+
+  ServerMessage _withDefaultSession(ServerMessage m) {
+    final sid = defaultSessionId;
+    if (sid.isEmpty) return m;
+    return switch (m) {
+      UserInput(:final sessionId) when sessionId.isEmpty => UserInput(
+        id: m.id,
+        sessionId: sid,
+        text: m.text,
+        streamingBehavior: m.streamingBehavior,
+        image: m.image,
+      ),
+      AgentChunk(:final sessionId) when sessionId.isEmpty => AgentChunk(
+        sessionId: sid,
+        inReplyTo: m.inReplyTo,
+        delta: m.delta,
+      ),
+      AgentDone(:final sessionId) when sessionId.isEmpty => AgentDone(
+        sessionId: sid,
+        inReplyTo: m.inReplyTo,
+        usage: m.usage,
+      ),
+      Cancelled(:final sessionId) when sessionId.isEmpty => Cancelled(
+        sessionId: sid,
+        inReplyTo: m.inReplyTo,
+        targetId: m.targetId,
+      ),
+      _ => m,
+    };
+  }
 }
 
 class _FakeSecureStorage implements FlutterSecureStorage {
@@ -105,6 +137,23 @@ class _FakeStorage extends PairingStorage {
 }
 
 late Directory _dir;
+int _sessionCounter = 0;
+
+Future<void> _adoptWithSession(ConnectionManager conn, _FakeChannel ch) async {
+  final sessionId = 'chat-session-${++_sessionCounter}';
+  ch.defaultSessionId = sessionId;
+  conn.adopt(ch, _peer);
+  ch.pushRaw(
+    PairOk(
+      inReplyTo: 'pair-$sessionId',
+      sessionName: 'Pi',
+      sessionStartedAt: DateTime.now().millisecondsSinceEpoch,
+      roomId: 'main',
+      sessionId: sessionId,
+    ),
+  );
+  await Future<void>.delayed(const Duration(milliseconds: 30));
+}
 
 void main() {
   setUpAll(() async {
@@ -130,8 +179,7 @@ void main() {
     await prefs.setSelectedPeerEpk(_peer.remoteEpk);
     await prefs.setSelectedRoom(epk: _peer.remoteEpk, roomId: 'main');
 
-    conn.adopt(ch, _peer);
-    await Future<void>.delayed(const Duration(milliseconds: 30));
+    await _adoptWithSession(conn, ch);
 
     final vm = ChatViewModel(read, sync, conn, prefs, storage);
     await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -174,16 +222,13 @@ void main() {
         storage: storage,
       );
       final boxes = LocalBoxes();
-      final msgBox = await boxes.msgsBox(_peer.remoteEpk, 'main');
-      await msgBox.clear();
       final sync = SyncService(conn, boxes);
       final read = SessionReadRepository(boxes);
       final prefs = Preferences(_FakeSecureStorage());
       await prefs.setSelectedPeerEpk(_peer.remoteEpk);
       await prefs.setSelectedRoom(epk: _peer.remoteEpk, roomId: 'main');
 
-      conn.adopt(ch, _peer);
-      await Future<void>.delayed(const Duration(milliseconds: 30));
+      await _adoptWithSession(conn, ch);
       final vm = ChatViewModel(read, sync, conn, prefs, storage);
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
@@ -233,8 +278,7 @@ void main() {
       await prefs.setSelectedPeerEpk(_peer.remoteEpk);
       await prefs.setSelectedRoom(epk: _peer.remoteEpk, roomId: 'main');
 
-      conn.adopt(ch, _peer);
-      await Future<void>.delayed(const Duration(milliseconds: 30));
+      await _adoptWithSession(conn, ch);
       final vm = ChatViewModel(read, sync, conn, prefs, storage);
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
@@ -259,6 +303,62 @@ void main() {
     },
   );
 
+  test('session-id rotation reloads an empty canonical message box', () async {
+    final ch = _FakeChannel();
+    final storage = _FakeStorage();
+    final conn = ConnectionManager(
+      factory: (_, _) async => ch,
+      storage: storage,
+    );
+    final boxes = LocalBoxes();
+    final sync = SyncService(conn, boxes);
+    final read = SessionReadRepository(boxes);
+    final prefs = Preferences(_FakeSecureStorage());
+    await prefs.setSelectedPeerEpk(_peer.remoteEpk);
+    await prefs.setSelectedRoom(epk: _peer.remoteEpk, roomId: 'main');
+
+    await _adoptWithSession(conn, ch);
+    final vm = ChatViewModel(read, sync, conn, prefs, storage);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    ch.push(UserInput(id: 'old-u1', text: 'old session row'));
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(
+      (vm.state as ChatReady).messages.whereType<UserMsg>().map((m) => m.text),
+      contains('old session row'),
+    );
+
+    const rotatedSession = 'chat-session-rotated';
+    ch.defaultSessionId = rotatedSession;
+    ch.pushRaw(
+      PairOk(
+        inReplyTo: 'pair-rotated',
+        sessionName: 'Pi',
+        sessionStartedAt: DateTime.now().millisecondsSinceEpoch,
+        roomId: 'main',
+        sessionId: rotatedSession,
+      ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    expect(
+      (vm.state as ChatReady).messages.whereType<UserMsg>().map((m) => m.text),
+      isNot(contains('old session row')),
+      reason: 'new canonical session must not render previous session rows',
+    );
+
+    ch.push(UserInput(id: 'new-u1', text: 'new session row'));
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(
+      (vm.state as ChatReady).messages.whereType<UserMsg>().map((m) => m.text),
+      ['new session row'],
+    );
+
+    vm.dispose();
+    sync.dispose();
+    conn.dispose();
+  });
+
   test(
     'an empty session reaches ChatReady with no messages → the chat shows the '
     'default "Nothing here" placeholder (plan/32)',
@@ -270,17 +370,15 @@ void main() {
         storage: storage,
       );
       final boxes = LocalBoxes();
-      // The msgs box is shared across tests in this file (setUpAll) — start
-      // this one from a clean slate so "empty session" really is empty.
-      (await boxes.msgsBox(_peer.remoteEpk, 'main')).clear();
+      // Message boxes are keyed by canonical session id; each test session is
+      // fresh, so "empty session" starts with an empty scoped box.
       final sync = SyncService(conn, boxes);
       final read = SessionReadRepository(boxes);
       final prefs = Preferences(_FakeSecureStorage());
       await prefs.setSelectedPeerEpk(_peer.remoteEpk);
       await prefs.setSelectedRoom(epk: _peer.remoteEpk, roomId: 'main');
 
-      conn.adopt(ch, _peer);
-      await Future<void>.delayed(const Duration(milliseconds: 30));
+      await _adoptWithSession(conn, ch);
       final vm = ChatViewModel(read, sync, conn, prefs, storage);
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
@@ -314,14 +412,18 @@ void main() {
     await prefs.setSelectedPeerEpk(_peer.remoteEpk);
     await prefs.setSelectedRoom(epk: _peer.remoteEpk, roomId: 'main');
 
-    conn.adopt(ch, _peer);
-    await Future<void>.delayed(const Duration(milliseconds: 30));
+    await _adoptWithSession(conn, ch);
     final vm = ChatViewModel(read, sync, conn, prefs, storage);
     await Future<void>.delayed(const Duration(milliseconds: 50));
 
     // Room comes online idle (no local turn started in THIS chat).
     ch.pushControl(
-      const RoomAnnounced(peer: 'epk_chat', roomId: 'main', startedAt: 1),
+      RoomAnnounced(
+        peer: 'epk_chat',
+        roomId: 'main',
+        sessionId: ch.defaultSessionId,
+        startedAt: 1,
+      ),
     );
     await Future<void>.delayed(const Duration(milliseconds: 20));
     expect(vm.isWorking, isFalse);
@@ -335,6 +437,7 @@ void main() {
         working: true,
         hasModel: false,
         hasThinking: false,
+        hasSessionId: false,
       ),
     );
     await Future<void>.delayed(const Duration(milliseconds: 20));
@@ -365,6 +468,7 @@ void main() {
         working: false,
         hasModel: false,
         hasThinking: false,
+        hasSessionId: false,
       ),
     );
     await Future<void>.delayed(const Duration(milliseconds: 20));

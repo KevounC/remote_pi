@@ -21,6 +21,7 @@ import 'package:app/data/sync/session_gate.dart';
 import 'package:app/data/transport/connection_manager.dart';
 import 'package:app/domain/contracts/service.dart';
 import 'package:app/domain/contracts/transcript_event_store.dart';
+import 'package:app/domain/entities/remote_session_ref.dart';
 import 'package:app/domain/session_state.dart';
 import 'package:app/domain/transcript/transcript_event.dart';
 import 'package:app/domain/transcript/transcript_projection.dart';
@@ -39,9 +40,12 @@ class SyncService extends Service {
   StreamSubscription<Map<String, List<RoomInfo>>>? _roomsSub;
   StreamSubscription<Map<String, PresenceState>>? _presenceSub;
 
-  // Active session being written (follows ConnectionManager).
+  // Active session being written (follows ConnectionManager). Persistence is
+  // bound to [_activeRef]; [_activeEpk]/[_activeRoomId] remain available for
+  // room-scoped reachability/runtime while the canonical session id is unknown.
   String? _activeEpk;
   String _activeRoomId = 'main';
+  RemoteSessionRef? _activeRef;
 
   // Highest `session_started_at` ever accepted for this active session.
   // Any incoming SessionHistory with a lower value is stale and rejected.
@@ -99,7 +103,7 @@ class SyncService extends Service {
     this.pendingSendTimeout = const Duration(seconds: 20),
   }) : _transcriptEventStore = transcriptEventStore {
     _connSub = _conn.statusStream.listen(_onStatus);
-    _roomsSub = _conn.roomsStream.listen((_) => _writeRuntime());
+    _roomsSub = _conn.roomsStream.listen((_) => _onRoomsChanged());
     _presenceSub = _conn.presenceStream.listen((_) => _writeRuntime());
     _onStatus(_conn.status); // replay current
   }
@@ -131,24 +135,48 @@ class SyncService extends Service {
 
   String? get activeEpk => _activeEpk;
   String get activeRoomId => _activeRoomId;
+  RemoteSessionRef? get activeSessionRef => _activeRef;
 
-  /// Bind the writer to a (peer, room). Opens the box and rebuilds the
-  /// dedupe/seq index from it. Called by the chat when it mounts / switches
-  /// rooms; also adopted automatically on the first StatusOnline.
+  RemoteSessionRef? _resolveActiveRef(String epk, String roomId) {
+    final activePeer = _conn.activePeer;
+    if (activePeer == null || activePeer.remoteEpk != epk) return null;
+    if (_conn.activeRoomId != roomId) return null;
+    final sessionId = _conn.activeSessionId;
+    if (sessionId == null || sessionId.isEmpty) return null;
+    return RemoteSessionRef(peerEpk: epk, roomId: roomId, sessionId: sessionId);
+  }
+
+  bool _isStillActive(RemoteSessionRef ref) => _activeRef == ref;
+
+  /// Bind the writer to a canonical remote session. The `(peer, room)` pair
+  /// may be known before the Pi reports a `session_id`; in that state runtime
+  /// reachability can still update, but transcript persistence waits for the
+  /// full [RemoteSessionRef].
   Future<void> activate(String epk, String roomId) async {
     final room = roomId.isEmpty ? 'main' : roomId;
-    if (_activeEpk == epk && _activeRoomId == room && _indexLoaded) return;
-    // Genuine session switch: drop the in-memory turn state so the
-    // PREVIOUS session's streaming buffer + whole-turn working flag can't
-    // bleed into the next chat (the bug where chat 2 looked "working"
-    // because chat 1 was mid-turn). We deliberately do NOT clear the
-    // durable session index — the previous room may still be running on
-    // the Pi, and Home keeps showing it via the relay's per-room
-    // `meta.working` broadcast.
+    final nextRef = _resolveActiveRef(epk, room);
+    final sameRoom = _activeEpk == epk && _activeRoomId == room;
+    final sameRef = _activeRef == nextRef;
+    if (sameRoom && sameRef && _indexLoaded) return;
+
+    // Genuine session switch or session-id rotation: drop in-memory turn state
+    // and projection buffers so the previous canonical transcript cannot bleed
+    // into the newly active session-scoped box. We deliberately do NOT clear
+    // the previous durable session index — the prior Pi session may still be
+    // visible via room-level relay metadata.
     _resetTurnState(clearPendingSendTimers: true);
+    _clearTranscriptEventBuffer();
+    _acceptedSessionStartedAtHighWater = null;
     _activeEpk = epk;
     _activeRoomId = room;
-    await _loadIndex();
+    _activeRef = nextRef;
+    _indexLoaded = false;
+    _idToSeq.clear();
+    _nextSeq = 0;
+
+    if (nextRef != null) {
+      await _loadIndex(nextRef);
+    }
     _writeRuntime();
   }
 
@@ -174,11 +202,16 @@ class SyncService extends Service {
     MessageImage? image,
     UserMessageStreamingBehavior? streamingBehavior,
   }) async {
+    final ref = _activeRef;
     final epk = _activeEpk;
-    final room = _activeRoomId;
     final id = _newId();
     final now = DateTime.now();
     final isSteer = streamingBehavior == UserMessageStreamingBehavior.steer;
+    final sessionId = ref?.sessionId;
+    if (ref == null || sessionId == null || sessionId.isEmpty) {
+      debugPrint('[msg-send] id=$id blocked: session identity unavailable');
+      return;
+    }
     // Optimistic pending row (#defaults: optimistic + dedupe by id).
     if (epk != null) {
       await _appendTranscriptEvent(
@@ -225,18 +258,6 @@ class SyncService extends Service {
       _emitStreaming(StreamingMessage(inReplyTo: id));
     }
     debugPrint('[msg-send] id=$id text=${_preview(text, image)}');
-    final sessionId = _activeSessionId;
-    if (sessionId == null || sessionId.isEmpty) {
-      await _failPendingSend(
-        id,
-        code: 'session_unavailable',
-        message:
-            'Session identity is not available yet. Reconnect and try again.',
-        expectedEpk: epk,
-        expectedRoom: room,
-      );
-      return;
-    }
     try {
       await ch.send(
         UserMessage(
@@ -256,8 +277,7 @@ class SyncService extends Service {
         message:
             'Message could not be sent to the Pi. Check the connection and try again.',
         debugDetail: err,
-        expectedEpk: epk,
-        expectedRoom: room,
+        expectedRef: ref,
       );
     }
   }
@@ -267,21 +287,20 @@ class SyncService extends Service {
   /// row loaded from disk already past [pendingSendTimeout] fires immediately
   /// (floored at zero). Idempotent — cancels any existing timer for `id`.
   void _armSendTimeout(String id, DateTime ts) {
-    final epk = _activeEpk;
-    if (epk == null) return;
-    final room = _activeRoomId;
+    final ref = _activeRef;
+    if (ref == null) return;
     _pendingSendTimers.remove(id)?.cancel();
     final remaining = pendingSendTimeout - DateTime.now().difference(ts);
     _pendingSendTimers[id] = Timer(
       remaining > Duration.zero ? remaining : Duration.zero,
-      () => _onSendTimeout(id, epk, room),
+      () => _onSendTimeout(id, ref),
     );
   }
 
   /// No echo arrived within [pendingSendTimeout]: replace the optimistic
   /// bubble with a visible failure and unwind only the turn state that belongs
   /// to THIS `id`.
-  void _onSendTimeout(String id, String epk, String room) {
+  void _onSendTimeout(String id, RemoteSessionRef expectedRef) {
     // ignore: discarded_futures
     _failPendingSend(
       id,
@@ -289,8 +308,7 @@ class SyncService extends Service {
       message:
           'Message was not confirmed by the Pi. It may not have been delivered.',
       debugDetail: 'no echo in ${pendingSendTimeout.inSeconds}s',
-      expectedEpk: epk,
-      expectedRoom: room,
+      expectedRef: expectedRef,
     );
   }
 
@@ -299,19 +317,12 @@ class SyncService extends Service {
     required String code,
     required String message,
     Object? debugDetail,
-    String? expectedEpk,
-    String? expectedRoom,
+    RemoteSessionRef? expectedRef,
   }) async {
-    if (expectedEpk != null &&
-        (_activeEpk != expectedEpk || _activeRoomId != expectedRoom)) {
-      return;
-    }
+    if (expectedRef != null && !_isStillActive(expectedRef)) return;
     _pendingSendTimers.remove(id)?.cancel();
     await _removePendingById(id);
-    if (expectedEpk != null &&
-        (_activeEpk != expectedEpk || _activeRoomId != expectedRoom)) {
-      return;
-    }
+    if (expectedRef != null && !_isStillActive(expectedRef)) return;
     // Clear the thinking cursor only if it's seeded for this message.
     if (_streaming?.inReplyTo == id) _emitStreaming(null);
     // Clear working ONLY if this id owns it — never knock down a turn that a
@@ -349,16 +360,14 @@ class SyncService extends Service {
   @visibleForTesting
   TranscriptEventStore? get debugTranscriptEventStore => _transcriptEventStore;
 
-  String? get _activeSessionId => _conn.activeSessionId;
-
   Future<void> setQueuedMessage(String text) async {
     final ch = _conn.channel;
     if (ch == null) return;
     _setQueuedText(text);
-    final sessionId = _activeSessionId;
-    if (sessionId == null || sessionId.isEmpty) return;
+    final ref = _activeRef;
+    if (ref == null) return;
     await ch.send(
-      QueuedMessageSet(id: _newId(), sessionId: sessionId, text: text),
+      QueuedMessageSet(id: _newId(), sessionId: ref.sessionId, text: text),
     );
   }
 
@@ -366,9 +375,9 @@ class SyncService extends Service {
     final ch = _conn.channel;
     _setQueuedText(null);
     if (ch == null) return;
-    final sessionId = _activeSessionId;
-    if (sessionId == null || sessionId.isEmpty) return;
-    await ch.send(QueuedMessageClear(id: _newId(), sessionId: sessionId));
+    final ref = _activeRef;
+    if (ref == null) return;
+    await ch.send(QueuedMessageClear(id: _newId(), sessionId: ref.sessionId));
   }
 
   Future<void> cancel(String targetId) async {
@@ -376,22 +385,22 @@ class SyncService extends Service {
     _pendingSendTimers.remove(targetId)?.cancel();
     final ch = _conn.channel;
     if (ch == null) return;
-    final sessionId = _activeSessionId;
-    if (sessionId == null || sessionId.isEmpty) return;
+    final ref = _activeRef;
+    if (ref == null) return;
     await ch.send(
-      Cancel(id: _newId(), sessionId: sessionId, targetId: targetId),
+      Cancel(id: _newId(), sessionId: ref.sessionId, targetId: targetId),
     );
   }
 
   Future<void> approveTool(String toolCallId, ApproveDecision decision) async {
     final ch = _conn.channel;
     if (ch == null) return;
-    final sessionId = _activeSessionId;
-    if (sessionId == null || sessionId.isEmpty) return;
+    final ref = _activeRef;
+    if (ref == null) return;
     await ch.send(
       ApproveTool(
         id: _newId(),
-        sessionId: sessionId,
+        sessionId: ref.sessionId,
         toolCallId: toolCallId,
         decision: decision,
       ),
@@ -419,31 +428,26 @@ class SyncService extends Service {
 
   void requestSync() {
     final ch = _conn.channel;
-    if (ch == null || _activeEpk == null) {
+    final ref = _activeRef;
+    if (ch == null || ref == null) {
       _pendingSyncRequest = true;
       return;
     }
     _pendingSyncRequest = false;
-    final sessionId = _activeSessionId;
-    if (sessionId == null || sessionId.isEmpty) {
-      _pendingSyncRequest = true;
-      return;
-    }
-    ch.send(SessionSync(id: _newId(), sessionId: sessionId));
+    ch.send(SessionSync(id: _newId(), sessionId: ref.sessionId));
   }
 
   /// Plan/28 — `session_new` acked: wipe the active session's rows.
   /// Keep the persisted `session_started_at` high-water so stale post-clear
   /// history can still be identified from persisted state.
   Future<void> clearActiveSession() async {
-    final epk = _activeEpk;
-    if (epk == null) return;
-    final room = _activeRoomId;
+    final ref = _activeRef;
+    if (ref == null) return;
     // Session wiped → any optimistic sends are moot; disarm their backstops.
     _cancelAllSendTimers();
     await _enqueue(() async {
-      if (_activeEpk != epk || _activeRoomId != room) return;
-      final box = await _boxes.msgsBox(epk, room);
+      if (!_isStillActive(ref)) return;
+      final box = await _boxes.msgsBox(ref);
       await box.clear();
       _idToSeq.clear();
       _nextSeq = 0;
@@ -507,6 +511,20 @@ class SyncService extends Service {
     if (_pendingSyncRequest) requestSync();
   }
 
+  void _onRoomsChanged() {
+    _writeRuntime();
+    final epk = _activeEpk;
+    if (epk == null) return;
+    final nextRef = _resolveActiveRef(epk, _activeRoomId);
+    if (nextRef != _activeRef) {
+      // A Pi `/new`, `/resume`, or daemon replacement can rotate the canonical
+      // session id while the relay room stays the same. Rebind persistence to
+      // the new session-scoped box and clear in-memory turn state.
+      // ignore: discarded_futures
+      activate(epk, _activeRoomId);
+    }
+  }
+
   void _onServerMessage(ServerMessage msg, [String? originEpk]) {
     // Plan/32f — drop frames from a peer whose channel is no longer the active
     // session (a stale connection still draining after `switchTo`). Without
@@ -518,7 +536,7 @@ class SyncService extends Service {
     if (originEpk != null && _activeEpk != null && originEpk != _activeEpk) {
       return;
     }
-    final gate = _sessionGate.accepts(msg, _activeSessionRef());
+    final gate = _sessionGate.accepts(msg, _activeRef);
     if (!gate.accepted) {
       debugPrint(
         '[session-gate] drop type=${gate.messageType ?? typeOfServerMessage(msg)} '
@@ -745,17 +763,6 @@ class SyncService extends Service {
     }
   }
 
-  ActiveSessionRef? _activeSessionRef() {
-    final epk = _activeEpk;
-    final sessionId = _activeSessionId;
-    if (epk == null || sessionId == null || sessionId.isEmpty) return null;
-    return ActiveSessionRef(
-      peerEpk: epk,
-      roomId: _activeRoomId,
-      sessionId: sessionId,
-    );
-  }
-
   static String _shortSessionId(String? sessionId) {
     if (sessionId == null || sessionId.isEmpty) return '-';
     return sessionId.length <= 8
@@ -766,12 +773,8 @@ class SyncService extends Service {
   /// Plan/32 — persist a compaction as a system row so it renders a system
   /// bubble in the chat and survives a re-sync. Keyed by `ts` when present so
   /// the live message and its history replay collapse to one row.
-  String _activeTranscriptSessionId() {
-    final sessionId = _activeSessionId;
-    if (sessionId != null && sessionId.isNotEmpty) return sessionId;
-    final epk = _activeEpk ?? 'unknown-peer';
-    return 'compat:$epk:$_activeRoomId';
-  }
+  String _activeTranscriptSessionId() =>
+      _activeRef?.sessionId ?? 'inactive-session';
 
   Future<void> _appendTranscriptEvent(
     TranscriptEvent event, {
@@ -842,16 +845,15 @@ class SyncService extends Service {
   }
 
   Future<void> _writeProjectionDiff(TranscriptProjection projection) async {
-    final epk = _activeEpk;
-    if (epk == null) return;
-    final room = _activeRoomId;
+    final ref = _activeRef;
+    if (ref == null) return;
     final desired = <MessageRecord>[
       for (var i = 0; i < projection.messages.length; i++)
         _recordFromProjectedMessage(projection.messages[i], i),
     ];
     await _enqueue(() async {
-      if (_activeEpk != epk || _activeRoomId != room) return;
-      final box = await _boxes.msgsBox(epk, room);
+      if (!_isStillActive(ref)) return;
+      final box = await _boxes.msgsBox(ref);
       for (final k in box.keys.toList()) {
         if ((k as num).toInt() >= desired.length) {
           await box.delete(k);
@@ -923,9 +925,8 @@ class SyncService extends Service {
   }
 
   Future<void> _applyHistory(SessionHistory h) async {
-    final epk = _activeEpk;
-    if (epk == null) return;
-    final room = _activeRoomId;
+    final ref = _activeRef;
+    if (ref == null) return;
     final incomingStartedAt = h.sessionStartedAt;
 
     if (_acceptedSessionStartedAtHighWater != null &&
@@ -933,10 +934,9 @@ class SyncService extends Service {
       return;
     }
 
-    final sessionId = _activeTranscriptSessionId();
-    await _seedPendingTranscriptEvents(epk, room, sessionId);
+    await _seedPendingTranscriptEvents(ref);
     await _replaceHistoryTranscriptEvents(
-      _historyToTranscriptEvents(h.events, sessionId),
+      _historyToTranscriptEvents(h.events, ref.sessionId),
     );
 
     final shouldAdvanceSessionHighWater =
@@ -954,12 +954,8 @@ class SyncService extends Service {
     }
   }
 
-  Future<void> _seedPendingTranscriptEvents(
-    String epk,
-    String room,
-    String sessionId,
-  ) async {
-    final box = await _boxes.msgsBox(epk, room);
+  Future<void> _seedPendingTranscriptEvents(RemoteSessionRef ref) async {
+    final box = await _boxes.msgsBox(ref);
     final pending = <TranscriptEvent>[];
     for (final value in box.values) {
       final record = MessageRecord.fromJson(_coerce(value));
@@ -967,7 +963,7 @@ class SyncService extends Service {
       pending.add(
         UserMessageSubmitted(
           eventId: 'local:user_submitted:${record.id}',
-          sessionId: sessionId,
+          sessionId: ref.sessionId,
           ts: record.ts,
           clientMessageId: record.id,
           text: record.text,
@@ -1041,24 +1037,19 @@ class SyncService extends Service {
 
   String _key(MsgRole role, String id) => '${role.name}:$id';
 
-  Future<void> _loadIndex() {
-    final epk = _activeEpk;
-    if (epk == null) return Future<void>.value();
-    final room = _activeRoomId;
+  Future<void> _loadIndex(RemoteSessionRef ref) {
     return _enqueue(() async {
-      if (_activeEpk != epk || _activeRoomId != room) return;
-      final box = await _boxes.msgsBox(epk, room);
+      if (!_isStillActive(ref)) return;
+      final box = await _boxes.msgsBox(ref);
       final idx = _boxes.sessionsIndexBox();
-      final indexRaw = idx.get(LocalBoxes.sessionKey(epk, room));
-      _acceptedSessionStartedAtHighWater = indexRaw is Map<String, dynamic>
-          ? SessionIndexRecord.fromJson(
-              indexRaw,
-            ).sessionStartedAt?.millisecondsSinceEpoch
+      final indexRaw = idx.get(LocalBoxes.sessionKey(ref));
+      final indexRecord = indexRaw is Map<String, dynamic>
+          ? SessionIndexRecord.tryFromJson(indexRaw)
           : indexRaw is Map
-          ? SessionIndexRecord.fromJson(
-              indexRaw.cast<String, dynamic>(),
-            ).sessionStartedAt?.millisecondsSinceEpoch
+          ? SessionIndexRecord.tryFromJson(indexRaw.cast<String, dynamic>())
           : null;
+      _acceptedSessionStartedAtHighWater =
+          indexRecord?.sessionStartedAt?.millisecondsSinceEpoch;
       _idToSeq.clear();
       _nextSeq = 0;
       for (final k in box.keys) {
@@ -1081,13 +1072,11 @@ class SyncService extends Service {
     String id,
     MessageRecord Function(int seq, MessageRecord? existing) build,
   ) {
-    final epk = _activeEpk;
-    if (epk == null) return Future<void>.value();
-    final room = _activeRoomId;
+    final ref = _activeRef;
+    if (ref == null) return Future<void>.value();
     return _enqueue(() async {
-      final active = _activeEpk == epk && _activeRoomId == room;
-      if (!active) return;
-      final box = await _boxes.msgsBox(epk, room);
+      if (!_isStillActive(ref)) return;
+      final box = await _boxes.msgsBox(ref);
       final mapKey = _key(role, id);
       final existingSeq = _idToSeq[mapKey];
       if (existingSeq != null) {
@@ -1102,12 +1091,11 @@ class SyncService extends Service {
   }
 
   Future<void> _removePendingById(String id) {
-    final epk = _activeEpk;
-    if (epk == null) return Future<void>.value();
-    final room = _activeRoomId;
+    final ref = _activeRef;
+    if (ref == null) return Future<void>.value();
     return _enqueue(() async {
-      if (_activeEpk != epk || _activeRoomId != room) return;
-      final box = await _boxes.msgsBox(epk, room);
+      if (!_isStillActive(ref)) return;
+      final box = await _boxes.msgsBox(ref);
       for (final role in MsgRole.values) {
         final key = _key(role, id);
         final seq = _idToSeq[key];
@@ -1191,18 +1179,25 @@ class SyncService extends Service {
       left.error == right.error;
 
   void _updateIndex(SessionIndexRecord Function(SessionIndexRecord cur) build) {
-    final epk = _activeEpk;
-    if (epk == null) return;
-    final room = _activeRoomId;
+    final ref = _activeRef;
+    if (ref == null) return;
     // ignore: discarded_futures
     _enqueue(() async {
+      if (!_isStillActive(ref)) return;
       final idx = _boxes.sessionsIndexBox();
-      final key = LocalBoxes.sessionKey(epk, room);
+      final key = LocalBoxes.sessionKey(ref);
       final raw = idx.get(key);
       final cur = raw is Map
-          ? SessionIndexRecord.fromJson(raw.cast<String, dynamic>())
-          : SessionIndexRecord(epk: epk, roomId: room);
-      await idx.put(key, build(cur).toJson());
+          ? SessionIndexRecord.tryFromJson(raw.cast<String, dynamic>())
+          : null;
+      final base =
+          cur ??
+          SessionIndexRecord(
+            epk: ref.peerEpk,
+            roomId: ref.roomId,
+            sessionId: ref.sessionId,
+          );
+      await idx.put(key, build(base).toJson());
     });
   }
 
@@ -1224,7 +1219,7 @@ class SyncService extends Service {
     // ignore: discarded_futures
     _enqueue(() async {
       _boxes.runtimeBox().put(
-        LocalBoxes.sessionKey(epk, room),
+        LocalBoxes.runtimeKey(epk, room),
         RuntimeRecord(connection: conn, presence: presence).toJson(),
       );
     });

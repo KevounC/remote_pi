@@ -7,6 +7,7 @@ import 'package:app/data/repositories/session_read_repository.dart';
 import 'package:app/data/sync/sync_events.dart';
 import 'package:app/data/sync/sync_service.dart';
 import 'package:app/data/transport/connection_manager.dart';
+import 'package:app/domain/entities/remote_session_ref.dart';
 import 'package:app/domain/session_state.dart';
 import 'package:app/domain/transcript/transcript_projection.dart';
 import 'package:app/pairing/storage.dart';
@@ -39,6 +40,7 @@ class ChatViewModel extends ViewModel<ChatState> {
 
   PeerRecord? _activePeer;
   String _activeRoomId = 'main';
+  RemoteSessionRef? _activeSessionRef;
   bool _bootstrapping = true;
   bool _disposed = false;
 
@@ -63,7 +65,10 @@ class ChatViewModel extends ViewModel<ChatState> {
     _turnViewSub = _sync.turnViewStream.listen(_onTurnView);
     _queuedSub = _sync.queuedStream.listen(_onQueued);
     _eventSub = _sync.events.listen(_onEvent);
-    _roomsSub = _conn.roomsStream.listen((_) => _recompute());
+    _roomsSub = _conn.roomsStream.listen((_) {
+      unawaited(_refreshSessionBinding());
+      _recompute();
+    });
     _statusSub = _conn.statusStream.listen(_onStatus);
     // ignore: discarded_futures
     _bootstrap();
@@ -139,22 +144,40 @@ class ChatViewModel extends ViewModel<ChatState> {
       _conn.switchRoom(roomId);
     }
 
-    // Bind the writer + watch the DB for this (peer, room).
-    await _sync.activate(epk, roomId);
+    // Bind the writer + watch the canonical session-scoped DB for this room.
+    await _refreshSessionBinding();
     if (_disposed) return;
-    // Plan/32f — now that the writer owns THIS session (activate reset the
-    // turn state on a switch, or kept it when re-entering the same session),
-    // seed the in-memory streaming/working from it. Doing this here instead of
-    // the constructor avoids inheriting the previous chat's bubble/pill.
-    _streaming = _sync.streaming;
-    _transcriptTurn = _sync.turnView;
-    _queuedText = _sync.queuedText;
-    _updateTurnProjection();
-    _msgsSub = _read.watchMessages(epk, roomId).listen(_onMessages);
     _runtimeSub = _read.watchRuntime(epk, roomId).listen(_onRuntime);
 
     _bootstrapping = false;
     _sync.requestSync();
+    _recompute();
+  }
+
+  Future<void> _refreshSessionBinding() async {
+    final peer = _activePeer;
+    if (peer == null) return;
+    await _sync.activate(peer.remoteEpk, _activeRoomId);
+    if (_disposed) return;
+
+    // Plan/32f — now that the writer owns THIS canonical session (activate
+    // reset the turn state on a switch/rotation), seed the in-memory
+    // streaming/working from it. Doing this after activate avoids inheriting
+    // the previous chat's bubble/pill.
+    _streaming = _sync.streaming;
+    _transcriptTurn = _sync.turnView;
+    _queuedText = _sync.queuedText;
+    _updateTurnProjection();
+
+    final ref = _sync.activeSessionRef;
+    if (ref == _activeSessionRef) return;
+    _activeSessionRef = ref;
+    await _msgsSub?.cancel();
+    _msgsSub = null;
+    _messages = const [];
+    if (ref != null) {
+      _msgsSub = _read.watchMessages(ref).listen(_onMessages);
+    }
     _recompute();
   }
 
