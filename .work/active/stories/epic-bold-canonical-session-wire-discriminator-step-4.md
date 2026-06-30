@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-wire-discriminator-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-canonical-session-wire-discriminator
 depends_on: [epic-bold-canonical-session-wire-discriminator-step-3]
@@ -69,3 +69,15 @@ Restore `forward_to_peer` use and client omission of `to_room`, knowingly re-ope
 - Verification: `cd /home/agent/projects/remote_pi/relay && cargo fmt --check && cargo clippy -- -D warnings && cargo test` — passed; `pi_forward_test` now runs 7 tests.
 - Discrepancies from design: implementation was already present in the checked-out relay source before this stride, so this pass landed an integration regression for the explicit missing-`to_room` wire case and advanced the story. Existing `pi_envelope_in` includes relay-owned `to_room` in addition to authenticated `from_pc` and the verbatim inner envelope, matching adjacent relay opaque-targeting work.
 - Adjacent issues parked: none.
+
+## Review (2026-06-30, fast-lane)
+
+**Verdict**: Approve — fast-lane advance; orchestrator independently verified.
+
+**Findings**: none above nit level.
+
+**Verification run (orchestrator)**:
+- `git show --stat 8bad735` — only `relay/tests/pi_forward_test.rs` + this story file changed; no stray files.
+- Confirmed `forward_to_room` already present in `relay/src/peers/registry.rs:372` and `relay/src/handlers/pi_forward.rs:190` (from prior identity-model/relay-opaque-targeting commits), so this step's remaining job was the regression-test lock — legit land-mode.
+- `cd relay && cargo test --test pi_forward_test` — 7/7 pass, incl. new `missing_to_room_returns_transport_error_bad_envelope` (live-relay integration test asserting `bad_envelope` transport error + envelope correlation; opaque `session_id` carried in body unchanged and uninspected).
+- Acceptance criteria all satisfied: missing `to_room`→`bad_envelope`; targeted two-room delivery; `session_id` opaque/uninspected; control broadcasts preserved; fmt/clippy/test green.

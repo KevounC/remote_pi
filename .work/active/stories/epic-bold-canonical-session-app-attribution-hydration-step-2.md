@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-app-attribution-hydration-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-canonical-session-app-attribution-hydration
 depends_on: [epic-bold-canonical-session-app-attribution-hydration-step-1]
@@ -74,3 +74,16 @@ Restore the `senderRoom == null` unconditional enqueue branch. Do not replace it
 - Enforced drop behavior for missing or empty room and room mismatch before any queueing.
 - Kept control-frame parsing on the same boundary: `{peer, ct}` envelopes are still routed through queueing logic and control frames still emit through `controlFrames`.
 - Added unit tests in `app/test/data/transport/ws_transport_demux_test.dart` covering all five outcomes: `enqueue`, `dropMissingRoom`, `dropRoomMismatch`, `control`, `dropMalformed`.
+
+## Review (2026-06-30, fast-lane)
+
+**Verdict**: Approve — fast-lane advance; orchestrator independently verified.
+
+**Findings**: none above nit level.
+
+**Verification run (orchestrator)**:
+- `git show --stat 8efd13e` — only `app/lib/data/transport/ws_transport.dart` + `app/test/data/transport/ws_transport_demux_test.dart` + this story file changed; no collision with other app agents (connection_manager.dart / protocol.g.dart untouched).
+- Confirmed legacy no-room bypass comment/route removed; `demuxPostAuthInboundFrame` pure helper + `WsInboundFrameKind`/`WsInboundFrameDecision` types present; all 5 outcomes (`enqueue`, `dropMissingRoom`, `dropRoomMismatch`, `control`, `dropMalformed`) reachable.
+- `cd app && flutter test test/data/transport/ws_transport_demux_test.dart` (PUB_CACHE set) — 5/5 pass.
+- `cd app && flutter analyze` — only the known-unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802` (documented; not a failure).
+- Acceptance criteria satisfied: missing-room drop, room-mismatch drop, active-room enqueue, control-frame routing, deterministic helper tests.
