@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-store-step-1
 kind: story
-stage: implementing
+stage: done
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-store
 depends_on: [epic-bold-transcript-event-log-projection-derive]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 1: Add the app Hive `TranscriptEvent` store adapter
@@ -137,3 +137,29 @@ Fix by either making the store port/adapter conform to the repository lifecycle 
 **Verification run**:
 - `cd /home/agent/forks/remote_pi/app && HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter analyze` → exit 1 with only the known-unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802`.
 - `cd /home/agent/forks/remote_pi/app && HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter test test/data/local/transcript_event_store_hive_test.dart` → exit 1; 3 tests passed, 2 failed with `PathNotFoundException` while opening transcript event Hive boxes for peer ids containing `/`.
+
+## Review — approved (2026-06-30, re-review after env fix)
+
+This story was bounced 3x in a prior session (DI `addRepository<T extends
+Repository>` bound violation → missing targeted tests → filename-safety
+`PathNotFoundException` for peer ids with `/`/`=`). All three bounces are now
+RESOLVED and the environment is fixed (flutter now at
+`~/projects/remote_pi/.tools/flutter`; the prior `/opt/flutter/bin/cache`
+read-only blocker is gone).
+
+Independently re-ran in the working env: `flutter test
+test/data/local/transcript_event_store_hive_test.dart` → 5/5 (event-id dedupe
+preserving original seq/order, monotonic seq across batches, per-session box
+isolation, sessionId mismatch guard, unknown-kind fail-fast); full app
+`flutter analyze` → only the known-unrelated `axisAlignment` info at
+input_bar.dart:802; full app `flutter test` → 596/596.
+
+Acceptance criteria verified: `TranscriptEventStore` port + Hive adapter with no
+UI/network imports (port imports only `dart:async` + the transcript event domain
+type — ports & adapters satisfied); event boxes keyed by `(peer, room,
+session_id)` with `_safe()` sanitization (the filename-safety bounce fix);
+records require matching `sessionId`; `appendAll` idempotent on `eventId`;
+`LocalBoxes.init` behavior intact; DI registration via `addOther` (the bound
+violation fix). The prior session's env blocker (`/opt/flutter/bin/cache`
+read-only) prevented verification then — now cleared. Final implementation
+commit `94ccdb5` (+ prior `8615cb0` re-fix + `73a1c11`).
