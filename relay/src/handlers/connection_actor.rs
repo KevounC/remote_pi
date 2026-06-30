@@ -260,7 +260,9 @@ mod tests {
     use crate::metrics::FirehoseMetrics;
     use crate::peers::registry::PeerRegistry;
     use crate::presence::PresenceManager;
-    use crate::rooms::{RoomManager, RoomMeta};
+    use crate::protocol::frame::{FrameDecodeError, RelayControlFrame, decode_relay_frame};
+    use crate::protocol::generated::control::{RELAY_CONTROL_FRAME_TYPES, RoomMetaUpdateFrame};
+    use crate::rooms::{RoomManager, RoomMeta, RoomMetaPatch};
 
     fn actor_services() -> ConnectionActorServices {
         let presence = Arc::new(PresenceManager::new());
@@ -372,6 +374,66 @@ mod tests {
     #[test]
     fn control_check_cost_charges_empty_checks() {
         assert_eq!(control_check_cost(&[]), 1);
+    }
+
+    #[test]
+    fn generated_control_dispatch_coverage_tracks_all_variants() {
+        let covered_variants = [
+            RelayControlFrame::SubscribePresence { peers: Vec::new() },
+            RelayControlFrame::UnsubscribePresence { peers: Vec::new() },
+            RelayControlFrame::PresenceCheck { peers: Vec::new() },
+            RelayControlFrame::SubscribeRooms { peers: Vec::new() },
+            RelayControlFrame::UnsubscribeRooms { peers: Vec::new() },
+            RelayControlFrame::RoomsCheck { peers: Vec::new() },
+            RelayControlFrame::RoomMetaUpdate(RoomMetaUpdateFrame {
+                room_id: None,
+                meta: RoomMetaPatch::default(),
+            }),
+        ];
+
+        assert_eq!(covered_variants.len(), RELAY_CONTROL_FRAME_TYPES.len());
+    }
+
+    #[test]
+    fn malformed_control_peers_reject_at_decode_boundary() {
+        let err = decode_relay_frame(r#"{"type":"subscribe_presence","peers":"pi"}"#)
+            .expect_err("malformed control frame must fail before dispatch");
+
+        assert!(matches!(err, FrameDecodeError::InvalidJson(_)));
+    }
+
+    #[test]
+    fn empty_control_peers_remain_valid_at_decode_boundary() {
+        let frame = decode_relay_frame(r#"{"type":"presence_check","peers":[]}"#)
+            .expect("empty peer list is a valid typed control frame");
+
+        assert!(matches!(
+            frame,
+            DecodedRelayFrame::Control(RelayControlFrame::PresenceCheck { peers })
+                if peers.is_empty()
+        ));
+    }
+
+    #[tokio::test]
+    async fn dispatch_routes_control_frames_to_typed_handler() {
+        let services = actor_services();
+        let mut actor = ConnectionActor::new(
+            "app".to_string(),
+            "app".to_string(),
+            "main".to_string(),
+            42,
+            services,
+        );
+
+        let dispatch = actor
+            .dispatch(DecodedRelayFrame::Control(
+                RelayControlFrame::PresenceCheck {
+                    peers: vec!["pi".to_string()],
+                },
+            ))
+            .await;
+
+        assert!(matches!(dispatch, ActorDispatch::Send(_)));
     }
 
     #[tokio::test]

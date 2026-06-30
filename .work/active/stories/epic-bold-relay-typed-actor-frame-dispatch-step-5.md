@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-frame-dispatch-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-frame-dispatch
 depends_on: [epic-bold-relay-typed-actor-frame-dispatch-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Replace the raw control-frame switch with exhaustive typed dispatch
@@ -72,11 +72,11 @@ The socket loop has no `frame.get("type")` branch and no stringly typed control-
 
 ## Acceptance Criteria
 
-- [ ] `relay/src/handlers/peer.rs` no longer branches on raw `frame.get("type")` or string constants for relay control dispatch.
-- [ ] All current control frame behaviors are reachable through typed enum variants.
-- [ ] Malformed control frame shapes fail at decode; valid empty peer lists retain documented behavior.
-- [ ] Presence/rooms/meta update tests continue to prove dedup, rate limiting, and merge-patch semantics.
-- [ ] `cargo fmt --check`, `cargo clippy -- -D warnings`, and targeted relay tests pass from `relay/`.
+- [x] `relay/src/handlers/peer.rs` no longer branches on raw `frame.get("type")` or string constants for relay control dispatch.
+- [x] All current control frame behaviors are reachable through typed enum variants.
+- [x] Malformed control frame shapes fail at decode; valid empty peer lists retain documented behavior.
+- [x] Presence/rooms/meta update tests continue to prove dedup, rate limiting, and merge-patch semantics.
+- [x] `cargo fmt --check`, `cargo clippy -- -D warnings`, and targeted relay tests pass from `relay/`.
 
 ## Risk
 
@@ -85,3 +85,15 @@ High. This is the final switch-over from the god-loop's raw JSON dispatch; mista
 ## Rollback
 
 Reintroduce the raw string match in `handle_peer` while keeping the actor shell from earlier steps if useful. If control-plane behavior regresses broadly, revert this story alone and leave typed outer/cross-PC routing intact.
+
+## Implementation
+
+- Exhaustive typed dispatch: `ConnectionActor::dispatch` routes `DecodedRelayFrame::Control` into the generated `RelayControlFrame` dispatch path; the exhaustive per-variant match and handler methods already live in `relay/src/handlers/control.rs` from the landed control-handlers slice, so this final switch-over did not touch that completed sibling-owned file.
+- Raw-switch removal: verified `relay/src/handlers/peer.rs` has no `frame.get("type")` control switch and no stringly typed relay-control routing; the socket loop only decodes via `decode_relay_frame` and calls `actor.dispatch(frame)`.
+- Malformed fail-fast: added connection-actor coverage proving malformed control `peers` shapes reject at `decode_relay_frame` before dispatch, while valid `peers: []` still decodes to the typed empty-list variant.
+- Behavior preservation: existing presence/rooms/meta tests continue to cover subscription replacement, subscribe backfill, per-connection dedup, control-check rate limiting, and `RoomMetaPatch` merge-patch semantics. Added an actor-level `DecodedRelayFrame::Control` dispatch smoke test so the final typed actor route is exercised directly.
+- Exhaustive coverage test: added a generated-control variant coverage assertion comparing constructed representative `RelayControlFrame` variants against `RELAY_CONTROL_FRAME_TYPES`; adding a generated variant without updating coverage now fails tests, and the production match remains Rust-exhaustive.
+- Regen verdict: not applicable; no generated protocol files or generator were touched.
+- Test counts: `cargo test` passed 148 relay tests total (93 lib, 3 integration, 13 mesh, 8 pi_forward, 10 presence, 2 protocol parity, 19 rooms; 0 doctests). Full verification also passed `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo build` from `relay/`.
+- Discrepancies from design: handler methods were already extracted into `handlers/control.rs` by the landed control-handlers work; this implementation respected the explicit collision guard not to edit that file and focused on final-route coverage and verification.
+- Adjacent issues parked: none.
