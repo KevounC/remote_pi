@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-frame-dispatch-step-1
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-frame-dispatch
 depends_on: [epic-bold-generated-protocol-rust-codegen]
@@ -117,3 +117,26 @@ Medium. The parsing seam is the highest-leverage part of the refactor; accidenta
 ## Rollback
 
 Revert `relay/src/protocol/frame.rs` and return the routing loop to its current inline parse path. Generated protocol artifacts can remain because this story only consumes them.
+
+## Review
+
+Approved (2026-06-30) with generated-contract + fail-fast verification.
+Independently re-ran: regen `--check` pass; determinism double-run byte-identical;
+committed generated files match generator output (no hand-edits). Relay
+`cargo fmt --check` clean; `cargo clippy -- -D warnings` clean; `cargo test`
+136 passed / 0 failed (81 lib + 3 integ + 13 mesh + 8 pi_forward + 10 presence +
+2 protocol_parity + 19 rooms; +5 new frame-decode boundary tests). Commit
+`2c9dbd3` scoped to protocol/frame.rs + generated/{frame,mod}.rs (via generator)
++ handlers/peer.rs (dispatch consumer) + generator + story .md.
+
+Single decode/classification boundary verified: `decode_relay_frame()` returns
+`DecodedRelayFrame::{Control, PiEnvelope, Outer}`; consumes generated
+`RelayInboundFrame`/`RelayControlFrame`/`PiEnvelopeFrame`/`OuterEnvelope` — no
+handwritten mirror. Fail-fast confirmed: invalid JSON + unknown typed frames
+rejected at the boundary (`FrameDecodeError::InvalidJson`/`UnknownType`) before
+connection dispatch; known malformed control frames rejected by generated serde.
+Outer-envelope compatibility preserved: no-top-level-`type` path through
+`outer::parse_line()`, opaque `ct`, 4 MiB ceiling, `OuterTooLarge` mapping.
+Generated-contract invariant held (extended generator to emit RelayInboundFrame,
+regenerated clean + deterministic). The `MalformedPiEnvelope` compat-path
+retention (preserves `bad_envelope` transport-error correlation) is sound.
