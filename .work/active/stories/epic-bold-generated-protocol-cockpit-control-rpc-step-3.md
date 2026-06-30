@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-cockpit-control-rpc-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, cockpit]
 parent: epic-bold-generated-protocol-cockpit-control-rpc
 depends_on: [epic-bold-generated-protocol-cockpit-control-rpc-step-2]
@@ -75,3 +75,18 @@ coverage changed.
 - Docs/tests: `cockpit/docs/rpc-protocol.md` documents the structured overlay on the `prompt` transport and the full custom-event map; added `cockpit/test/data/pi_rpc_process_control_test.dart` for schema-envelope serialization and updated mapper tests for schema-aligned event details.
 - Verification: `PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache /home/agent/projects/remote_pi/.tools/flutter/bin/flutter pub get --offline` passed; `flutter analyze` passed with 0 issues; `flutter test` passed with 228/228 tests. A first full-suite run timed out at the harness limit after reaching 222 passing tests; the rerun completed green.
 - Discrepancies from design: `cockpit/lib/app/cockpit/domain/entities/pi_command.dart` comments were updated to avoid stale NUL-prefix documentation; no UI behavior changes were needed in `agent_session.dart`.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: **cockpit tests 228 passed (up from 226
+— the agent's new schema-envelope serialization + mapper tests)**; `flutter analyze`
+clean. Commit `6649528` scoped to cockpit only (pi_rpc_process + rpc_event_mapper +
+rpc_event + docs + tests); collision guard held (app/pi-ext disjoint).
+
+Schema-envelope emission verified: `PiRpcProcess.sendControl` now writes a `prompt`
+frame whose `message` is a JSON `remote_pi_control` envelope (relay_on/off/toggle/
+status, rename), not the legacy NUL-prefixed verb string. Event-mapping aligned:
+`relay-state`/`name-assigned`/`pair-code`/`paired`/`mesh-revoked` all covered through
+the typed `RpcControlOverlayEventType` registry; malformed `paired` now rejected as
+`RpcUnknown` (fail-fast) instead of partial schema event. UX preserved (agent_session
+unchanged). Docs updated in `cockpit/docs/rpc-protocol.md`.
