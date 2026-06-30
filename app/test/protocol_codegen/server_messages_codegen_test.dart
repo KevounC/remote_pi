@@ -52,34 +52,16 @@ const _relayControlFixtureFiles = <String>{
 
 void main() {
   group('generated Dart server protocol', () {
-    test('generated registry is derived from the app protocol IR', () {
-      final schema =
-          jsonDecode(
-                File(
-                  '../tools/protocol-codegen/fixtures/app_pi_client_dart_ir.json',
-                ).readAsStringSync(),
-              )
-              as Map<String, dynamic>;
-      final serverUnion = (schema['unions'] as List<dynamic>)
-          .cast<Map<String, dynamic>>()
-          .singleWhere((union) => union['name'] == 'ServerMessage');
-      final historyUnion = (schema['unions'] as List<dynamic>)
-          .cast<Map<String, dynamic>>()
-          .singleWhere((union) => union['name'] == 'SessionHistoryEvent');
+    test('generated server type registry matches schema variants', () {
+      final schema = _appProtocolIr();
 
       expect(
         generated.generatedServerMessageTypes,
-        (serverUnion['variants'] as List<dynamic>)
-            .cast<Map<String, dynamic>>()
-            .map((variant) => variant['type'] as String)
-            .toSet(),
+        _schemaVariantTypes(schema, 'ServerMessage'),
       );
       expect(
         generated.generatedSessionHistoryEventTypes,
-        (historyUnion['variants'] as List<dynamic>)
-            .cast<Map<String, dynamic>>()
-            .map((variant) => variant['type'] as String)
-            .toSet(),
+        _schemaVariantTypes(schema, 'SessionHistoryEvent'),
       );
     });
 
@@ -118,20 +100,25 @@ void main() {
       }
     });
 
-    test('hand protocol delegates top-level narrowing to generated dispatch', () {
-      expect(
-        hand.ServerMessage.fromJson(_firstServerPayloadOfType('user_message')),
-        isA<hand.UserInput>(),
-      );
-      expect(
-        hand.ServerMessage.fromJson(_firstServerPayloadOfType('models_list')),
-        isA<hand.ModelsList>(),
-      );
-      expect(
-        () => hand.ServerMessage.fromJson({'type': 'future_server_type'}),
-        throwsA(isA<hand.UnsupportedTypeException>()),
-      );
-    });
+    test(
+      'hand protocol delegates top-level narrowing to generated dispatch',
+      () {
+        expect(
+          hand.ServerMessage.fromJson(
+            _firstServerPayloadOfType('user_message'),
+          ),
+          isA<hand.UserInput>(),
+        );
+        expect(
+          hand.ServerMessage.fromJson(_firstServerPayloadOfType('models_list')),
+          isA<hand.ModelsList>(),
+        );
+        expect(
+          () => hand.ServerMessage.fromJson({'type': 'future_server_type'}),
+          throwsA(isA<hand.UnsupportedTypeException>()),
+        );
+      },
+    );
 
     test('generated history dispatch narrows every nested event variant', () {
       final cases = <String, Type>{
@@ -196,15 +183,24 @@ void main() {
       for (final fileName in _serverFixtureFiles) {
         for (final payload in _fixturePayloads(fileName)) {
           observedServerTypes.add(payload['type'] as String);
-          expect(generated.ServerMessage.fromJson(payload), isA<generated.ServerMessage>());
-          expect(hand.ServerMessage.fromJson(payload), isA<hand.ServerMessage>());
+          expect(
+            generated.ServerMessage.fromJson(payload),
+            isA<generated.ServerMessage>(),
+          );
+          expect(
+            hand.ServerMessage.fromJson(payload),
+            isA<hand.ServerMessage>(),
+          );
         }
       }
       expect(observedServerTypes, generated.generatedServerMessageTypes);
 
       for (final fileName in _clientOnlyFixtureFiles) {
         for (final payload in _fixturePayloads(fileName)) {
-          expect(generated.ClientMessage.fromJson(payload), isA<generated.ClientMessage>());
+          expect(
+            generated.ClientMessage.fromJson(payload),
+            isA<generated.ClientMessage>(),
+          );
           expect(
             () => generated.ServerMessage.fromJson(payload),
             throwsA(isA<generated.UnsupportedTypeException>()),
@@ -218,12 +214,14 @@ void main() {
           expect(
             () => generated.ServerMessage.fromJson(payload),
             throwsA(isA<generated.UnsupportedTypeException>()),
-            reason: '$fileName is a relay-control fixture, not a server message',
+            reason:
+                '$fileName is a relay-control fixture, not a server message',
           );
           expect(
             () => generated.ClientMessage.fromJson(payload),
             throwsA(isA<generated.UnsupportedTypeException>()),
-            reason: '$fileName is a relay-control fixture, not a client message',
+            reason:
+                '$fileName is a relay-control fixture, not a client message',
           );
         }
       }
@@ -243,9 +241,10 @@ Map<String, dynamic> _firstServerPayloadOfType(String type) {
 Map<String, dynamic> _historyPayloadOfType(String type) {
   final sessionHistory = _firstServerPayloadOfType('session_history');
   final historyEvents = sessionHistory['events'] as List<dynamic>;
-  final event = historyEvents
-      .cast<Map<String, dynamic>>()
-      .firstWhere((event) => event['type'] == type, orElse: () => {});
+  final event = historyEvents.cast<Map<String, dynamic>>().firstWhere(
+    (event) => event['type'] == type,
+    orElse: () => {},
+  );
   if (event.isNotEmpty) return event;
 
   if (type == 'compaction') {
@@ -257,6 +256,24 @@ Map<String, dynamic> _historyPayloadOfType(String type) {
     };
   }
   throw StateError('No session_history fixture payload for type $type');
+}
+
+Map<String, dynamic> _appProtocolIr() =>
+    jsonDecode(
+          File(
+            '../tools/protocol-codegen/fixtures/app_pi_client_dart_ir.json',
+          ).readAsStringSync(),
+        )
+        as Map<String, dynamic>;
+
+Set<String> _schemaVariantTypes(Map<String, dynamic> schema, String unionName) {
+  final union = (schema['unions'] as List<dynamic>)
+      .cast<Map<String, dynamic>>()
+      .singleWhere((union) => union['name'] == unionName);
+  return (union['variants'] as List<dynamic>)
+      .cast<Map<String, dynamic>>()
+      .map((variant) => variant['type'] as String)
+      .toSet();
 }
 
 Iterable<Map<String, dynamic>> _fixturePayloads(String fileName) sync* {

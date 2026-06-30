@@ -8,7 +8,7 @@ depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Generated protocol — Dart codegen target (riskiest — design first)
@@ -395,3 +395,9 @@ test('every server fixture decodes through generated ServerMessage', () {
 - Invoked because: large/risky autopilot design hinge.
 - Scope: skipped; no subagent/peer-review adapter is available in this delegated context, and design-time advisory review is non-blocking under autopilot.
 - Accepted: direct-read evidence and local codegen feasibility judgment are sufficient to spawn implementation steps; final autopilot completion remains responsible for fresh-context review.
+
+## Implementation handoff
+
+- **Final Dart generator feasibility verdict**: **achievable and implemented**. The custom deterministic IR → Dart target emits clean generated sealed `ClientMessage`, `ServerMessage`, and `SessionHistoryEvent` unions with `fromJson` narrowing, `toJson`, generated test-visible registries, and exhaustive-switch support in tests. No fallback to a hand-maintained schema mirror was needed, so this feature remains `stage: implementing` until normal review advancement.
+- **Generated parity guard**: `app/test/protocol_codegen/server_messages_codegen_test.dart` now compares `generatedServerMessageTypes` and `generatedSessionHistoryEventTypes` against the schema IR fixture, exercises every generated server dispatch case, and classifies the legacy cross-language JSONL fixtures as server, client-only, or relay-control. Omitting a Dart server variant from generated output now fails the schema/generated registry parity check and fixture coverage check instead of being swallowed as `UnsupportedTypeException`.
+- **Deferred control-frame scope**: relay control, presence, and room frames remain intentionally outside the generated inner-protocol IR. They are still exported through the temporary hand-maintained `app/lib/protocol/control_frames.dart` island and covered as relay-control fixtures. Keep `.orchestration/contracts/fixtures/` as the legacy cross-language fixture suite until the broader generated-protocol epic retires it.

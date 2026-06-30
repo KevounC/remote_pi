@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen-step-5
 kind: story
-stage: implementing
+stage: review
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: [epic-bold-generated-protocol-dart-codegen-step-4]
 tags: [refactor]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Add generated-protocol parity checks and implementation handoff notes
@@ -83,10 +83,18 @@ test('generated server type registry matches schema variants', () {
 
 ## Acceptance Criteria
 
-- [ ] Tests distinguish server, client, and relay-control fixtures instead of swallowing every unsupported type.
-- [ ] A schema/generated registry parity check fails when a Dart server variant is omitted.
-- [ ] The feature body records the final feasibility verdict and any deferred control-frame scope.
-- [ ] No new hand-maintained protocol variant registry is introduced in Dart.
+- [x] Tests distinguish server, client, and relay-control fixtures instead of swallowing every unsupported type.
+- [x] A schema/generated registry parity check fails when a Dart server variant is omitted.
+- [x] The feature body records the final feasibility verdict and any deferred control-frame scope.
+- [x] No new hand-maintained protocol variant registry is introduced in Dart.
+
+## Implementation
+
+- Added generated-protocol parity coverage in `app/test/protocol_codegen/server_messages_codegen_test.dart`: the test now compares generated server/history registries against `tools/protocol-codegen/fixtures/app_pi_client_dart_ir.json`, narrows every server variant through generated `ServerMessage.fromJson`, and classifies every legacy JSONL fixture as server, client-only, or relay-control instead of accepting `UnsupportedTypeException` for all lines.
+- Fixture classification counts: 18 server fixture files, 5 client-only fixture files, 13 relay-control fixture files; observed server fixture types must equal `generatedServerMessageTypes`.
+- Feasibility verdict recorded in the parent feature: the custom Dart generator remains feasible and implemented with clean generated sealed unions; no hand-maintained schema mirror fallback was used.
+- Deferred scope recorded in the parent feature: relay control/presence/rooms frames remain in the temporary hand-maintained `control_frames.dart` island and in `.orchestration/contracts/fixtures/` until the broader generated-protocol epic retires that legacy suite.
+- Verification: `flutter pub get` completed; `flutter analyze` reported only the known unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802` (command exits non-zero on that info); `flutter test test/protocol_codegen/` passed 15 tests from `app/` with `PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache`.
 
 ## Rollback
 
