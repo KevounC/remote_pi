@@ -14,30 +14,34 @@ triage on one story. **No agents are in flight** — safe exit/resume point.
 - Before this session: 51 done / 0 review / 92 implementing / 4 drafting
 - After: **68 done / 0 review / 68 implementing / 4 drafting** (+17 done)
 
-## ⚠️ CRITICAL ENV FINDING — the sandbox blocks Unix domain sockets
+## ⚠️ ENV FINDING — UPDATED: sandbox UDS ceiling LIFTED on rebuild
 
-**The sandbox kernel blocks Unix domain socket `bind()` with `EPERM` everywhere**
-(verified: `/tmp`, `/var/tmp`, project dirs, `~/.pi` — all writable, but UDS
-listen is forbidden — a namespace/seccomp restriction, NOT a permissions issue).
-`acquireCwdLock` (pi-extension/src/session/cwd_lock.ts) creates a `.sock` UDS to
-pin a per-cwd singleton; it CANNOT bind → returns `{ok:false}` →
-`src/extension.test.ts` `beforeEach` setup bails silently for ~37 tests that
-exercise the extension harness. `cwd_lock.test.ts` itself fails all 7 tests.
-`~/.pi/remote/locks` is also on a READ-ONLY fs.
+**Original sandbox (2026-06-30 earlier):** the sandbox kernel blocked Unix
+ domain socket `bind()` with `EPERM` everywhere, which broke
+ `acquireCwdLock` (cwd_lock.ts) and made full `src/extension.test.ts` impossibly
+ red (~37 pre-existing failures via the cwd-lock cascade).
 
-This is a verified PRE-EXISTING environmental ceiling (clean HEAD has the same
-37 failures), NOT a code defect. **DO NOT require full `src/extension.test.ts`
-green — it is impossible in this sandbox.** If the session is rebuilt WITHOUT
-the sandbox (the operator's plan), this ceiling may vanish — re-verify by
-running `corepack pnpm exec vitest run src/session/cwd_lock.test.ts` from
-`pi-extension/` (with the pnpm env vars). If cwd_lock tests pass, the UDS
-ceiling is gone and full `extension.test.ts` is a valid signal again.
+**After rebuild (2026-06-30 later):** re-ran `corepack pnpm exec vitest run
+ src/session/cwd_lock.test.ts` from `pi-extension/` → **7/7 pass**. The UDS
+ ceiling is GONE. Full `extension.test.ts` is now a valid signal.
 
-pi-ext verification signal (sandbox-limited):
+**Current extension.test.ts state at HEAD:** 19 failed | 128 passed (147).
+These 19 are PRE-EXISTING (reverting this session's 4 pi-ext commits yields
+32 failures — the session's work *reduced* failures by 12). They share a
+"relay send mock didn't fire" shape, likely canonical-session attribution
+gating that the test fixtures don't yet satisfy. Parked as
+`.work/backlog/backlog-piext-extension-test-19-failures.md` — NOT caused by
+the drain, out of scope to chase mid-drain. A fixture-count drift (31→36
+from dart-codegen-step-3) was fixed inline (commit f39ba01).
+
+**pi-ext verification signal going forward (Wave 5+):**
 1. `corepack pnpm typecheck` (clean).
 2. `corepack pnpm exec vitest run <owned test files>`.
-3. `corepack pnpm exec vitest run src/extension.test.ts -t "<test fragments>"`.
-4. Confirm no NEW failures beyond the known 37 baseline.
+3. `corepack pnpm exec vitest run src/extension.test.ts` — now valid; agents
+   must confirm they add NO NEW failures beyond the known 19 baseline (and the
+   19 should not be in code they own unless their story touches that area).
+4. `corepack pnpm exec vitest run src/extension.test.ts -t "<fragments>"`
+   remains useful for focused convergence checks.
 
 ## Dev environment incantations (resolved this session, in CLAUDE.md + skills too)
 
@@ -102,12 +106,12 @@ pi-ext verification signal (sandbox-limited):
 ## Resume instructions (full autopilot queue drain)
 
 1. **All Waves 2-4 are `done`. No agents in flight. Working tree clean.**
-2. **Re-verify the env ceiling first.** If the session is rebuilt without the
-   sandbox, run `corepack pnpm exec vitest run src/session/cwd_lock.test.ts`
-   from `pi-extension/` (pnpm env vars set). If it passes, the UDS ceiling is
-   gone — pi-ext agents can use full `extension.test.ts` green as the signal
-   again. If it still fails EPERM, keep the env-aware signal (typecheck +
-   targeted vitest + `-t` filter + no-new-failures-beyond-37).
+2. **Re-verify the env ceiling first.** ✅ DONE (2026-06-30 later): the sandbox
+   UDS-EPERM ceiling is LIFTED on rebuild — `cwd_lock.test.ts` 7/7 pass.
+   Full `extension.test.ts` is now a valid signal (19 pre-existing failures
+   remain, parked in backlog; not caused by the drain). pi-ext Wave-5 agents
+   can require full `extension.test.ts` green for THEIR owned areas, confirming
+   no new failures beyond the known 19 baseline.
 3. **Wave 5 ready-set: 14 stories** (probe with `python3 /tmp/full_probe.py` or
    the inline probe in `.work/WAVE-RUN-NOTES-2026-06-30.md`). Collision map:
    - **relay `peer.rs`/`registry.rs`/`rooms.rs` cluster** (serialize ONE per
