@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-rust-codegen
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-generated-protocol
 depends_on: [epic-bold-generated-protocol-schema-source]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Generated protocol — Rust serde codegen target
@@ -347,3 +347,11 @@ cargo test
 ```
 
 Run the protocol generator stale check from the owning protocol package once the schema-source handoff exists (for example, `corepack pnpm --dir protocol generate:rust --check` or the final command documented by the implementation).
+
+## Review — advanced to done (2026-06-30)
+
+All 5 child steps `done` (outer envelope, auth/control, room, cross-PC/mesh —
+all generated from the shared schema via `tools/protocol-codegen`, with the
+generated-contract invariant verified clean + deterministic + no hand-edits at
+each step). The relay's wire types are now generated, not hand-mirrored. Epic
+complete.
