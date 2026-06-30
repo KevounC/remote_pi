@@ -1,14 +1,14 @@
 ---
 id: epic-bold-relay-typed-actor-frame-dispatch-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-frame-dispatch
 depends_on: [epic-bold-generated-protocol-rust-codegen]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 1: Introduce the typed relay frame decode boundary
@@ -104,6 +104,15 @@ pub fn decode_relay_frame(text: &str) -> Result<DecodedRelayFrame, FrameDecodeEr
 ## Risk
 
 Medium. The parsing seam is the highest-leverage part of the refactor; accidentally changing compatibility handling for no-`type` outer envelopes would be observable.
+
+## Implementation
+
+- Added `relay/src/protocol/frame.rs` as the inbound WebSocket text decode/classification boundary. The connection loop now calls `decode_relay_frame()` once and dispatches only `DecodedRelayFrame::{Control, PiEnvelope, Outer}` variants, with a compatibility `MalformedPiEnvelope` path retained solely to preserve existing `bad_envelope` transport-error correlation.
+- Extended the Rust protocol generator to emit generated `protocol::generated::frame::RelayInboundFrame` and `RELAY_INBOUND_FRAME_TYPES`, then regenerated `relay/src/protocol/generated/{mod.rs,frame.rs}`. The boundary consumes generated `RelayControlFrame`, `PiEnvelopeFrame`, `OuterEnvelope`, and `RelayInboundFrame`; no handwritten protocol schema mirror was added.
+- Fail-fast behavior: invalid JSON and unknown typed frames are rejected at the boundary before normal connection dispatch. Known malformed control frames are rejected by generated serde parsing. Malformed `pi_envelope` frames are classified at the boundary and routed only through the existing bad-envelope transport-error path to preserve protocol behavior.
+- Outer envelope behavior: the boundary preserves the no-top-level-`type` outer-envelope path through `protocol::outer::parse_line()`, including opaque `ct`, the 4 MiB decoded-size ceiling, and `FrameDecodeError::OuterTooLarge` mapping from the existing `ParseError::TooLarge`. Current generated outer parsing remains fail-closed for missing `room`, matching the existing relay tests in this checkout.
+- Focused tests added in `protocol::frame`: invalid JSON rejection, unknown typed-frame rejection, no-type outer-envelope decode, `ct` too large rejection, and known control-frame typed decode. Full relay verification passed: `cargo test` reported 81 lib tests, 3 integration tests, 13 mesh tests, 8 pi-forward tests, 10 presence tests, 2 protocol parity tests, and 19 rooms tests passing.
+- Regeneration verdict: `node --check tools/protocol-codegen/bin/protocol-codegen.mjs`, Rust generated-protocol `--check`, determinism double-run (`diff -r` between two temp generations), and temp-generation diff against `relay/src/protocol/generated` all passed cleanly.
 
 ## Rollback
 

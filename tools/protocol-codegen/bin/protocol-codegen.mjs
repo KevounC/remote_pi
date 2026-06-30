@@ -1272,6 +1272,67 @@ function emitRustMesh() {
   return `${lines.join('\n')}\n`;
 }
 
+function emitRustFrame(controlEntries, crossPcEntries) {
+  const controlTypes = controlEntries
+    .map((entry) => entry.type)
+    .filter((type) => RELAY_CLIENT_CONTROL_TYPES.includes(type))
+    .sort((a, b) => a.localeCompare(b));
+  const hasPiEnvelope = crossPcEntries.some((entry) => entry.type === 'pi_envelope');
+  if (!hasPiEnvelope) throw new Error('Relay inbound frame generation requires crossPc pi_envelope');
+
+  const inboundTypes = [...controlTypes, 'pi_envelope'];
+  const lines = rustHeader('frame');
+  lines.push('use serde::de;');
+  lines.push('use serde::{Deserialize, Deserializer};');
+  lines.push('use serde_json::Value;');
+  lines.push('');
+  lines.push('use super::control::{RelayControlFrame, is_relay_control_frame_type};');
+  lines.push('use super::cross_pc::PiEnvelopeFrame;');
+  lines.push('');
+  lines.push('#[derive(Debug, Clone)]');
+  lines.push('pub enum RelayInboundFrame {');
+  lines.push('    Control(RelayControlFrame),');
+  lines.push('    PiEnvelope(PiEnvelopeFrame),');
+  lines.push('}');
+  lines.push('');
+  lines.push('pub const RELAY_INBOUND_FRAME_TYPES: &[&str] = &[');
+  for (const type of inboundTypes) lines.push(`    "${type}",`);
+  lines.push('];');
+  lines.push('');
+  lines.push('impl<\'de> Deserialize<\'de> for RelayInboundFrame {');
+  lines.push('    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>');
+  lines.push('    where');
+  lines.push('        D: Deserializer<\'de>,');
+  lines.push('    {');
+  lines.push('        let value = Value::deserialize(deserializer)?;');
+  lines.push('        let frame_type = value');
+  lines.push('            .get("type")');
+  lines.push('            .and_then(Value::as_str)');
+  lines.push('            .ok_or_else(|| de::Error::missing_field("type"))?');
+  lines.push('            .to_string();');
+  lines.push('');
+  lines.push('        if is_relay_control_frame_type(&frame_type) {');
+  lines.push('            return serde_json::from_value(value)');
+  lines.push('                .map(RelayInboundFrame::Control)');
+  lines.push('                .map_err(de::Error::custom);');
+  lines.push('        }');
+  lines.push('');
+  lines.push('        if frame_type == "pi_envelope" {');
+  lines.push('            return serde_json::from_value(value)');
+  lines.push('                .map(RelayInboundFrame::PiEnvelope)');
+  lines.push('                .map_err(de::Error::custom);');
+  lines.push('        }');
+  lines.push('');
+  lines.push('        Err(de::Error::unknown_variant(');
+  lines.push('            &frame_type,');
+  lines.push('            RELAY_INBOUND_FRAME_TYPES,');
+  lines.push('        ))');
+  lines.push('    }');
+  lines.push('}');
+  lines.push('');
+  return `${lines.join('\n')}\n`;
+}
+
 function emitRustMod() {
   return [
     '// GENERATED CODE - DO NOT EDIT BY HAND.',
@@ -1279,6 +1340,7 @@ function emitRustMod() {
     '',
     'pub mod control;',
     'pub mod cross_pc;',
+    'pub mod frame;',
     'pub mod mesh;',
     'pub mod outer;',
     'pub mod room;',
@@ -1296,12 +1358,15 @@ function emitRust(schema, schemaPath) {
     bucket.push(entry);
     byModule.set(module, bucket);
   }
+  const controlEntries = (byModule.get('control') ?? []).sort((a, b) => a.type.localeCompare(b.type));
+  const crossPcEntries = (byModule.get('cross_pc') ?? []).sort((a, b) => a.type.localeCompare(b.type));
   return new Map([
     ['mod.rs', emitRustMod()],
     ['outer.rs', emitRustOuter(schema, schemaPath)],
     ['room.rs', emitRustRoom(entries, schemaPath)],
-    ['control.rs', emitRustControl((byModule.get('control') ?? []).sort((a, b) => a.type.localeCompare(b.type)), schemaPath)],
-    ['cross_pc.rs', emitRustCrossPc((byModule.get('cross_pc') ?? []).sort((a, b) => a.type.localeCompare(b.type)), schemaPath)],
+    ['control.rs', emitRustControl(controlEntries, schemaPath)],
+    ['cross_pc.rs', emitRustCrossPc(crossPcEntries, schemaPath)],
+    ['frame.rs', emitRustFrame(controlEntries, crossPcEntries)],
     ['mesh.rs', emitRustMesh()],
   ]);
 }
@@ -1314,7 +1379,7 @@ function readSchemaInput(schemaPath) {
 }
 
 function rustfmtContent(content) {
-  return execFileSync('rustfmt', ['--emit', 'stdout'], {
+  return execFileSync('rustfmt', ['--edition', '2024', '--emit', 'stdout'], {
     input: content,
     encoding: 'utf8',
   });

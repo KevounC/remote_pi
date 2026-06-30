@@ -17,8 +17,9 @@ use crate::auth::challenge::{
 pub(crate) mod connection_actor;
 
 use crate::handlers::peer::connection_actor::{ActorDispatch, ConnectionActor};
-use crate::protocol::generated::control::{RelayControlFrame, is_relay_control_frame_type};
-use crate::protocol::outer::{OuterEnvelope, parse_line};
+use crate::protocol::frame::{
+    DecodedRelayFrame, FrameDecodeError, OuterEnvelope, decode_relay_frame,
+};
 use crate::reachability::RELAY_WS_PING_INTERVAL;
 
 /// Maximum number of peer IDs accepted in one presence/rooms control frame.
@@ -145,35 +146,24 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
                             Message::Binary(_) => continue, // ignore binary
                         };
 
-                        // Parse as JSON to check for relay control frames.
-                        let frame: serde_json::Value = match serde_json::from_str(&text) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                warn!(peer = %peer_short, err = %e, "invalid json, dropping");
+                        let frame = match decode_relay_frame(&text) {
+                            Ok(frame) => frame,
+                            Err(FrameDecodeError::UnknownType(frame_type)) => {
+                                warn!(
+                                    peer = %peer_short,
+                                    frame_type = %frame_type,
+                                    "unknown relay frame type, dropping"
+                                );
+                                continue;
+                            }
+                            Err(err) => {
+                                warn!(peer = %peer_short, err = %err, "invalid relay frame, dropping");
                                 continue;
                             }
                         };
 
-                        // Frames with a top-level "type" are handled by the relay itself.
-                        if let Some(t) = frame
-                            .get("type")
-                            .and_then(|v| v.as_str())
-                            .map(str::to_owned)
-                        {
-                            if is_relay_control_frame_type(&t) {
-                                let control_frame = match serde_json::from_value::<RelayControlFrame>(frame) {
-                                    Ok(frame) => frame,
-                                    Err(err) => {
-                                        warn!(
-                                            peer = %peer_short,
-                                            frame_type = %t,
-                                            err = %err,
-                                            "malformed typed control frame, dropping"
-                                        );
-                                        continue;
-                                    }
-                                };
-
+                        match frame {
+                            DecodedRelayFrame::Control(control_frame) => {
                                 match actor.dispatch_control(control_frame).await {
                                     ActorDispatch::Continue => {}
                                     ActorDispatch::Send(msg) => {
@@ -189,50 +179,56 @@ async fn handle_peer(socket: WebSocket, peer_addr: SocketAddr, state: AppState) 
                                         }
                                     }
                                 }
-                                continue;
                             }
-
-                            match t.as_str() {
-                                // ── Pi-to-Pi envelope forward (plano 25 W-A) ──
-                                "pi_envelope" => {
-                                    use crate::handlers::pi_forward::{
-                                        PiForwardResult, handle_pi_envelope,
-                                    };
-                                    match handle_pi_envelope(
-                                        &peer_id,
-                                        &frame,
-                                        &registry,
-                                        &mesh,
-                                        &mesh_auth,
-                                    )
-                                    .await
-                                    {
-                                        PiForwardResult::Forwarded => {}
-                                        PiForwardResult::TransportError(err_msg) => {
-                                            if sink.send(err_msg).await.is_err() {
-                                                break;
-                                            }
+                            DecodedRelayFrame::PiEnvelope(pi_frame) => {
+                                use crate::handlers::pi_forward::{
+                                    PiForwardResult, handle_pi_envelope,
+                                };
+                                let pi_frame = serde_json::to_value(
+                                    crate::protocol::generated::cross_pc::CrossPcFrame::PiEnvelope(
+                                        pi_frame,
+                                    ),
+                                )
+                                .expect("generated pi_envelope serialisation is infallible");
+                                match handle_pi_envelope(
+                                    &peer_id,
+                                    &pi_frame,
+                                    &registry,
+                                    &mesh,
+                                    &mesh_auth,
+                                )
+                                .await
+                                {
+                                    PiForwardResult::Forwarded => {}
+                                    PiForwardResult::TransportError(err_msg) => {
+                                        if sink.send(err_msg).await.is_err() {
+                                            break;
                                         }
                                     }
                                 }
-
-                                _ => {
-                                    warn!(
-                                        peer = %peer_short,
-                                        frame_type = %t,
-                                        "unknown control frame type, dropping"
-                                    );
+                            }
+                            DecodedRelayFrame::MalformedPiEnvelope(pi_frame) => {
+                                use crate::handlers::pi_forward::{
+                                    PiForwardResult, handle_pi_envelope,
+                                };
+                                match handle_pi_envelope(
+                                    &peer_id,
+                                    &pi_frame,
+                                    &registry,
+                                    &mesh,
+                                    &mesh_auth,
+                                )
+                                .await
+                                {
+                                    PiForwardResult::Forwarded => {}
+                                    PiForwardResult::TransportError(err_msg) => {
+                                        if sink.send(err_msg).await.is_err() {
+                                            break;
+                                        }
+                                    }
                                 }
                             }
-                            continue; // do not fall through to envelope path
-                        }
-
-                        // No "type" field → outer envelope (opaque routing).
-                        match parse_line(&text) {
-                            Err(e) => {
-                                warn!(peer = %peer_short, err = %e, "invalid envelope, dropping");
-                            }
-                            Ok(env) => {
+                            DecodedRelayFrame::Outer(env) => {
                                 let ct_len = env.ct.len();
                                 let dest_peer = env.peer;
                                 let dest_room = env.room;

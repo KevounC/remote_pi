@@ -3,6 +3,7 @@
 
 pub mod control;
 pub mod cross_pc;
+pub mod frame;
 pub mod mesh;
 pub mod outer;
 pub mod room;
