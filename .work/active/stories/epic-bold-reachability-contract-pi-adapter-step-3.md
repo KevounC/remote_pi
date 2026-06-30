@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-pi-adapter-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract-pi-adapter
 depends_on: [epic-bold-reachability-contract-pi-adapter-step-2]
@@ -67,3 +67,16 @@ indexing logic.
 - Verification:
   - `corepack pnpm typecheck`
   - `corepack pnpm exec vitest run src/reachability src/session/mesh_node`
+
+## Review (2026-06-30, fast-lane)
+
+**Verdict**: Approve — fast-lane advance; orchestrator independently verified.
+
+**Findings**: none above nit level.
+
+**Verification run (orchestrator)**:
+- `git show --stat 84402d8` — only `pi-extension/src/session/mesh_node.ts` + `mesh_node.test.ts` + this story; no `index.ts` collision with deferred pi-ext stories.
+- Confirmed `MeshNode.RELAY_RECONNECT_BACKOFFS_MS` static constant removed; shared `reachability_contract.js` imports (`REACHABILITY_BACKOFF_MS`, `reachabilityBackoffMs`) wired into reconnect scheduling. Reconnect wiring/ownership flags unchanged.
+- `corepack pnpm typecheck` clean (harmless npmrc EACCES + pnpm-field warnings only).
+- `corepack pnpm exec vitest run src/reachability src/session/mesh_node` — 8/8 pass. New test `relay reconnect delays use the shared 1,2,5,10,30-second ladder with cap` asserts `delays === [1_000, 2_000, 5_000, 10_000, 30_000, 30_000]` (6th value proves cap). Reset-after-success test present.
+- Acceptance criteria satisfied: ladder emits 1,2,5,10,30s with cap; reset-after-success unchanged; no MeshNode lifecycle/state-ownership changes beyond import replacement.
