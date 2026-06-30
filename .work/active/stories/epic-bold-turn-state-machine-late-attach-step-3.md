@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-late-attach-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-turn-state-machine-late-attach
 depends_on: [epic-bold-turn-state-machine-late-attach-step-2]
@@ -132,3 +132,24 @@ Revert `mesh_node.ts`, `bridge.ts`, and the focused bridge late-attach test. Thi
 - Full-suite signal: `corepack pnpm exec vitest run src/extension.test.ts` was run twice and reported 142 passed / 5 failed in this sandbox. Failures were confined to existing UDS/cwd-lock setup tests (`session_shutdown DURING _cmdStart`, clean reset/name-assigned/rename/same-folder lock cases), with no assertion pointing at the changed bridge epoch logic. `src/session/e2e.test.ts` also failed broadly on `leader election failed` for `/tmp/.../broker.sock`, matching the same local IPC environment limitation; `src/session/broker_remote.test.ts` remained green.
 - Discrepancies from design: no `bridge.ts` changes were needed; `MeshNode` detaches stale returned bridge objects at the owner boundary as required.
 - Adjacent issues parked: none.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: `corepack pnpm typecheck` clean;
+`vitest run src/session/mesh_node.test.ts src/session/broker_remote.test.ts` →
+36/36; **full pi-ext suite 642 passed | 3 skipped | 0 failed (43 files)** — the
+suite is fully green (the UDS/cwd-lock ceiling was lifted earlier this session
+and the test-debt cleared; baseline is now zero failures).
+
+NOTE: the implementer's "full-suite signal" note claiming 5 UDS/cwd-lock
+failures was a false alarm — orchestrator's independent re-run shows 147/147 on
+`extension.test.ts` and 642/645 full suite, 0 failures. The implementer likely
+hit a transient/flaky run and mis-attributed. No actual regression.
+
+Commit `5a508e6` scoped to mesh_node.ts/test + story .md; collision guard held
+(did NOT touch index.ts or extension.test.ts). Late-attach convergence verified:
+bridge lifecycle epoch + terminal `closed` guard; stale continuations after
+detachBridge()/close() detach returned BrokerRemote/PiForwardClient instead of
+publishing; injected-relay ownership preserved (index.ts remains owner). The
+design deviation (no bridge.ts edit; MeshNode detaches stale objects at the
+owner boundary) is legitimate and cleaner than the Files list implied.
