@@ -4612,6 +4612,88 @@ describe("cumulative transcript event log", () => {
     expect(h.inner["truncated"]).toBe(false);
   });
 
+  test("session_sync projects the transcript event log fixture across canonical-session boundary", async () => {
+    await _pairForTest("peer-store-fixture");
+    const sessionId = currentSessionIdFromSends();
+    const ts = 1_700_000_200_000;
+    _setSessionStartedAtForTest(ts);
+    // Mirrors the app-side fixture until generated protocol contracts replace
+    // hand-written cross-surface fixture copies.
+    _setTranscriptEventsForTest([
+      {
+        kind: "user_submitted",
+        eventId: "local:cli_1",
+        sessionId,
+        ts: ts + 1,
+        clientMessageId: "cli_1",
+        text: "hello",
+      },
+      {
+        kind: "user_confirmed",
+        eventId: "server:cli_1",
+        sessionId,
+        ts: ts + 2,
+        clientMessageId: "cli_1",
+        text: "hello",
+      },
+      {
+        kind: "assistant_delta",
+        eventId: "server:chunk_1",
+        sessionId,
+        ts: ts + 3,
+        replyTo: "cli_1",
+        delta: "done",
+      },
+      {
+        kind: "assistant_committed",
+        eventId: "server:chunk_1:committed",
+        sessionId,
+        ts: ts + 4,
+        messageId: "agent_chunk_1",
+        replyTo: "cli_1",
+        text: "done",
+      },
+      {
+        kind: "assistant_done",
+        eventId: "server:done_1",
+        sessionId,
+        ts: ts + 5,
+        replyTo: "cli_1",
+      },
+      {
+        kind: "user_confirmed",
+        eventId: "foreign:cli_1",
+        sessionId: "foreign-session",
+        ts: ts + 6,
+        clientMessageId: "cli_foreign",
+        text: "must not replay",
+      },
+    ]);
+
+    const sendsBefore = relayRef.current!.send.mock.calls.length;
+    routeClientMessage(
+      { type: "session_sync", id: "fixture-sync", session_id: sessionId, limit: 50 },
+      { abort: () => undefined },
+    );
+
+    const h = relayRef.current!.send.mock.calls.slice(sendsBefore)
+      .map((c) => c[0] as string)
+      .map(decodeSentCt)
+      .find((d) => d.inner.type === "session_history")!;
+    expect(h.inner).toMatchObject({
+      type: "session_history",
+      in_reply_to: "fixture-sync",
+      session_id: sessionId,
+      session_started_at: ts,
+      eos: true,
+      truncated: false,
+    });
+    expect(h.inner["events"]).toEqual([
+      { ts: ts + 1, type: "user_input", id: "cli_1", text: "hello" },
+      { ts: ts + 4, type: "agent_message", in_reply_to: "cli_1", text: "done" },
+    ]);
+  });
+
   test("mixed sources (extension + interactive) all land in transcript events ordered by ts", async () => {
     await _pairForTest("peer-mix");
     const onInput = captureEventHandler("input");

@@ -16,6 +16,7 @@ import 'package:app/data/transport/connection_manager.dart';
 import 'package:app/domain/contracts/transcript_event_store.dart';
 import 'package:app/domain/entities/remote_session_ref.dart';
 import 'package:app/domain/session_state.dart';
+import 'package:app/domain/transcript/transcript_event.dart';
 import 'package:app/domain/transcript/transcript_projection.dart';
 import 'package:app/pairing/storage.dart';
 import 'package:app/protocol/protocol.dart';
@@ -1239,6 +1240,155 @@ void main() {
       expect(rows.single.role, MsgRole.user);
       expect(rows.single.text, 'eventual echo');
       expect(rows.single.pending, isFalse);
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
+    'transcript log drives replay and converges idle across terminal outcomes',
+    () async {
+      final s = await setup();
+
+      s.ch.push(UserInput(id: 'success-u1', text: 'succeed'));
+      await _settle();
+      s.ch.push(AgentChunk(inReplyTo: 'success-u1', delta: 'done'));
+      await _settle();
+      s.ch.push(AgentDone(inReplyTo: 'success-u1'));
+      await _settle();
+      expect(s.sync.isWorking, isFalse, reason: 'success converges idle');
+
+      s.ch.push(UserInput(id: 'error-u1', text: 'fail'));
+      await _settle();
+      s.ch.push(AgentChunk(inReplyTo: 'error-u1', delta: 'partial'));
+      s.ch.push(
+        ErrorMessage(
+          sessionId: s.sessionId,
+          inReplyTo: 'error-u1',
+          code: 'provider_error',
+          message: 'boom',
+        ),
+      );
+      await _settle();
+      expect(s.sync.isWorking, isFalse, reason: 'error converges idle');
+
+      s.ch.push(UserInput(id: 'cancel-u1', text: 'cancel'));
+      await _settle();
+      s.ch.push(AgentChunk(inReplyTo: 'cancel-u1', delta: 'partial'));
+      s.ch.push(Cancelled(inReplyTo: 'cancel-req', targetId: 'cancel-u1'));
+      await _settle();
+      expect(s.sync.isWorking, isFalse, reason: 'cancel converges idle');
+
+      s.ch.push(
+        Compaction(
+          sessionId: s.sessionId,
+          summary: 'compacted fixture',
+          tokensBefore: 1234,
+          ts: 1700000001234,
+        ),
+      );
+      await _settle();
+      expect(s.sync.isWorking, isFalse, reason: 'compaction converges idle');
+
+      final log = await s.sync.debugTranscriptEventStore.readSession(
+        transcriptKeyFor(s.epk),
+      );
+      expect(
+        log.whereType<UserMessageConfirmed>().map(
+          (event) => event.clientMessageId,
+        ),
+        containsAll(<String>['success-u1', 'error-u1', 'cancel-u1']),
+      );
+      expect(log.whereType<AssistantDoneReceived>(), isNotEmpty);
+      expect(
+        log.whereType<CompactionRecorded>().single.summary,
+        'compacted fixture',
+      );
+
+      await LocalBoxes().openMsgsBox(refFor(s.epk)).clear();
+      s.sync.dispose();
+      final sync2 = SyncService(s.conn, LocalBoxes());
+      await sync2.activate(s.epk, 'main');
+      await _settle();
+
+      final replayedTexts = messages(s.epk).map((row) => row.text).toList();
+      expect(
+        replayedTexts,
+        containsAll(<String>[
+          'succeed',
+          'done',
+          'fail',
+          'cancel',
+          'compacted fixture',
+        ]),
+      );
+      expect(replayedTexts, contains(startsWith('⚠ provider_error:')));
+      expect(sync2.isWorking, isFalse, reason: 'replay rebuild stays idle');
+
+      s.conn.dispose();
+      sync2.dispose();
+    },
+  );
+
+  test(
+    'session replacement partitions transcript logs and starts a fresh projection',
+    () async {
+      final s = await setup();
+      final oldSession = s.sessionId;
+      s.ch.push(UserInput(id: 'old-u1', text: 'old session'));
+      s.ch.push(AgentMessage(inReplyTo: 'old-u1', text: 'old reply'));
+      await _settle();
+      expect(messages(s.epk, oldSession).map((row) => row.text), <String>[
+        'old session',
+        'old reply',
+      ]);
+      expect(
+        await s.sync.debugTranscriptEventStore.readSession(
+          transcriptKeyFor(s.epk, oldSession),
+        ),
+        hasLength(2),
+      );
+
+      const newSession = 'session-replacement-fixture';
+      _sessionByEpk[s.epk] = newSession;
+      s.ch.defaultSessionId = newSession;
+      s.ch.pushRaw(
+        PairOk(
+          inReplyTo: 'pair-new-session',
+          sessionName: 'Pi',
+          sessionStartedAt: DateTime.now().millisecondsSinceEpoch,
+          roomId: 'main',
+          sessionId: newSession,
+        ),
+      );
+      await _settle();
+      await _settle();
+
+      expect(messages(s.epk, newSession), isEmpty);
+      expect(
+        await s.sync.debugTranscriptEventStore.readSession(
+          transcriptKeyFor(s.epk, newSession),
+        ),
+        isEmpty,
+      );
+      expect(messages(s.epk, oldSession).map((row) => row.text), <String>[
+        'old session',
+        'old reply',
+      ]);
+
+      s.ch.push(UserInput(id: 'new-u1', text: 'new session'));
+      await _settle();
+      expect(messages(s.epk, newSession).map((row) => row.text), <String>[
+        'new session',
+      ]);
+      expect(
+        await s.sync.debugTranscriptEventStore.readSession(
+          transcriptKeyFor(s.epk, oldSession),
+        ),
+        hasLength(2),
+        reason: 'session replacement must not clear the prior canonical log',
+      );
 
       s.conn.dispose();
       s.sync.dispose();

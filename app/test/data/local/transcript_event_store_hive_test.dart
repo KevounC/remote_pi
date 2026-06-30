@@ -4,7 +4,9 @@ import 'package:app/data/local/boxes.dart';
 import 'package:app/data/local/records/transcript_event_record.dart';
 import 'package:app/data/local/transcript_event_store_hive.dart';
 import 'package:app/domain/contracts/transcript_event_store.dart';
+import 'package:app/domain/session_state.dart';
 import 'package:app/domain/transcript/transcript_event.dart';
+import 'package:app/domain/transcript/transcript_projection.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 
@@ -132,6 +134,99 @@ void main() {
         throwsA(isA<StateError>()),
       );
     });
+
+    test(
+      'shared store/replay fixture is append-only, isolated, and rebuildable',
+      () async {
+        const key = TranscriptSessionKey(
+          peerId: 'peer-fixture',
+          roomId: 'main',
+          sessionId: 'sess-store-fixture',
+        );
+        const foreignKey = TranscriptSessionKey(
+          peerId: 'peer-fixture',
+          roomId: 'main',
+          sessionId: 'sess-foreign-fixture',
+        );
+        final ts = DateTime.fromMillisecondsSinceEpoch(1700000000000);
+        final fixture = <TranscriptEvent>[
+          UserMessageSubmitted(
+            eventId: 'local:cli_1',
+            sessionId: key.sessionId,
+            ts: ts,
+            clientMessageId: 'cli_1',
+            text: 'hello',
+          ),
+          UserMessageFailed(
+            eventId: 'local:cli_1:timeout',
+            sessionId: key.sessionId,
+            ts: ts.add(const Duration(milliseconds: 1)),
+            clientMessageId: 'cli_1',
+            code: 'timeout',
+            message: 'Timed out waiting for echo.',
+          ),
+          UserMessageConfirmed(
+            eventId: 'server:cli_1',
+            sessionId: key.sessionId,
+            ts: ts.add(const Duration(milliseconds: 2)),
+            clientMessageId: 'cli_1',
+            text: 'hello',
+          ),
+          AssistantMessageCommitted(
+            eventId: 'server:chunk_1:committed',
+            sessionId: key.sessionId,
+            ts: ts.add(const Duration(milliseconds: 3)),
+            messageId: 'agent_chunk_1',
+            replyTo: 'cli_1',
+            text: 'done',
+          ),
+          AssistantDoneReceived(
+            eventId: 'server:done_1',
+            sessionId: key.sessionId,
+            ts: ts.add(const Duration(milliseconds: 4)),
+            replyTo: 'cli_1',
+          ),
+        ];
+
+        final first = await store.appendAll(key, fixture);
+        final duplicate = await store.appendAll(key, fixture);
+        await store.appendAll(foreignKey, <TranscriptEvent>[
+          _submitted('foreign:cli_1', foreignKey.sessionId, 'cli_1', 'foreign'),
+        ]);
+
+        expect(first.appended, fixture.length);
+        expect(duplicate.appended, 0, reason: 'duplicate append is ignored');
+        expect(duplicate.skipped, fixture.length);
+        expect(
+          (await store.readSession(key)).map((event) => event.eventId),
+          fixture.map((event) => event.eventId),
+          reason: 'stable append order is the replay order',
+        );
+        expect(
+          (await store.readSession(foreignKey)).map((event) => event.eventId),
+          <String>['foreign:cli_1'],
+          reason: 'foreign session_id is isolated in its own canonical box',
+        );
+
+        final projection = deriveTranscriptProjection(
+          sessionId: key.sessionId,
+          events: await store.readSession(key),
+        );
+        expect(projection.turn.working, isFalse);
+        expect(projection.messages.map((message) => message.id), <String>[
+          'cli_1',
+          'agent_chunk_1',
+        ]);
+        final user = projection.messages.first as UserMsg;
+        expect(
+          user.status,
+          UserMsgStatus.confirmed,
+          reason: 'late confirmation suppresses timeout failure',
+        );
+        expect(user.text, 'hello');
+        expect((projection.messages.last as AssistantMsg).text, 'done');
+      },
+    );
 
     test('fails fast on unknown record kind', () {
       expect(
