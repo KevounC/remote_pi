@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-projection-consumers-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-turn-state-machine-projection-consumers
 depends_on: [epic-bold-turn-state-machine-projection-consumers-step-2]
@@ -102,3 +102,25 @@ RoomTurnProjection roomTurnProjection(String epk, String roomId) {
 ## Rollback
 
 Revert relay/app interpretation changes to the prior bool cache. Do not remove tests that prove cached ended rooms must not show `working:true`; bounce the story if rollback is needed because that is the absorbed bug class.
+
+## Review
+
+Approved (2026-06-30) with deeper verification — cross-cutting HIGH-risk story.
+Independently re-ran: relay `cargo fmt --check` clean, `cargo clippy -- -D
+warnings` clean, `cargo test` 124 passed / 0 failed (70 lib + 3 integ + 13 mesh +
+9 pi_forward + 10 presence + 19 rooms; +2 new registry snapshot tests); app
+`flutter test test/transport/` 64 passed / 0 failed. Commit `a6608a4` scoped to
+relay rooms.rs/registry.rs + new app test file + story .md; no collision-guard
+violations (did not touch connection_manager_test.dart / reachability_adapter /
+sync_service / control.rs).
+
+Core convergence invariant verified directly in code + tests: `room_ended`
+clears cached `working:true` and projects `stale`/not-working (app test); a fresh
+`RoomsSnapshot` missing a previously-working room clears its working bit and
+projects stale (app test); relay `rooms_of` is the authoritative live-room
+snapshot carrying the latest projected `working` (relay test
+`rooms_of_returns_latest_working_projection`), and last-disconnect emits
+`room_ended` + removes from snapshot (relay test). The agent's "deviation" (not
+re-touching connection_manager.dart/protocol.dart/peer.rs source) is legitimate
+and documented — Step 2 already landed the app `RoomTurnProjection` gate; this
+step correctly focused on relay snapshot authority + app convergence coverage.
