@@ -1,14 +1,14 @@
 ---
 id: epic-bold-cockpit-workspace-projection-settings-split-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-cockpit-workspace-projection-settings-split
 depends_on: [epic-bold-cockpit-workspace-projection-settings-split-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Extract the daemon settings projection
@@ -96,3 +96,10 @@ Medium — daemon fleet actions are destructive and the panel owns a polling tim
 
 ## Rollback
 Move daemon panel/dialog code back into `settings_page.dart`, restore private names, and keep Steps 1-3 intact.
+
+## Implementation notes
+- Extracted `DaemonSettingsPanel` to `cockpit/lib/app/settings/ui/categories/daemon_settings_panel.dart` and wired `SettingsPage` to import it for the daemons category.
+- Moved daemon fleet actions, daemon tiles, state formatting, uptime formatting, and the 10s `Timer.periodic` polling lifecycle with the panel; `dispose()` cancels the timer and async dialog paths retain mounted guards before ViewModel calls.
+- Extracted daemon editor UI and `DaemonEditorResult` to `cockpit/lib/app/settings/ui/dialogs/daemon_editor_dialog.dart`; `FilePicker` remains in that dialog UI edge.
+- Added `cockpit/test/settings/daemon_settings_panel_test.dart` covering importability, ViewModel gateway behavior, post-frame reload, periodic refresh cancellation on dispose, row/fleet/supervisor actions, edit rename, and cancel-without-create behavior.
+- Verification: `flutter pub get --offline` passed; targeted daemon panel test passed; touched-file analyze passed. Full `flutter analyze` is currently blocked by pre-existing/concurrent errors in `cockpit/lib/app/cockpit/ui/viewmodels/cockpit_viewmodel.dart`, which this story was explicitly instructed not to edit.
