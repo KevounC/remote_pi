@@ -70,6 +70,7 @@ import {
 import { RelayClient, RoomAlreadyOpenError } from "./transport/relay_client.js";
 import { PlainPeerChannel } from "./transport/peer_channel.js";
 import { OwnerMultiplexer } from "./extension/owner_multiplexer.js";
+import type { OwnerMultiplexerTestHarness } from "./extension/testing.js";
 import { createCommandSurface } from "./extension/command_surface.js";
 import { registerRemotePiCommands, type RemotePiCommandSpec } from "./extension/command_surface/commands.js";
 import { LocalMeshCommands } from "./extension/command_surface/local_mesh_commands.js";
@@ -225,6 +226,17 @@ const _owners = new OwnerMultiplexer({
     }, undefined, "paired");
   },
 });
+
+const ownerHarness: OwnerMultiplexerTestHarness = {
+  activeOwnerCount: () => _owners.activeCount(),
+  hasOwner: (peerId) => _owners.has(peerId),
+  disconnectOwner: (peerId) => _disconnectOwnerForRuntime(peerId),
+  fallbackRoute: (message, ctx) => {
+    const fallback = _owners.entries().at(-1)?.channel;
+    if (!fallback) return;
+    _routeClientMessageFrom(fallback as PlainPeerChannel, message, ctx);
+  },
+};
 // Plan/28 Wave D.1: `thinking` published alongside `model` so the app's
 // Quick Actions sheet hydrates the thinking segmented control on first
 // open instead of starting null. The SDK fires `thinking_level_select`
@@ -856,14 +868,10 @@ export function _getState(): "idle" | "started" | "paired" {
 }
 
 /** Test-only: number of owners currently attached via PlainPeerChannel. */
-export function _getActivePeerCountForTest(): number {
-  return _owners.activeCount();
-}
+export const _getActivePeerCountForTest = (): number => ownerHarness.activeOwnerCount();
 
 /** Test-only: true if a specific peer (base64 std) has an attached channel. */
-export function _hasActivePeerForTest(appPeerIdStd: string): boolean {
-  return _owners.has(appPeerIdStd);
-}
+export const _hasActivePeerForTest = (appPeerIdStd: string): boolean => ownerHarness.hasOwner(appPeerIdStd);
 
 
 // ── Multi-channel helpers ─────────────────────────────────────────────────────
@@ -1147,7 +1155,7 @@ export async function _handleControl(cmd: string): Promise<void> {
  * back to detaching the most recently attached peer, mirroring the old
  * singleton semantics.
  */
-export function _onPeerDisconnect(appPeerId?: string): void {
+function _disconnectOwnerForRuntime(appPeerId?: string): void {
   if (_state === "idle") return;
   const result = _owners.disconnectOwner(appPeerId);
   if (!result.disconnected) return;
@@ -1166,6 +1174,8 @@ export function _onPeerDisconnect(appPeerId?: string): void {
   _notify("[remote-pi] All app peers disconnected, listening for reconnect", "info");
   // Auto-listener stays up — same listener catches the reconnect on any peer.
 }
+
+export const _onPeerDisconnect = (appPeerId?: string): void => ownerHarness.disconnectOwner(appPeerId);
 
 // ── Auto-listener ─────────────────────────────────────────────────────────────
 //
@@ -3252,14 +3262,10 @@ export function _routeClientMessageFrom(
  * a specific sender channel. Routes to the most recently attached owner,
  * mirroring the pre-W2D singleton behavior.
  */
-export function routeClientMessage(
+export const routeClientMessage = (
   msg: ClientMessage,
   ctx: Pick<ExtensionContext, "abort">,
-): void {
-  const fallback = _owners.entries().at(-1)?.channel;
-  if (!fallback) return;
-  _routeClientMessageFrom(fallback as PlainPeerChannel, msg, ctx);
-}
+): void => ownerHarness.fallbackRoute(msg, ctx);
 
 // ── session_sync handler + helpers ────────────────────────────────────────────
 

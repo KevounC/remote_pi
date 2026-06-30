@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-owner-multiplexer-module-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-owner-multiplexer-module
 depends_on: [epic-bold-split-pi-extension-index-owner-multiplexer-module-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Lock compatibility exports and owner-multiplexer tests
@@ -68,6 +68,22 @@ export const routeClientMessage = (msg: ClientMessage, ctx: Pick<ExtensionContex
 ## Risk
 
 Medium. Test harness churn can accidentally weaken the multi-owner contract or hide a regression behind aliases.
+
+## Implementation
+
+- Added `pi-extension/src/extension/testing.ts` with `OwnerMultiplexerTestHarness` and a harness factory for compatibility aliases.
+- Switched `pi-extension/src/index.ts` compatibility exports (`_getActivePeerCountForTest`, `_hasActivePeerForTest`, `_onPeerDisconnect`, `routeClientMessage`) to delegate through `ownerHarness` while preserving the runtime disconnect side effects.
+- Added focused `OwnerMultiplexer` unit tests using fake owner channels: same-owner reattach replaces the stale channel, broadcast fans out to all attached owners, detach-one preserves the other, known-owner reconnect ingress attaches and routes the triggering message, and malformed/unknown ingress is ignored or sender-only errored.
+- Preserved existing `extension.test.ts` integration coverage; no structural replacement of app-visible multi-owner behavior tests.
+
+Verification:
+
+- `corepack pnpm typecheck`: pass (`tsc --noEmit`).
+- `corepack pnpm exec vitest run src/extension.test.ts -t "revoke|relay reconnect|footer|peers|multi-channel"`: pass — 1 file passed; 43 passed, 105 skipped (148 total).
+- `corepack pnpm exec vitest run src/extension/owner_multiplexer.test.ts`: pass — 1 file passed; 5 passed.
+- `corepack pnpm exec vitest run src/extension/`: pass — 3 files passed; 8 passed.
+- `corepack pnpm build`: pass (`tsc`).
+- `corepack pnpm test`: observed the known false-failure signature in this subagent environment — 39 files passed, 5 failed; 582 passed, 66 failed, 3 skipped (651 total). Failing test names matched the pre-declared mesh/cwd-lock false-alarm group (`cwd_lock`, `leader_election`, `session/e2e`, `supervisor`) and are not attributable to this owner-multiplexer change.
 
 ## Rollback
 
