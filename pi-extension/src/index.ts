@@ -63,7 +63,9 @@ import { RelayClient, RoomAlreadyOpenError } from "./transport/relay_client.js";
 import { PlainPeerChannel } from "./transport/peer_channel.js";
 import { createCommandSurface } from "./extension/command_surface.js";
 import { registerRemotePiCommands, type RemotePiCommandSpec } from "./extension/command_surface/commands.js";
-import type { CommandSurfacePort, RemotePiRuntime } from "./extension/ports.js";
+import { createRemotePiExtensionRuntime } from "./extension/composition_root.js";
+import { createLegacyIndexPorts, type LegacyIndexDeps } from "./extension/legacy_ports.js";
+import type { CommandSurfacePort } from "./extension/ports.js";
 import { SdkSessionProjection } from "./session/sdk_session_projection.js";
 import { roomIdFor } from "./rooms.js";
 import { registerAgentTools } from "./session/tools.js";
@@ -1403,9 +1405,9 @@ const _sdkSessionProjection = new SdkSessionProjection({
 });
 
 const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
-  _pi = pi;
-  _messageApi = pi;
-  _sdkSessionProjection.bindApi(pi);
+  const legacyPorts = createLegacyIndexPorts(createIndexDeps());
+  const legacyRuntime = createRemotePiExtensionRuntime(pi, legacyPorts);
+  legacyRuntime.ports.session.bindApi(pi);
 
   // Plano 19: ensure ~/.pi/remote/{sessions,skills}/ exist. The command
   // surface deploys the agent-network skill when it registers.
@@ -1694,21 +1696,99 @@ const extension: ExtensionFactory = (pi: ExtensionAPI): void => {
   });
 
   // ── Commands ──────────────────────────────────────────────────────────────
-  createLegacyCommandSurface().register(pi, legacyCommandSurfaceRuntime());
+  legacyRuntime.ports.commands.register(pi, legacyRuntime);
 
 };
 
 export default extension;
 
-function legacyCommandSurfaceRuntime(): RemotePiRuntime {
+function createIndexDeps(): LegacyIndexDeps {
   return {
-    epoch: {
-      id: 0,
-      get disposed() { return _disposed; },
-      isCurrent: () => !_disposed,
-      dispose: () => { _disposed = true; },
+    relay: {
+      status: _relayStatus,
+      start: async (input) => {
+        if (!_cachedEd25519) throw new Error("remote-pi identity not loaded");
+        const relay = new RelayClient(toWebSocketUrl(input.relayUrl), _cachedEd25519);
+        await relay.connect({ roomId: input.roomId, roomMeta: input.roomMeta });
+        _relay = relay;
+        _relayUrl = input.relayUrl;
+        if (input.roomId) _myRoomId = input.roomId;
+        return { relay, roomId: input.roomId };
+      },
+      stop: (reason) => { _goIdle(reason); },
+      sendRoomMeta: (patch) => {
+        _publishRoomMetaPatch({
+          session_id: patch.session_id,
+          model: patch.model,
+          thinking: patch.thinking as ThinkingLevel | undefined,
+          working: patch.working,
+        });
+      },
+      onOuterMessage: (handler) => {
+        const relay = _relay;
+        if (!relay) return () => undefined;
+        relay.on("message", handler);
+        return () => { relay.off("message", handler); };
+      },
+      attachCrossPcBridge: async () => { _attachBridgeIfReady(); },
+      detachCrossPcBridge: () => { _meshNode?.detachBridge(); },
+      relay: () => _relay,
+      setRelay: (relay) => { _relay = relay; },
     },
-    ports: {} as RemotePiRuntime["ports"],
+    owners: {
+      activeCount: () => _activePeers.size,
+      attach: (input) => {
+        if (_activePeers.has(input.peerId)) _detachPeerChannel(input.peerId);
+        let channel: PlainPeerChannel;
+        channel = new PlainPeerChannel(
+          input.relay,
+          input.peerId,
+          input.roomId ?? _myRoomId ?? undefined,
+          (message) => input.onMessage(message, channel),
+          () => input.onDisconnect?.(input.peerId),
+        );
+        _attachPeerChannel(input.peerId, channel);
+        _refreshFooter();
+        return channel;
+      },
+      detach: (peerId, reason) => {
+        const channel = _activePeers.get(peerId);
+        if (channel && reason) {
+          try { channel.send({ type: "bye", reason }); } catch { /* best-effort */ }
+        }
+        _detachPeerChannel(peerId);
+      },
+      broadcast: _broadcastToActive,
+      routeFrom: (sender, message) => _routeClientMessageFrom(sender as PlainPeerChannel, message, _lastEventCtx ?? _lastCtx ?? _noopCtx),
+      lateAttachTargets: () => [..._activePeers.values()],
+    },
+    session: {
+      bindApi: (boundPi) => {
+        _pi = boundPi;
+        _messageApi = boundPi;
+        _sdkSessionProjection.bindApi(boundPi);
+      },
+      bindCommandContext: _rememberCommandCtx,
+      bindSessionContext: (ctx) => {
+        _lastEventCtx = ctx;
+        _sdkSessionProjection.bindSessionContext(ctx);
+        _captureRemoteSession(ctx);
+      },
+      clearStaleContexts: () => {
+        _lastCtx = null;
+        _lastEventCtx = null;
+        _messageApi = null;
+        _pi = null;
+        _sdkSessionProjection.clearStaleContexts();
+      },
+      sendPiMessage: (...args) => _sendPiMessage(...args),
+      wakeAgent: (...args) => _sdkSessionProjection.wakeAgent(...args),
+      publishWorking: _publishWorking,
+      handleClientMessage: (sender, message) => _routeClientMessageFrom(sender as PlainPeerChannel, message, _lastEventCtx ?? _lastCtx ?? _noopCtx),
+    },
+    commands: {
+      register: (boundPi, runtime) => { createLegacyCommandSurface().register(boundPi, runtime); },
+    },
   };
 }
 

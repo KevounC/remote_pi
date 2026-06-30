@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-composition-root-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-composition-root
 depends_on: [epic-bold-split-pi-extension-index-composition-root-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Build legacy adapters for the four future modules
@@ -92,3 +92,13 @@ Inline adapter wiring back into `index.ts` and remove `legacy_ports.ts`; no prot
 - `cd /home/agent/forks/remote_pi/pi-extension && corepack pnpm typecheck` — passed (`tsc --noEmit`; pnpm warned about unreadable `/home/agent/.npmrc` and ignored legacy package `pnpm` field).
 - `cd /home/agent/forks/remote_pi/pi-extension && corepack pnpm test` — failed, apparently pre-existing/environmental UDS issues: 5 files failed, 98 tests failed, 522 passed, 3 skipped; representative failures are `listen EPERM` on `/tmp/claude/.../supervisor.sock`, cwd-lock first-acquire expectations false, and leader-election failures under `/tmp/claude/.../broker.sock`.
 - `cd /home/agent/forks/remote_pi/pi-extension && corepack pnpm build` — passed (`tsc`; same pnpm warnings).
+
+## Implementation notes (rework 2026-06-30)
+- Files changed: `pi-extension/src/index.ts`, `.work/active/stories/epic-bold-split-pi-extension-index-composition-root-step-3.md`.
+- What changed: imported `createLegacyIndexPorts` and `LegacyIndexDeps` into the default extension factory, constructed `createIndexDeps()` as the composition-root dependency object for today's index globals, and registered the existing command surface through the legacy runtime ports. The current inline Pi hook bodies remain in place for the follow-on routing story, but SDK binding and command-surface registration now pass through the adapter dependency object instead of the ad hoc `legacyCommandSurfaceRuntime()` shim.
+- Discrepancies from design: no change to `legacy_ports.ts`; its adapters already existed and this rework wires them from `index.ts`. The relay/owner/session adapter callbacks are wrapper-only and delegate to current helpers/state; public protocol, CLI output, pairing, reconnect, session sync, and app action behavior are intended unchanged.
+- Verification:
+  - `cd /home/agent/projects/remote_pi/pi-extension && corepack pnpm typecheck` — passed (`tsc --noEmit`; harmless `/home/agent/.npmrc` EACCES and ignored `pnpm` field warnings).
+  - With sandbox cache env (`PNPM_HOME=/home/agent/projects/remote_pi/.pnpm-store`, `npm_config_cache=/home/agent/projects/remote_pi/.npm-cache`, `XDG_CACHE_HOME=/home/agent/projects/remote_pi/.xdg-cache`): `corepack pnpm exec vitest run src/extension/composition_root.test.ts src/session/turn_state.test.ts src/session/session_gate.test.ts src/protocol/session_scope.test.ts` — passed (4 files, 22 tests).
+  - Extra probe: `corepack pnpm exec vitest run src/extension.test.ts -t "app session_new recaptures fresh message API|cancel uses freshest session_start ctx"` failed with the known current-head session-gate expectation failures; verified by reverse-applying this rework patch and re-running the same command, which failed identically before these changes.
+- Adjacent issues parked: none.
