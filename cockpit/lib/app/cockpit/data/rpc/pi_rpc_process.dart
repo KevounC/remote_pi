@@ -384,14 +384,12 @@ class PiRpcProcess implements RpcProcessGateway {
   static const _ctrlPrefix = '\x00remote-pi-ctrl:';
 
   @override
-  Future<Result<void, RpcError>> sendControl(String verb) async {
+  Future<Result<void, RpcError>> sendControl(PiControlCommand command) async {
     if (_process == null) {
       return const Failure(RpcError('No agent running.'));
     }
     try {
-      await _writeLine(
-        '${jsonEncode(<String, dynamic>{'type': 'prompt', 'message': '$_ctrlPrefix$verb'})}\n',
-      );
+      await _writeLine('${jsonEncode(_compatControlPrompt(command))}\n');
       return const Success(null);
     } catch (error, stackTrace) {
       return Failure(
@@ -401,6 +399,26 @@ class PiRpcProcess implements RpcProcessGateway {
           stackTrace: stackTrace,
         ),
       );
+    }
+  }
+
+  Map<String, dynamic> _compatControlPrompt(PiControlCommand command) => {
+    'type': 'prompt',
+    'message': '$_ctrlPrefix${_compatControlVerb(command)}',
+  };
+
+  String _compatControlVerb(PiControlCommand command) {
+    switch (command.command) {
+      case PiControlCommandName.relayOn:
+        return 'relay:on';
+      case PiControlCommandName.relayOff:
+        return 'relay:off';
+      case PiControlCommandName.relayToggle:
+        return 'relay:toggle';
+      case PiControlCommandName.relayStatus:
+        return 'relay:status';
+      case PiControlCommandName.rename:
+        return 'rename:${command.name}';
     }
   }
 

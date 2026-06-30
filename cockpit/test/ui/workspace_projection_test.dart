@@ -441,7 +441,7 @@ final class _RpcGateway implements RpcProcessGateway {
   ) async => const Success(null);
 
   @override
-  Future<Result<void, RpcError>> sendControl(String verb) async =>
+  Future<Result<void, RpcError>> sendControl(PiControlCommand command) async =>
       const Success(null);
 
   @override

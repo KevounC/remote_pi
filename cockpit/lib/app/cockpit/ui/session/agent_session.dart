@@ -477,14 +477,15 @@ class AgentSession extends PaneItem {
   // ---- controles (request/response) -----------------------------------------
 
   /// Liga/desliga/alterna o relay sem envolver o LLM. Não aparece no transcript.
-  /// [verb]: `relay:on` | `relay:off` | `relay:toggle` | `relay:status`.
-  Future<void> sendRelayControl(String verb) async {
-    await _process.sendControl(verb);
+  Future<void> sendRelayControl(PiControlCommand command) async {
+    await _process.sendControl(command);
   }
 
   /// Solicita o estado atual do relay ao pi (resposta chega como RpcRelayState).
   Future<void> _syncRelayStatus() async {
-    await _process.sendControl('relay:status');
+    await _process.sendControl(
+      PiControlCommand.relay(PiRelayControlAction.status),
+    );
   }
 
   Future<void> _loadControls() async {
@@ -688,6 +689,8 @@ class AgentSession extends PaneItem {
         if (changed) {
           rename(assigned); // persiste no layout imediatamente
         }
+      case RpcPairCode() || RpcPaired() || RpcMeshRevoked():
+        return;
       case RpcUnknown():
         return;
     }

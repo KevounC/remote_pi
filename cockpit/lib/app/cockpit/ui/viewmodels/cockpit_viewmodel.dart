@@ -20,6 +20,7 @@ import 'package:cockpit/app/cockpit/domain/entities/file_node.dart';
 import 'package:cockpit/app/cockpit/domain/entities/git_file_status.dart';
 import 'package:cockpit/app/cockpit/domain/entities/git_info.dart';
 import 'package:cockpit/app/cockpit/domain/entities/launchable_app.dart';
+import 'package:cockpit/app/cockpit/domain/entities/pi_command.dart';
 import 'package:cockpit/app/cockpit/domain/entities/project.dart';
 import 'package:cockpit/app/cockpit/domain/entities/session_info.dart';
 import 'package:cockpit/app/cockpit/domain/entities/workspace_document.dart';
@@ -897,7 +898,7 @@ class CockpitViewModel extends ChangeNotifier {
     s.rename(agentName.trim());
     s.setAutoStartRelay(autoStartRelay);
     if (nameChanged && s.isAlive) {
-      unawaited(s.sendRelayControl('rename:${agentName.trim()}'));
+      unawaited(s.sendRelayControl(PiControlCommand.rename(agentName)));
     }
     notifyListeners();
   }

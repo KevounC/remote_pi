@@ -1199,7 +1199,7 @@ class _SendButton extends StatelessWidget {
 }
 
 /// Indicador/botão do relay: ativo (verde), reconectando (âmbar), offline (cinza).
-/// Toca `relay:toggle` no processo sem envolver o LLM nem o transcript.
+/// Toca o comando schema-aligned de toggle sem envolver o LLM nem o transcript.
 class _RelayButton extends StatelessWidget {
   const _RelayButton({required this.session});
   final AgentSession session;
@@ -1230,7 +1230,9 @@ class _RelayButton extends StatelessWidget {
       child: HoverTap(
         borderRadius: BorderRadius.circular(5),
         onTap: session.projection.isAlive
-            ? () => session.sendRelayControl('relay:toggle')
+            ? () => session.sendRelayControl(
+                PiControlCommand.relay(PiRelayControlAction.toggle),
+              )
             : null,
         child: SizedBox(
           width: 28,

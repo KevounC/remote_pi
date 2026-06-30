@@ -189,8 +189,8 @@ final class AgentProcessController {
     Map<String, dynamic> response,
   ) async => _gateway?.respondUi(id, response);
 
-  Future<Result<void, RpcError>?> sendControl(String verb) async =>
-      _gateway?.sendControl(verb);
+  Future<Result<void, RpcError>?> sendControl(PiControlCommand command) async =>
+      _gateway?.sendControl(command);
 
   void _onEvent(RpcEvent event) {
     switch (event) {

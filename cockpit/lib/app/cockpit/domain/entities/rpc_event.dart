@@ -169,15 +169,42 @@ final class RpcUiRequest extends RpcEvent {
 /// Estado da conexão do relay para [RpcRelayState].
 enum RelayStatus { connected, reconnecting, disconnected }
 
+/// Canonical custom event names from `protocol/schema/cockpit-control.schema.json`.
+enum RpcControlOverlayEventType {
+  relayState('remote-pi:relay-state'),
+  nameAssigned('remote-pi:name-assigned'),
+  pairCode('remote-pi:pair-code'),
+  paired('remote-pi:paired'),
+  meshRevoked('remote-pi:mesh-revoked');
+
+  const RpcControlOverlayEventType(this.wire);
+
+  final String wire;
+
+  static RpcControlOverlayEventType? fromWire(String? wire) {
+    for (final eventType in values) {
+      if (eventType.wire == wire) return eventType;
+    }
+    return null;
+  }
+}
+
 /// `message_start` com `role:"custom"` e `customType:"remote-pi:relay-state"`.
 ///
 /// Emitido em toda transição do relay (liga, queda → reconnecting, desliga,
 /// reconexão) e em resposta ao controle `relay:status`.
 final class RpcRelayState extends RpcEvent {
-  const RpcRelayState({required this.status, required this.connected});
+  const RpcRelayState({
+    required this.status,
+    required this.connected,
+    this.relayUrl,
+    this.room,
+  });
 
   final RelayStatus status;
   final bool connected;
+  final String? relayUrl;
+  final String? room;
 }
 
 /// `message_start` com `role:"custom"` e `customType:"remote-pi:name-assigned"`.
@@ -186,13 +213,56 @@ final class RpcRelayState extends RpcEvent {
 /// diferente do pedido (`agent_name`) para evitar colisão (ex.: "Proj" → "Proj#2").
 /// Quando [changed] é `false`, [assigned] == o nome original — sem ação necessária.
 final class RpcNameAssigned extends RpcEvent {
-  const RpcNameAssigned({required this.assigned, required this.changed});
+  const RpcNameAssigned({
+    required this.assigned,
+    required this.changed,
+    this.requested,
+  });
+
+  /// Nome pedido pelo usuário antes de eventual resolução de colisão.
+  final String? requested;
 
   /// Nome efetivo atribuído pelo broker (o que aparece no mesh).
   final String assigned;
 
   /// `true` quando o broker mudou o nome pedido por colisão.
   final bool changed;
+}
+
+/// `message_start` com `customType:"remote-pi:pair-code"`.
+///
+/// Carrega os dados estruturados para o Cockpit renderizar/copiar o QR sem
+/// raspar o texto de display do Pi.
+final class RpcPairCode extends RpcEvent {
+  const RpcPairCode({
+    required this.uri,
+    required this.token,
+    required this.expiresAt,
+    required this.roomId,
+    required this.name,
+  });
+
+  final String uri;
+  final String token;
+  final int expiresAt;
+  final String roomId;
+  final String name;
+}
+
+/// `message_start` com `customType:"remote-pi:paired"`.
+final class RpcPaired extends RpcEvent {
+  const RpcPaired({this.name, this.peerId, this.pairedAt});
+
+  final String? name;
+  final String? peerId;
+  final int? pairedAt;
+}
+
+/// `message_start` com `customType:"remote-pi:mesh-revoked"`.
+final class RpcMeshRevoked extends RpcEvent {
+  const RpcMeshRevoked({this.details});
+
+  final Map<String, dynamic>? details;
 }
 
 /// Qualquer evento ainda não mapeado (compaction, retry, queue_update, deltas

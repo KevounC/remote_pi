@@ -87,11 +87,11 @@ class RpcEventMapper {
     if (message['role'] != 'custom') return const RpcUnknown('message_start');
 
     final customType = message['customType'] as String?;
-    final details = message['details'];
+    final details = _detailsMap(message['details']);
 
-    switch (customType) {
-      case 'remote-pi:relay-state':
-        if (details is! Map<String, dynamic>) {
+    switch (RpcControlOverlayEventType.fromWire(customType)) {
+      case RpcControlOverlayEventType.relayState:
+        if (details == null) {
           return const RpcUnknown('message_start:relay-state:no-details');
         }
         final statusStr = details['status'] as String?;
@@ -102,20 +102,57 @@ class RpcEventMapper {
             _ => RelayStatus.disconnected,
           },
           connected: details['connected'] == true,
+          relayUrl: _nonEmptyString(details['relayUrl']),
+          room: _nonEmptyString(details['room']),
         );
-      case 'remote-pi:name-assigned':
-        if (details is! Map<String, dynamic>) {
+      case RpcControlOverlayEventType.nameAssigned:
+        if (details == null) {
           return const RpcUnknown('message_start:name-assigned:no-details');
         }
-        final assigned = details['assigned'] as String?;
+        final assigned = _nonEmptyString(details['assigned']);
         if (assigned == null) {
           return const RpcUnknown('message_start:name-assigned:no-assigned');
         }
         return RpcNameAssigned(
+          requested: _nonEmptyString(details['requested']),
           assigned: assigned,
           changed: details['changed'] == true,
         );
-      default:
+      case RpcControlOverlayEventType.pairCode:
+        if (details == null) {
+          return const RpcUnknown('message_start:pair-code:no-details');
+        }
+        final uri = _nonEmptyString(details['uri']);
+        final token = _nonEmptyString(details['token']);
+        final expiresAt = _int(details['expiresAt']);
+        final roomId = _nonEmptyString(details['roomId']);
+        final name = _nonEmptyString(details['name']);
+        if (uri == null ||
+            token == null ||
+            expiresAt == null ||
+            roomId == null ||
+            name == null) {
+          return const RpcUnknown('message_start:pair-code:invalid-details');
+        }
+        return RpcPairCode(
+          uri: uri,
+          token: token,
+          expiresAt: expiresAt,
+          roomId: roomId,
+          name: name,
+        );
+      case RpcControlOverlayEventType.paired:
+        if (details == null) {
+          return const RpcUnknown('message_start:paired:no-details');
+        }
+        return RpcPaired(
+          name: _nonEmptyString(details['name']),
+          peerId: _nonEmptyString(details['peerId']),
+          pairedAt: _int(details['pairedAt']),
+        );
+      case RpcControlOverlayEventType.meshRevoked:
+        return RpcMeshRevoked(details: details);
+      case null:
         return RpcUnknown('message_start:custom:${customType ?? "?"}');
     }
   }
@@ -193,6 +230,18 @@ class RpcEventMapper {
 
   /// Coerção segura pra String (nunca lança): não-string vira `null`.
   String? _str(Object? v) => v is String ? v : null;
+
+  String? _nonEmptyString(Object? value) {
+    if (value is String && value.isNotEmpty) return value;
+    return null;
+  }
+
+  int? _int(Object? value) => value is num ? value.toInt() : null;
+
+  Map<String, dynamic>? _detailsMap(Object? value) {
+    if (value is! Map) return null;
+    return value.map((key, v) => MapEntry(key.toString(), v));
+  }
 
   /// Valor inicial do campo: `placeholder.defaultValue`, `defaultValue` ou
   /// `prefill`. Cobre o `ui.input(title, {defaultValue})` do remote-pi.

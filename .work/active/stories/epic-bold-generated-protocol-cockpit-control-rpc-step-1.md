@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-cockpit-control-rpc-step-1
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, cockpit, pi-extension]
 parent: epic-bold-generated-protocol-cockpit-control-rpc
 depends_on: [epic-bold-generated-protocol-schema-source]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 1: Add schema-aligned cockpit control command types and event entities in Cockpit
@@ -73,4 +73,13 @@ and the adapter only recognizes two custom event cases (`relay-state`, `name-ass
 Revert the Cockpit domain and adapter typed layer additions and restore the
 string-only `sendControl(String)` contract and current event mapping; no protocol
 runtime codepaths outside Cockpit are touched by this step.
+
+## Implementation
+
+- Added a schema-aligned `PiControlCommand` domain value in `pi_command.dart` and changed `RpcProcessGateway.sendControl` plus Cockpit callers/fakes to pass typed commands instead of raw relay/rename verb strings.
+- Kept the runtime control transport behavior unchanged: `PiRpcProcess` still serializes commands to the existing NUL-prefixed `prompt` compatibility frame, centralized in the gateway adapter.
+- Expanded the typed control-overlay event set and mapper for `remote-pi:relay-state`, `remote-pi:name-assigned`, `remote-pi:pair-code`, `remote-pi:paired`, and `remote-pi:mesh-revoked`; unknown custom types still return `RpcUnknown`.
+- Added `cockpit/test/data/rpc_event_mapper_test.dart` covering existing relay/name payload fields unchanged, the new schema-neighbor events, and unknown custom-event degradation.
+- Verification: `flutter pub get --offline` passed; `flutter analyze` passed with 0 issues; `flutter test` passed (226/226).
+- Discrepancies: generated Dart output does not yet include `cockpitControl` DTOs, so this step aligns Cockpit to the checked-in schema vocabulary by hand-domain values while preserving legacy transport serialization for later structured-emission steps.
 
