@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-pi-adapter-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract-pi-adapter
 depends_on: [epic-bold-reachability-contract-pi-adapter-step-3]
@@ -55,3 +55,16 @@ Low/Medium. Watchdog behavior is timing-sensitive; preserve numeric identity.
 
 ## Rollback
 Reinstate inline constants in `relay_client.ts`.
+
+## Review (2026-06-30, fast-lane)
+
+**Verdict**: Approve — fast-lane advance; orchestrator independently verified.
+
+**Findings**: none above nit level.
+
+**Verification run (orchestrator)**:
+- `git show --stat a227eaa` — only `pi-extension/src/transport/relay_client.ts` + this story; no `index.ts` collision.
+- Imports wired: `REACHABILITY_RELAY_LIVENESS_TIMEOUT_MS`/`REACHABILITY_RELAY_LIVENESS_CHECK_MS` from `reachability_contract.ts` (which derives them from `REACHABILITY_HEARTBEAT` — single source of truth). Local aliases kept (`LIVENESS_TIMEOUT_MS = REACHABILITY_RELAY_LIVENESS_TIMEOUT_MS`) so watchdog scheduling/close logic is byte-identical; `AUTH_TIMEOUT_MS` and ping interval stayed local (per story scope).
+- `corepack pnpm typecheck` clean (harmless npmrc/pnpm-field warnings only).
+- `corepack pnpm exec vitest run src/transport/relay_client src/reachability` — 14/14 pass, incl. 8 relay_client liveness tests (closing after silence beyond timeout; surviving simulated relay ping frames) unchanged.
+- Acceptance criteria satisfied: liveness tests pass; no change in ping/reconnect user-visible behavior; numeric identity preserved via the contract.
