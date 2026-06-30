@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-control-handlers-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-control-handlers
 depends_on: [epic-bold-relay-typed-actor-control-handlers-step-4]
@@ -109,3 +109,24 @@ Restore the raw `room_meta_update` branch and handwritten `RoomMetaPatch` constr
 - `session_id` remains opaque room metadata: it is stored and included in room metadata snapshots/updates when present, but is not used for routing, indexing, logs, or metrics.
 - Regen verdict: touched `tools/protocol-codegen/`, regenerated `relay/src/protocol/generated/*`, `--check` passed, and deterministic double-run temp output matched both temp dirs and the committed generated directory.
 - Tests: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo build` passed from `relay/` (`cargo test`: 78 lib + 3 integration + 13 mesh + 9 pi_forward + 10 presence + 19 rooms = 132 tests).
+
+## Review
+
+Approved (2026-06-30) with generated-contract + merge-patch verification.
+Independently re-ran: regen `--check` pass; determinism double-run byte-identical;
+committed generated files match generator output (no hand-edits). Relay
+`cargo fmt --check` clean; `cargo clippy -- -D warnings` clean; `cargo test`
+132 passed / 0 failed (78 lib + 3 integ + 13 mesh + 9 pi_forward + 10 presence +
+19 rooms; +6 new merge-patch/registry tests). Commit `7d6e8ff` reconciled the two
+`RoomMetaPatch` sources (generated/control.rs + generated/room.rs) via the
+generator — `ControlHandlers::room_meta_update` now consumes the generated
+`RoomMetaUpdateFrame`; `peer.rs` only decodes typed control frames + dispatches.
+
+Merge-patch tri-state verified directly in tests: `working_true_patch_broadcasts_true`,
+`working_false_patch_broadcasts_false`, `nullable_string_patch_clears_session_id_metadata`,
+`empty_patch_is_acknowledged_without_broadcast`. Malformed-meta fail-fast confirmed:
+generated `RoomMetaPatch` deserializes via a map-only visitor (non-object meta,
+`working:null`, duplicate/unknown fields fail at decode, not silent empty patch).
+`session_id` remains opaque room metadata (stored/snapshotted, not routed/indexed/
+logged). Reconciling the step-3 control.rs `RoomMetaPatch` with step-4's room.rs
+one was the intended resolution — clean.
