@@ -13,6 +13,7 @@ import 'package:app/data/sync/sync_service.dart';
 import 'package:app/data/transport/epk_encoding.dart';
 import 'package:app/data/transport/channel.dart';
 import 'package:app/data/transport/connection_manager.dart';
+import 'package:app/domain/contracts/transcript_event_store.dart';
 import 'package:app/domain/entities/remote_session_ref.dart';
 import 'package:app/domain/session_state.dart';
 import 'package:app/domain/transcript/transcript_projection.dart';
@@ -192,6 +193,13 @@ void main() {
     roomId: 'main',
     sessionId: sessionId ?? _sessionByEpk[epk]!,
   );
+
+  TranscriptSessionKey transcriptKeyFor(String epk, [String? sessionId]) =>
+      TranscriptSessionKey(
+        peerId: epk,
+        roomId: 'main',
+        sessionId: sessionId ?? _sessionByEpk[epk]!,
+      );
 
   List<MessageRecord> messages(String epk, [String? sessionId]) {
     final ref = refFor(epk, sessionId);
@@ -695,7 +703,7 @@ void main() {
     },
   );
 
-  test('cancelled removes a still-pending optimistic user row', () async {
+  test('cancelled marks a still-pending optimistic user row failed', () async {
     final s = await setup();
     await s.sync.sendMessage('stop before echo');
     await _settle();
@@ -705,7 +713,11 @@ void main() {
     s.ch.push(Cancelled(inReplyTo: 'cancel-1', targetId: id));
     await _settle();
 
-    expect(messages(s.epk), isEmpty);
+    final rows = messages(s.epk);
+    expect(rows, hasLength(1));
+    expect(rows.single.id, id);
+    expect(rows.single.role, MsgRole.user);
+    expect(rows.single.status, UserMsgStatus.failed);
     expect(s.sync.streaming, isNull);
     expect(s.sync.isWorking, isFalse);
     expect(index(s.epk)?.status, SessionActivity.idle);
@@ -828,8 +840,9 @@ void main() {
         hasLength(1),
         reason: 'pending row converges to visible failure',
       );
-      expect(failed.single.role, MsgRole.assistant);
-      expect(failed.single.text, startsWith('⚠ send_timeout:'));
+      expect(failed.single.role, MsgRole.user);
+      expect(failed.single.status, UserMsgStatus.failed);
+      expect(failed.single.text, 'hi');
       expect(s.sync.debugPendingSendTimerCount, 0);
 
       final reconnect = _FakeChannel();
@@ -1117,6 +1130,11 @@ void main() {
       final afterFirst = emits;
       expect(afterFirst, greaterThan(1));
 
+      final logLengthAfterFirst =
+          (await s.sync.debugTranscriptEventStore.readSession(
+            transcriptKeyFor(s.epk),
+          )).length;
+
       s.ch.push(
         SessionHistory(
           inReplyTo: 'sync-duplicate-2',
@@ -1127,12 +1145,70 @@ void main() {
       );
       await _settle();
 
+      final logLengthAfterDuplicate =
+          (await s.sync.debugTranscriptEventStore.readSession(
+            transcriptKeyFor(s.epk),
+          )).length;
+      expect(logLengthAfterDuplicate, logLengthAfterFirst);
       expect(emits, afterFirst);
       expect(messages(s.epk).map((row) => row.text), <String>['hi', 'done']);
 
       await sub.cancel();
       s.conn.dispose();
       s.sync.dispose();
+    },
+  );
+
+  test(
+    'msgs projection is disposable and rebuilds from transcript event store',
+    () async {
+      final s = await setup();
+      s.ch.push(
+        SessionHistory(
+          sessionId: s.sessionId,
+          inReplyTo: 'sync-rebuild-source',
+          sessionStartedAt: 0,
+          events: const [
+            UserInputEvt(ts: 1, id: 'u1', text: 'hi'),
+            AgentMessageEvt(ts: 2, inReplyTo: 'u1', text: 'done'),
+            CompactionEvt(ts: 3, summary: 'compacted', tokensBefore: 5000),
+          ],
+          eos: true,
+        ),
+      );
+      await _settle();
+      final expected = [
+        for (final row in messages(s.epk))
+          (role: row.role, id: row.id, text: row.text, status: row.status),
+      ];
+      expect(expected.map((row) => row.text), <String>[
+        'hi',
+        'done',
+        'compacted',
+      ]);
+      expect(
+        await s.sync.debugTranscriptEventStore.readSession(
+          transcriptKeyFor(s.epk),
+        ),
+        hasLength(3),
+      );
+
+      await LocalBoxes().openMsgsBox(refFor(s.epk)).clear();
+      expect(messages(s.epk), isEmpty, reason: 'msgs box is disposable');
+
+      s.sync.dispose();
+      final sync2 = SyncService(s.conn, LocalBoxes());
+      await sync2.activate(s.epk, 'main');
+      await _settle();
+
+      final rebuilt = [
+        for (final row in messages(s.epk))
+          (role: row.role, id: row.id, text: row.text, status: row.status),
+      ];
+      expect(rebuilt, expected);
+
+      s.conn.dispose();
+      sync2.dispose();
     },
   );
 
@@ -1148,7 +1224,11 @@ void main() {
 
       await Future<void>.delayed(const Duration(milliseconds: 80));
       await _settle();
-      expect(messages(s.epk).single.text, startsWith('⚠ send_timeout:'));
+      final failed = messages(s.epk).single;
+      expect(failed.id, sentId);
+      expect(failed.role, MsgRole.user);
+      expect(failed.status, UserMsgStatus.failed);
+      expect(failed.text, 'eventual echo');
 
       s.ch.push(UserInput(id: sentId, text: 'eventual echo'));
       await _settle();
@@ -1609,8 +1689,9 @@ void main() {
 
         final rows = messages(s.epk);
         expect(rows, hasLength(1), reason: 'visible failure replaces bubble');
-        expect(rows.single.role, MsgRole.assistant);
-        expect(rows.single.text, startsWith('⚠ send_timeout:'));
+        expect(rows.single.role, MsgRole.user);
+        expect(rows.single.status, UserMsgStatus.failed);
+        expect(rows.single.text, 'hello');
         expect(
           s.sync.isWorking,
           isFalse,
@@ -1726,8 +1807,9 @@ void main() {
         await _settle();
         final rows = messages(epk);
         expect(rows, hasLength(1), reason: 'offline failure remains visible');
-        expect(rows.single.role, MsgRole.assistant);
-        expect(rows.single.text, startsWith('⚠ send_timeout:'));
+        expect(rows.single.role, MsgRole.user);
+        expect(rows.single.status, UserMsgStatus.failed);
+        expect(rows.single.text, 'typed while offline');
         s.conn.dispose();
         s.sync.dispose();
       },
@@ -1771,8 +1853,9 @@ void main() {
         await _settle();
         final rows = messages(s.epk);
         expect(rows, hasLength(1), reason: 'stale pending fails on return');
-        expect(rows.single.role, MsgRole.assistant);
-        expect(rows.single.text, startsWith('⚠ send_timeout:'));
+        expect(rows.single.role, MsgRole.user);
+        expect(rows.single.status, UserMsgStatus.failed);
+        expect(rows.single.text, 'hi');
         s.conn.dispose();
         s.sync.dispose();
       },
@@ -1788,8 +1871,9 @@ void main() {
       expect(s.ch.sent.whereType<UserMessage>(), isEmpty);
       final rows = messages(s.epk);
       expect(rows, hasLength(1));
-      expect(rows.single.role, MsgRole.assistant);
-      expect(rows.single.text, startsWith('⚠ send_error:'));
+      expect(rows.single.role, MsgRole.user);
+      expect(rows.single.status, UserMsgStatus.failed);
+      expect(rows.single.text, 'hello');
       expect(s.sync.isWorking, isFalse);
       expect(s.sync.streaming, isNull);
       expect(s.sync.debugPendingSendTimerCount, 0);

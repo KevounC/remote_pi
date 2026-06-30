@@ -1,8 +1,9 @@
 import 'package:app/domain/session_state.dart';
 
-/// Plan/31 — one persisted chat message (row-granular SSOT). Stored in the
-/// per-session `msgs:<epk>:<roomId>` box, keyed by [seq]. Maps to the domain
-/// [ChatMessage] the UI widgets already render.
+/// One materialized chat message in the disposable `msgs` projection. Stored in
+/// the per-session `msgs:<epk>:<roomId>` box, keyed by [seq], and rebuilt from
+/// the transcript event store. Maps to the domain [ChatMessage] the UI widgets
+/// already render.
 enum MsgRole { user, assistant, tool, compaction }
 
 class MessageRecord {
@@ -21,13 +22,17 @@ class MessageRecord {
   final ToolEventData? tool;
   final DateTime ts;
 
+  /// User-message delivery state. Older rows only stored [pending], so
+  /// [fromJson] derives this field from that boolean when `status` is absent.
+  final UserMsgStatus status;
+
   /// Optimistic: sent locally, not yet echoed by the Pi.
-  final bool pending;
+  bool get pending => status == UserMsgStatus.pending;
 
   /// Plan/32 — tokens reclaimed by a compaction (compaction rows only).
   final int? tokensBefore;
 
-  const MessageRecord({
+  MessageRecord({
     required this.id,
     required this.seq,
     required this.role,
@@ -35,9 +40,12 @@ class MessageRecord {
     this.image,
     this.tool,
     required this.ts,
-    this.pending = false,
+    bool pending = false,
+    UserMsgStatus? status,
     this.tokensBefore,
-  });
+  }) : status =
+           status ??
+           (pending ? UserMsgStatus.pending : UserMsgStatus.confirmed);
 
   MessageRecord copyWith({
     int? seq,
@@ -45,6 +53,7 @@ class MessageRecord {
     MessageImage? image,
     ToolEventData? tool,
     bool? pending,
+    UserMsgStatus? status,
   }) => MessageRecord(
     id: id,
     seq: seq ?? this.seq,
@@ -53,7 +62,11 @@ class MessageRecord {
     image: image ?? this.image,
     tool: tool ?? this.tool,
     ts: ts,
-    pending: pending ?? this.pending,
+    status:
+        status ??
+        (pending == null
+            ? this.status
+            : (pending ? UserMsgStatus.pending : UserMsgStatus.confirmed)),
     tokensBefore: tokensBefore,
   );
 
@@ -66,19 +79,30 @@ class MessageRecord {
     if (tool != null) 'tool': tool!.toJson(),
     'ts': ts.millisecondsSinceEpoch,
     'pending': pending,
+    if (role == MsgRole.user) 'status': status.name,
     if (tokensBefore != null) 'tokens_before': tokensBefore,
   };
 
   factory MessageRecord.fromJson(Map<String, dynamic> j) {
     final imageRaw = j['image'];
     final toolRaw = j['tool'];
+    final role = MsgRole.values.firstWhere(
+      (r) => r.name == j['role'],
+      orElse: () => MsgRole.assistant,
+    );
+    final statusRaw = j['status'];
+    final pending = (j['pending'] as bool?) ?? false;
+    final status = role == MsgRole.user && statusRaw is String
+        ? UserMsgStatus.values.firstWhere(
+            (s) => s.name == statusRaw,
+            orElse: () =>
+                pending ? UserMsgStatus.pending : UserMsgStatus.confirmed,
+          )
+        : (pending ? UserMsgStatus.pending : UserMsgStatus.confirmed);
     return MessageRecord(
       id: j['id'] as String,
       seq: (j['seq'] as num).toInt(),
-      role: MsgRole.values.firstWhere(
-        (r) => r.name == j['role'],
-        orElse: () => MsgRole.assistant,
-      ),
+      role: role,
       text: (j['text'] as String?) ?? '',
       image: imageRaw is Map
           ? MessageImage(
@@ -90,7 +114,7 @@ class MessageRecord {
           ? ToolEventData.fromJson(toolRaw.cast<String, dynamic>())
           : null,
       ts: DateTime.fromMillisecondsSinceEpoch((j['ts'] as num).toInt()),
-      pending: (j['pending'] as bool?) ?? false,
+      status: status,
       tokensBefore: (j['tokens_before'] as num?)?.toInt(),
     );
   }
@@ -99,12 +123,7 @@ class MessageRecord {
   ChatMessage toChatMessage() {
     switch (role) {
       case MsgRole.user:
-        return UserMsg(
-          id: id,
-          text: text,
-          status: pending ? UserMsgStatus.pending : UserMsgStatus.confirmed,
-          image: image,
-        );
+        return UserMsg(id: id, text: text, status: status, image: image);
       case MsgRole.assistant:
         return AssistantMsg(id: id, text: text);
       case MsgRole.tool:

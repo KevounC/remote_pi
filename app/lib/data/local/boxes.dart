@@ -5,8 +5,9 @@
 // on first boot). The `runtime` box is VOLATILE: wiped on every boot (#3) so
 // connection/presence never report stale online across restarts.
 //
-//   DURABLE  msgs_<epk>__<roomId>__<sessionId>
+//   DERIVED  msgs_<epk>__<roomId>__<sessionId>
 //                                           key = seq (int)  → MessageRecord
+//            Disposable projection rebuilt from transcript_events.
 //
 // Peer+room-only boxes from early rp_v2 builds are intentionally not opened or
 // deleted here. A clean-room re-sync from the Pi repopulates the active

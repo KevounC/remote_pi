@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-store-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-store
 depends_on: [epic-bold-transcript-event-log-store-step-1]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 2: Make app projections rebuildable outputs of the event store
@@ -67,6 +67,15 @@ Future<void> _appendTranscriptEvents(Iterable<TranscriptEvent> events) async {
 - [ ] Deleting/rebuilding the `msgs` projection from the stored event log recovers the same ordered messages.
 - [ ] Working/streaming convergence tests cover success, timeout, late confirm after timeout, cancel/error, compaction, reconnect replay, and session switch filtering.
 - [ ] `flutter test test/data/sync/sync_service_test.dart` passes.
+
+## Implementation
+
+- Live transcript paths now append `TranscriptEvent` records to `TranscriptEventStore` first, then read the stored session log, derive `TranscriptProjection`, and rewrite the disposable `msgs` projection under `_writeChain`.
+- `sendMessage`, `UserInput`, assistant chunks/done/messages, tool request/result, cancellation/error terminals, and compaction now flow through event append + projection materialization instead of treating `MessageRecord` as transcript truth.
+- Pending-send timeout and send-error backstops append `UserMessageFailed`; a later `UserMessageConfirmed` with the same client id is retained in the event log and wins in the derived projection.
+- `SessionHistory` replay is converted to deterministic server-authoritative transcript events and appended/deduped through the event store; replay does not delete local unseen event-log entries.
+- Tests cover success, timeout, late-confirm-after-timeout, cancel/error, compaction, reconnect replay, session switch filtering, duplicate replay/no churn, and deleting/rebuilding the `msgs` box from the stored event log.
+- Confirmed `msgs` is disposable: clearing it and constructing a fresh `SyncService` rebuilds the same ordered projection from `TranscriptEventStore`.
 
 ## Rollback
 

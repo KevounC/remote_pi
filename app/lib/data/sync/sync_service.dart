@@ -1,12 +1,13 @@
-// Plan/31 — SyncService: the SINGLE writer of the local SSOT.
+// SyncService is the single app-side transcript writer.
 //
-// Consumes the channel (ConnectionManager status + PeerChannel
-// serverMessages) and writes row-granular records to Hive (v2 boxes). The UI
-// never touches this stream — it reads the DB via the read repositories.
+// Consumes the channel (ConnectionManager status + PeerChannel serverMessages),
+// appends canonical TranscriptEvent records, and materializes the disposable
+// row-granular `msgs` Hive projection read by repositories/UI. The `msgs` box
+// is not transcript truth and can be rebuilt from the event store.
 //
-// Streaming is the ONE exception to SSOT (#7): AgentChunk deltas are coalesced
-// into an in-memory Stream<StreamingMessage?> and NEVER written to the DB; only
-// the finalized message lands in the box on `agent_done`.
+// Streaming remains in-memory for UI responsiveness; AgentChunk deltas are
+// also event-store inputs, and finalized/projection rows are derived from the
+// stored event log.
 
 import 'dart:async';
 import 'dart:convert';
@@ -16,6 +17,7 @@ import 'package:app/data/local/boxes.dart';
 import 'package:app/data/local/records/message_record.dart';
 import 'package:app/data/local/records/runtime_record.dart';
 import 'package:app/data/local/records/session_index_record.dart';
+import 'package:app/data/local/transcript_event_store_hive.dart';
 import 'package:app/data/sync/sync_events.dart';
 import 'package:app/data/sync/session_gate.dart';
 import 'package:app/data/transport/connection_manager.dart';
@@ -32,7 +34,7 @@ import 'package:flutter/foundation.dart';
 class SyncService extends Service {
   final ConnectionManager _conn;
   final LocalBoxes _boxes;
-  final TranscriptEventStore? _transcriptEventStore;
+  final TranscriptEventStore _eventStore;
   final SessionGate _sessionGate = const SessionGate();
 
   StreamSubscription<ConnectionStatus>? _connSub;
@@ -60,9 +62,6 @@ class SyncService extends Service {
 
   // Serialise box mutations so concurrent async writes stay ordered.
   Future<void> _writeChain = Future<void>.value();
-
-  final List<TranscriptEvent> _transcriptEvents = <TranscriptEvent>[];
-  final Set<String> _transcriptEventIds = <String>{};
 
   // Streaming — in-memory only (#7).
   final StringBuffer _chunkBuffer = StringBuffer();
@@ -101,7 +100,7 @@ class SyncService extends Service {
     this._boxes, {
     TranscriptEventStore? transcriptEventStore,
     this.pendingSendTimeout = const Duration(seconds: 20),
-  }) : _transcriptEventStore = transcriptEventStore {
+  }) : _eventStore = transcriptEventStore ?? HiveTranscriptEventStore(_boxes) {
     _connSub = _conn.statusStream.listen(_onStatus);
     _roomsSub = _conn.roomsStream.listen((_) => _onRoomsChanged());
     _presenceSub = _conn.presenceStream.listen((_) => _writeRuntime());
@@ -165,7 +164,6 @@ class SyncService extends Service {
     // the previous durable session index — the prior Pi session may still be
     // visible via room-level relay metadata.
     _resetTurnState(clearPendingSendTimers: true);
-    _clearTranscriptEventBuffer();
     _acceptedSessionStartedAtHighWater = null;
     _activeEpk = epk;
     _activeRoomId = room;
@@ -176,6 +174,7 @@ class SyncService extends Service {
 
     if (nextRef != null) {
       await _loadIndex(nextRef);
+      await _materializeTranscriptProjectionForRef(nextRef);
     }
     _writeRuntime();
   }
@@ -321,26 +320,23 @@ class SyncService extends Service {
   }) async {
     if (expectedRef != null && !_isStillActive(expectedRef)) return;
     _pendingSendTimers.remove(id)?.cancel();
-    await _removePendingById(id);
+    if (expectedRef != null && !_isStillActive(expectedRef)) return;
+    await _appendTranscriptEvent(
+      UserMessageFailed(
+        eventId: 'local:user_failed:$id:$code',
+        sessionId: expectedRef?.sessionId ?? _activeTranscriptSessionId(),
+        ts: DateTime.now(),
+        clientMessageId: id,
+        code: code,
+        message: message,
+      ),
+    );
     if (expectedRef != null && !_isStillActive(expectedRef)) return;
     // Clear the thinking cursor only if it's seeded for this message.
     if (_streaming?.inReplyTo == id) _emitStreaming(null);
     // Clear working ONLY if this id owns it — never knock down a turn that a
     // different (echoed) message is already driving.
     if (turnProjection.cancelTargetId == id) _setTurnIdle();
-    await _upsert(
-      MsgRole.assistant,
-      'err_$id',
-      (seq, existing) =>
-          existing ??
-          MessageRecord(
-            id: 'err_$id',
-            seq: seq,
-            role: MsgRole.assistant,
-            text: '⚠ $code: $message',
-            ts: DateTime.now(),
-          ),
-    );
     debugPrint(
       '[msg-failed] id=$id code=$code detail=${debugDetail ?? message}',
     );
@@ -358,7 +354,7 @@ class SyncService extends Service {
   int get debugPendingSendTimerCount => _pendingSendTimers.length;
 
   @visibleForTesting
-  TranscriptEventStore? get debugTranscriptEventStore => _transcriptEventStore;
+  TranscriptEventStore get debugTranscriptEventStore => _eventStore;
 
   @visibleForTesting
   Future<void> debugApplyHistory(SessionHistory history) =>
@@ -409,25 +405,8 @@ class SyncService extends Service {
         decision: decision,
       ),
     );
-    await _upsert(MsgRole.tool, toolCallId, (seq, existing) {
-      final base =
-          existing?.tool ??
-          ToolEventData(toolCallId: toolCallId, tool: 'unknown');
-      return (existing ??
-              MessageRecord(
-                id: toolCallId,
-                seq: seq,
-                role: MsgRole.tool,
-                ts: DateTime.now(),
-              ))
-          .copyWith(
-            tool: base.copyWith(
-              status: decision == ApproveDecision.allow
-                  ? ToolEventStatus.allowed
-                  : ToolEventStatus.denied,
-            ),
-          );
-    });
+    // Tool approval status is ultimately materialized from the transcript/tool
+    // event stream. Do not mutate the disposable msgs projection directly here.
   }
 
   void requestSync() {
@@ -438,7 +417,12 @@ class SyncService extends Service {
       return;
     }
     _pendingSyncRequest = false;
-    ch.send(SessionSync(id: _newId(), sessionId: ref.sessionId));
+    ch.send(SessionSync(id: _newId(), sessionId: ref.sessionId)).catchError((
+      Object err,
+      StackTrace _,
+    ) {
+      debugPrint('[session-sync] request failed: $err');
+    });
   }
 
   /// Plan/28 — `session_new` acked: wipe the active session's rows.
@@ -456,7 +440,15 @@ class SyncService extends Service {
       _idToSeq.clear();
       _nextSeq = 0;
       _indexLoaded = true;
-      _clearTranscriptEventBuffer();
+      await _clearTranscriptEventsForRef(ref);
+      await _rewriteMessageProjectionInWriteChain(
+        ref,
+        const TranscriptProjection(
+          messages: <ChatMessage>[],
+          turn: TranscriptTurnView.idle,
+        ),
+        const <TranscriptEvent>[],
+      );
       // Session-clear is a `session_new` wipe boundary: a clear during an
       // active turn would otherwise leave the turn projection / streaming
       // cursor stuck on a stale cancel target. Reset the whole-turn state so
@@ -592,18 +584,15 @@ class SyncService extends Service {
 
       case AgentMessage(:final inReplyTo, :final text):
         // ignore: discarded_futures
-        _upsert(
-          MsgRole.assistant,
-          inReplyTo,
-          (seq, existing) =>
-              existing ??
-              MessageRecord(
-                id: inReplyTo,
-                seq: seq,
-                role: MsgRole.assistant,
-                text: text,
-                ts: DateTime.now(),
-              ),
+        _appendTranscriptEvent(
+          AssistantMessageCommitted(
+            eventId: 'server:assistant_message:$inReplyTo:${uuid7()}',
+            sessionId: _activeTranscriptSessionId(),
+            ts: DateTime.now(),
+            messageId: 'agent_$inReplyTo',
+            replyTo: inReplyTo,
+            text: text,
+          ),
         );
 
       case QueuedMessageState(:final text):
@@ -633,8 +622,7 @@ class SyncService extends Service {
                 : MessageImage(data: image.data, mime: image.mime),
             streamingBehavior: streamingBehavior,
           ),
-          preserveTurnState:
-              streamingBehavior == UserMessageStreamingBehavior.steer,
+          preserveTurnState: true,
         );
         // Steering input should not start/replace the working turn bubble.
         if (streamingBehavior == UserMessageStreamingBehavior.steer) {
@@ -699,11 +687,27 @@ class SyncService extends Service {
       case Cancelled(:final targetId):
         _pendingSendTimers.remove(targetId)?.cancel();
         _discardStreamingState();
-        // Cancel is stop-generation, not delete-history. Only drop a local
-        // optimistic row that never got confirmed by the Pi echo; preserve
-        // confirmed user/tool rows as the audit trail of what happened.
+        // Cancel is stop-generation, not delete-history. If the target was
+        // still only a local optimistic send, materialize it as failed through
+        // the event log; confirmed history stays visible and the terminal done
+        // event converges the turn idle through the projection.
         // ignore: discarded_futures
-        _removePendingById(targetId);
+        _appendTranscriptEvents(<TranscriptEvent>[
+          UserMessageFailed(
+            eventId: 'server:user_cancelled:$targetId',
+            sessionId: _activeTranscriptSessionId(),
+            ts: DateTime.now(),
+            clientMessageId: targetId,
+            code: 'cancelled',
+            message: 'Message was cancelled before delivery was confirmed.',
+          ),
+          AssistantDoneReceived(
+            eventId: 'server:assistant_cancelled:$targetId:${uuid7()}',
+            sessionId: _activeTranscriptSessionId(),
+            ts: DateTime.now(),
+            replyTo: targetId,
+          ),
+        ]);
         _setTurnIdle();
 
       case Bye(:final rawReason):
@@ -721,7 +725,7 @@ class SyncService extends Service {
         // ignore: discarded_futures
         _applyHistory(msg);
 
-      case ErrorMessage(:final code, :final message):
+      case ErrorMessage(:final inReplyTo, :final code, :final message):
         if (code.contains('unknown_peer')) {
           if (!_eventController.isClosed) {
             _eventController.add(const PairingRevoked());
@@ -731,17 +735,22 @@ class SyncService extends Service {
         _discardStreamingState();
         _setTurnIdle();
         // ignore: discarded_futures
-        _upsert(
-          MsgRole.assistant,
-          _newId(),
-          (seq, _) => MessageRecord(
-            id: 'err_$seq',
-            seq: seq,
-            role: MsgRole.assistant,
-            text: '⚠ $code: $message',
+        _appendTranscriptEvents(<TranscriptEvent>[
+          AssistantMessageCommitted(
+            eventId: 'server:error_message:${uuid7()}',
+            sessionId: _activeTranscriptSessionId(),
             ts: DateTime.now(),
+            messageId: 'err_${uuid7()}',
+            replyTo: inReplyTo ?? 'error',
+            text: '⚠ $code: $message',
           ),
-        );
+          AssistantDoneReceived(
+            eventId: 'server:error_done:${uuid7()}',
+            sessionId: _activeTranscriptSessionId(),
+            ts: DateTime.now(),
+            replyTo: inReplyTo ?? 'error',
+          ),
+        ]);
 
       case Compaction(:final summary, :final tokensBefore, :final ts):
         // ignore: discarded_futures
@@ -791,73 +800,112 @@ class SyncService extends Service {
     Iterable<TranscriptEvent> events, {
     bool preserveTurnState = false,
   }) async {
-    final ref = _activeRef;
-    if (ref == null) return;
-    final sessionId = ref.sessionId;
-    var changed = false;
-    for (final event in events) {
-      if (event.sessionId != sessionId) continue;
-      if (_transcriptEventIds.add(event.eventId)) {
-        _transcriptEvents.add(event);
-        changed = true;
-      }
-    }
-    if (!changed) return;
-    final projection = deriveTranscriptProjection(
-      sessionId: sessionId,
-      events: _transcriptEvents,
-    );
-    if (!preserveTurnState) {
-      _emitStreaming(projection.streaming);
-      _setTurnView(projection.turn);
-    }
-    await _writeProjectionDiff(ref, projection);
-  }
+    final key = _activeTranscriptKeyOrNull();
+    if (key == null) return;
+    final batch = events
+        .where((event) => event.sessionId == key.sessionId)
+        .toList(growable: false);
+    if (batch.isEmpty) return;
 
-  void _clearTranscriptEventBuffer() {
-    _transcriptEvents.clear();
-    _transcriptEventIds.clear();
-  }
-
-  Future<void> _writeProjectionDiff(
-    RemoteSessionRef ref,
-    TranscriptProjection projection,
-  ) async {
-    final desired = <MessageRecord>[
-      for (var i = 0; i < projection.messages.length; i++)
-        _recordFromProjectedMessage(projection.messages[i], i),
-    ];
     await _enqueue(() async {
-      if (!_isStillActive(ref)) return;
-      final box = await _boxes.msgsBox(ref);
-      for (final k in box.keys.toList()) {
-        if ((k as num).toInt() >= desired.length) {
-          await box.delete(k);
-        }
+      final ref = _activeRef;
+      if (ref == null || !_sameTranscriptKey(key, ref)) return;
+      final result = await _eventStore.appendAll(key, batch);
+      if (result.appended == 0) return;
+      final log = await _eventStore.readSession(key);
+      final projection = deriveTranscriptProjection(
+        sessionId: key.sessionId,
+        events: log,
+      );
+      if (!preserveTurnState) {
+        _emitStreaming(projection.streaming);
+        _setTurnView(projection.turn);
       }
-      for (var i = 0; i < desired.length; i++) {
-        final newJson = desired[i].toJson();
-        final curRaw = box.get(i);
-        final curJson = curRaw == null
-            ? null
-            : MessageRecord.fromJson(_coerce(curRaw)).toJson();
-        if (curJson == null || !_sameMessageRecordJson(curJson, newJson)) {
-          await box.put(i, newJson);
-        }
-      }
-      _idToSeq
-        ..clear()
-        ..addEntries([
-          for (var i = 0; i < desired.length; i++)
-            MapEntry(_key(desired[i].role, desired[i].id), i),
-        ]);
-      _nextSeq = desired.length;
-      _indexLoaded = true;
+      await _rewriteMessageProjectionInWriteChain(ref, projection, log);
     });
   }
 
-  MessageRecord _recordFromProjectedMessage(ChatMessage message, int seq) {
-    final now = DateTime.now();
+  Future<void> _materializeTranscriptProjectionForRef(RemoteSessionRef ref) {
+    final key = _transcriptKeyForRef(ref);
+    return _enqueue(() async {
+      if (!_isStillActive(ref)) return;
+      final log = await _eventStore.readSession(key);
+      final projection = deriveTranscriptProjection(
+        sessionId: key.sessionId,
+        events: log,
+      );
+      _emitStreaming(projection.streaming);
+      _setTurnView(projection.turn);
+      await _rewriteMessageProjectionInWriteChain(ref, projection, log);
+    });
+  }
+
+  Future<void> _clearTranscriptEventsForRef(RemoteSessionRef ref) async {
+    final key = _transcriptKeyForRef(ref);
+    final box = await _boxes.transcriptEventsBox(key);
+    await box.clear();
+  }
+
+  TranscriptSessionKey? _activeTranscriptKeyOrNull() {
+    final ref = _activeRef;
+    return ref == null ? null : _transcriptKeyForRef(ref);
+  }
+
+  TranscriptSessionKey _transcriptKeyForRef(RemoteSessionRef ref) =>
+      TranscriptSessionKey(
+        peerId: ref.peerEpk,
+        roomId: ref.roomId,
+        sessionId: ref.sessionId,
+      );
+
+  bool _sameTranscriptKey(TranscriptSessionKey key, RemoteSessionRef ref) =>
+      key.peerId == ref.peerEpk &&
+      key.roomId == ref.roomId &&
+      key.sessionId == ref.sessionId;
+
+  Future<void> _rewriteMessageProjectionInWriteChain(
+    RemoteSessionRef ref,
+    TranscriptProjection projection,
+    List<TranscriptEvent> log,
+  ) async {
+    if (!_isStillActive(ref)) return;
+    final desired = <MessageRecord>[
+      for (var i = 0; i < projection.messages.length; i++)
+        _recordFromProjectedMessage(projection.messages[i], i, log),
+    ];
+    final box = await _boxes.msgsBox(ref);
+    for (final k in box.keys.toList()) {
+      if ((k as num).toInt() >= desired.length) {
+        await box.delete(k);
+      }
+    }
+    for (var i = 0; i < desired.length; i++) {
+      final newJson = desired[i].toJson();
+      final curRaw = box.get(i);
+      final curJson = curRaw == null
+          ? null
+          : MessageRecord.fromJson(_coerce(curRaw)).toJson();
+      if (curJson == null || !_sameMessageRecordJson(curJson, newJson)) {
+        await box.put(i, newJson);
+      }
+    }
+    _idToSeq
+      ..clear()
+      ..addEntries([
+        for (var i = 0; i < desired.length; i++)
+          MapEntry(_key(desired[i].role, desired[i].id), i),
+      ]);
+    _nextSeq = desired.length;
+    _indexLoaded = true;
+    _reconcilePendingSendTimers(desired);
+  }
+
+  MessageRecord _recordFromProjectedMessage(
+    ChatMessage message,
+    int seq,
+    List<TranscriptEvent> log,
+  ) {
+    final ts = _timestampForProjectedMessage(message, log) ?? DateTime.now();
     return switch (message) {
       UserMsg() => MessageRecord(
         id: message.id,
@@ -865,21 +913,21 @@ class SyncService extends Service {
         role: MsgRole.user,
         text: message.text,
         image: message.image,
-        pending: message.status == UserMsgStatus.pending,
-        ts: now,
+        status: message.status,
+        ts: ts,
       ),
       AssistantMsg() => MessageRecord(
         id: message.id,
         seq: seq,
         role: MsgRole.assistant,
         text: message.text,
-        ts: now,
+        ts: ts,
       ),
       ToolEvent() => MessageRecord(
         id: message.id,
         seq: seq,
         role: MsgRole.tool,
-        ts: now,
+        ts: ts,
         tool: ToolEventData(
           toolCallId: message.toolCallId,
           tool: message.tool,
@@ -895,9 +943,68 @@ class SyncService extends Service {
         role: MsgRole.compaction,
         text: message.summary,
         tokensBefore: message.tokensBefore,
-        ts: now,
+        ts: ts,
       ),
     };
+  }
+
+  DateTime? _timestampForProjectedMessage(
+    ChatMessage message,
+    List<TranscriptEvent> log,
+  ) {
+    DateTime? ts;
+    for (final event in log) {
+      switch ((message, event)) {
+        case (UserMsg(:final id), UserMessageConfirmed(:final clientMessageId))
+            when id == clientMessageId:
+          ts = event.ts;
+        case (UserMsg(:final id), UserMessageSubmitted(:final clientMessageId))
+            when id == clientMessageId && ts == null:
+          ts = event.ts;
+        case (UserMsg(:final id), UserMessageFailed(:final clientMessageId))
+            when id == clientMessageId:
+          ts = event.ts;
+        case (
+              AssistantMsg(:final id),
+              AssistantMessageCommitted(:final messageId),
+            )
+            when id == messageId:
+          ts = event.ts;
+        case (
+              ToolEvent(toolCallId: final messageToolCallId),
+              ToolRequested(toolCallId: final eventToolCallId),
+            )
+            when messageToolCallId == eventToolCallId && ts == null:
+          ts = event.ts;
+        case (
+              ToolEvent(toolCallId: final messageToolCallId),
+              ToolFinished(toolCallId: final eventToolCallId),
+            )
+            when messageToolCallId == eventToolCallId:
+          ts = event.ts;
+        case (CompactionMsg(:final id), CompactionRecorded())
+            when id == event.eventId:
+          ts = event.ts;
+        default:
+          break;
+      }
+    }
+    return ts;
+  }
+
+  void _reconcilePendingSendTimers(List<MessageRecord> desired) {
+    final pendingIds = <String>{
+      for (final record in desired)
+        if (record.role == MsgRole.user && record.pending) record.id,
+    };
+    for (final id in _pendingSendTimers.keys.toList()) {
+      if (!pendingIds.contains(id)) _pendingSendTimers.remove(id)?.cancel();
+    }
+    for (final record in desired) {
+      if (record.role == MsgRole.user && record.pending) {
+        _armSendTimeout(record.id, record.ts);
+      }
+    }
   }
 
   Future<void> _applyHistory(SessionHistory h) async {
@@ -911,7 +1018,6 @@ class SyncService extends Service {
       return;
     }
 
-    await _seedExistingTranscriptEvents(ref);
     await _appendTranscriptEvents(
       historyToTranscriptEvents(h.events, sessionId: ref.sessionId),
     );
@@ -929,92 +1035,6 @@ class SyncService extends Service {
         ),
       );
     }
-  }
-
-  Future<void> _seedExistingTranscriptEvents(RemoteSessionRef ref) async {
-    final box = await _boxes.msgsBox(ref);
-    final rows = <MessageRecord>[];
-    for (final value in box.values) {
-      rows.add(MessageRecord.fromJson(_coerce(value)));
-    }
-    rows.sort((a, b) => a.seq.compareTo(b.seq));
-    final seeded = <TranscriptEvent>[];
-    for (final record in rows) {
-      switch (record.role) {
-        case MsgRole.user:
-          if (record.pending) {
-            seeded.add(
-              UserMessageSubmitted(
-                eventId: 'local:user_submitted:${record.id}',
-                sessionId: ref.sessionId,
-                ts: record.ts,
-                clientMessageId: record.id,
-                text: record.text,
-                image: record.image,
-              ),
-            );
-          } else {
-            seeded.add(
-              UserMessageConfirmed(
-                eventId: 'server:user_confirmed:${record.id}',
-                sessionId: ref.sessionId,
-                ts: record.ts,
-                clientMessageId: record.id,
-                text: record.text,
-                image: record.image,
-              ),
-            );
-          }
-        case MsgRole.assistant:
-          seeded.add(
-            AssistantMessageCommitted(
-              eventId: 'seed:assistant_committed:${record.id}',
-              sessionId: ref.sessionId,
-              ts: record.ts,
-              messageId: record.id,
-              replyTo: record.id,
-              text: record.text,
-            ),
-          );
-        case MsgRole.tool:
-          final tool = record.tool;
-          if (tool == null) break;
-          seeded.add(
-            ToolRequested(
-              eventId: 'server:tool_requested:${tool.toolCallId}',
-              sessionId: ref.sessionId,
-              ts: record.ts,
-              toolCallId: tool.toolCallId,
-              tool: tool.tool,
-              args: _objectMap(tool.args),
-            ),
-          );
-          if (tool.status == ToolEventStatus.completed ||
-              tool.status == ToolEventStatus.failed) {
-            seeded.add(
-              ToolFinished(
-                eventId: 'server:tool_finished:${tool.toolCallId}',
-                sessionId: ref.sessionId,
-                ts: record.ts,
-                toolCallId: tool.toolCallId,
-                result: tool.result,
-                error: tool.error,
-              ),
-            );
-          }
-        case MsgRole.compaction:
-          seeded.add(
-            CompactionRecorded(
-              eventId: record.id,
-              sessionId: ref.sessionId,
-              ts: record.ts,
-              summary: record.text,
-              tokensBefore: record.tokensBefore,
-            ),
-          );
-      }
-    }
-    await _appendTranscriptEvents(seeded);
   }
 
   // ---------------------------------------------------------------------------
@@ -1053,52 +1073,6 @@ class SyncService extends Service {
     });
   }
 
-  Future<void> _upsert(
-    MsgRole role,
-    String id,
-    MessageRecord Function(int seq, MessageRecord? existing) build,
-  ) {
-    final ref = _activeRef;
-    if (ref == null) return Future<void>.value();
-    return _enqueue(() async {
-      if (!_isStillActive(ref)) return;
-      final box = await _boxes.msgsBox(ref);
-      final mapKey = _key(role, id);
-      final existingSeq = _idToSeq[mapKey];
-      if (existingSeq != null) {
-        final existing = MessageRecord.fromJson(_coerce(box.get(existingSeq)));
-        await box.put(existingSeq, build(existingSeq, existing).toJson());
-      } else {
-        final seq = _nextSeq++;
-        await box.put(seq, build(seq, null).toJson());
-        _idToSeq[mapKey] = seq;
-      }
-    });
-  }
-
-  Future<void> _removePendingById(String id) {
-    final ref = _activeRef;
-    if (ref == null) return Future<void>.value();
-    return _enqueue(() async {
-      if (!_isStillActive(ref)) return;
-      final box = await _boxes.msgsBox(ref);
-      for (final role in MsgRole.values) {
-        final key = _key(role, id);
-        final seq = _idToSeq[key];
-        if (seq == null) continue;
-        final raw = box.get(seq);
-        if (raw == null) {
-          _idToSeq.remove(key);
-          continue;
-        }
-        final existing = MessageRecord.fromJson(_coerce(raw));
-        if (!existing.pending) continue;
-        _idToSeq.remove(key);
-        await box.delete(seq);
-      }
-    });
-  }
-
   void _setActivity(SessionActivity status, {String? preview}) {
     _updateIndex(
       (cur) => cur.copyWith(
@@ -1125,15 +1099,22 @@ class SyncService extends Service {
   /// in-memory turn stream (chat pill/cancel target), durable session index,
   /// and the active-room relay compatibility correction.
   void _setTurnView(TranscriptTurnView next, {String? preview}) {
+    final sameTurn = _sameTurnView(_turnView, next);
+    final epk = _activeEpk;
+    if (sameTurn && preview == null) {
+      if (epk != null) {
+        _conn.markRoomWorking(epk, _activeRoomId, next.working);
+      }
+      return;
+    }
     _setActivity(
       next.working ? SessionActivity.working : SessionActivity.idle,
       preview: preview,
     );
-    final epk = _activeEpk;
     if (epk != null) {
       _conn.markRoomWorking(epk, _activeRoomId, next.working);
     }
-    if (_sameTurnView(_turnView, next)) return;
+    if (sameTurn) return;
     _turnView = next;
     if (!_turnViewController.isClosed) _turnViewController.add(next);
   }
