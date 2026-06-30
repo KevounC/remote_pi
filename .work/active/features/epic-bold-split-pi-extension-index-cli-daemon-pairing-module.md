@@ -1,14 +1,14 @@
 ---
 id: epic-bold-split-pi-extension-index-cli-daemon-pairing-module
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-split-pi-extension-index
 depends_on: [epic-bold-split-pi-extension-index-composition-root]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Split pi-extension index — CLI / daemon / pairing module
@@ -556,3 +556,11 @@ No project-specific `.agents/skills/refactor-conventions/` catalog exists. The p
 
 ## Atomic steps acknowledged
 Step 2 is semi-atomic because root command dispatch and nested command registration must agree on the same registry to avoid transient command drift. Step 4 is semi-atomic because the relay auto-listener, pair-request validation, and owner attachment need a consistent ownership split; it remains rollbackable by restoring the existing listener and `_handlePairRequest` block in one revert. Step 6 is semi-atomic for package-bin compatibility: direct-run CLI bootstrap and compatibility test aliases should move together.
+
+## Review — advanced to done (2026-06-30)
+
+All 6 child steps `done` (command surface → local-mesh lifecycle → setup/pairing
+→ relay-facing handlers/QR coordinator → daemon/cron/service → standalone CLI
+dispatcher + harness). The `index.ts` god-file's CLI/daemon/pairing surface is
+now extracted into command-surface modules; `index.ts` is thin wiring + bootstrap.
+Epic complete.
