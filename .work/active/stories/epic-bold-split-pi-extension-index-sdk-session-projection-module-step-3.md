@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-sdk-session-projection-module-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-sdk-session-projection-module
 depends_on: [epic-bold-split-pi-extension-index-sdk-session-projection-module-step-2]
@@ -97,3 +97,21 @@ High. This is the main stale-context bug class. The safe failure mode is an expl
 
 ## Rollback
 Restore app action routing in `index.ts` and the prior `_pi`/`_lastCtx`/`_lastEventCtx` helper paths; keep the module shell unused if necessary.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran (clean state): `corepack pnpm typecheck`
+clean; `corepack pnpm build` clean; **full pi-ext suite 660 passed | 3 skipped |
+0 failed (44 files)** — fully green (up from 656 — the agent's 8+ new stale-context
+tests, +285 lines).
+
+Stale-context safety verified (2× consistent): prompt/list-models after simulated
+new/resume/fork/reload use fresh session_start ctx (not stale `_pi`); compact/cancel
+after replacement use freshest ctx; model/thinking after app `session_new` use fresh
+action API or return explicit sender-scoped unavailable errors (never stale `_pi`);
+session_new recaptures command/event/message/action API + remote session id through
+one replacement binding path; `_pi` deliberately dropped as stale fallback;
+session_shutdown teardown — app user_message after shutdown does not call stale pi.
+Existing listener-count invariant tests untouched and passing. Commit `23277c9`
+scoped to pi-ext only (index.ts + extension.test.ts + sdk_session_projection guards);
+collision guard held.
