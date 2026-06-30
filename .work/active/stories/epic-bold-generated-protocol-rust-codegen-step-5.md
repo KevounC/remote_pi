@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-rust-codegen-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-generated-protocol-rust-codegen
 depends_on: [epic-bold-generated-protocol-rust-codegen-step-4]
@@ -109,3 +109,25 @@ Medium. The main risk is over-typing `AgentEnvelope.body` or `session_id` and ac
 ## Rollback
 
 Revert cross-PC/mesh generated-type consumption and restore raw JSON parsing in `pi_forward.rs` plus handwritten wire DTOs in `mesh/types.rs`. Earlier generated outer/control/room types can remain.
+
+## Review
+
+Approved (2026-06-30) with generated-contract + opacity verification. Independently
+re-ran: regen `--check` pass; determinism double-run byte-identical; committed
+generated files match generator output (no hand-edits). Relay `cargo fmt --check`
+clean; `cargo clippy -- -D warnings` clean; `cargo test` 131 passed / 0 failed
+(76 lib + 3 integ + 13 mesh + 8 pi_forward + 10 presence + 2 protocol_parity +
+19 rooms). Commit `f70ad5b` scoped to generated cross_pc.rs/mesh.rs + pi_forward.rs
++ mesh/types.rs + registry.rs + generator + parity test/fixtures + story .md.
+
+Opacity preserved (the story's key risk): `AgentEnvelope.body` is
+`serde_json::Value`; body-level `session_id` stays endpoint-owned opaque data
+(forwarded only, never parsed by the relay). `transport_error` shape preserved
+(`_relay` + `re` + `body.type = "transport_error"`). Mesh decoded/internal types
+(`MeshEnvelope`/`MeshHeader`/`MeshRecord`) kept handwritten; only wire DTOs
+generated. Peer-wide `forward_to_peer` preserved (room-targeting correctly
+deferred to relay-opaque-targeting). Parity tests added
+(`protocol_parity_test.rs` + `mesh-http.jsonl` fixture) deserialize cross-PC +
+mesh fixtures through generated types, round-trip representative frames, and
+compare coverage to `CROSS_PC_TYPES` so omitted variants fail. The
+`forward_to_peer` registry addition is a legitimate supporting change.
