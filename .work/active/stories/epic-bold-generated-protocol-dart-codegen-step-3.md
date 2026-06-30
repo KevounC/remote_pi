@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen-step-3
 kind: story
-stage: review
+stage: done
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: [epic-bold-generated-protocol-dart-codegen-step-2]
 tags: [refactor]
@@ -133,3 +133,16 @@ Revert the generated server output and tests. The hand mirror remains the runtim
 - Verification: `PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache /home/agent/projects/remote_pi/.tools/flutter/bin/flutter test test/protocol_codegen/` passed; `PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache /home/agent/projects/remote_pi/.tools/flutter/bin/flutter analyze` reported only the known unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802` and exited 1.
 - Discrepancies from design: none.
 - Adjacent issues parked: none.
+
+## Review (2026-06-30, fast-lane; generated-contract invariant verified)
+
+**Verdict**: Approve — fast-lane advance; orchestrator independently verified the generated-contract invariant.
+
+**Findings**: none above nit level.
+
+**Verification run (orchestrator)**:
+- `git show --stat 4ba0339` — exactly the right file set: generator (`tools/protocol-codegen/bin/protocol-codegen.mjs` + IR fixture `app_pi_client_dart_ir.json`), regenerated `app/lib/protocol/generated/protocol.g.dart`, `app/lib/protocol/protocol.dart`, codegen test `server_messages_codegen_test.dart`, + 5 new contract fixtures. No stray files; no collision with other app agents (ws_transport/connection_manager untouched).
+- **REGEN CHECK**: ran `node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema .../app_pi_client_dart_ir.json --out /tmp/regen_protocol.g.dart` and `diff` against the committed `protocol.g.dart` → **EMPTY DIFF**. The generated file matches generator output exactly — no hand-edits. Generated-contract invariant holds (change is in the generator, not the generated file).
+- `cd app && flutter test test/protocol_codegen/` (PUB_CACHE set) — 15/15 pass (server fixtures decode + classified; generator output deterministic + matches golden; union narrows fromJson + round-trips toJson; exhaustive switch supported; unknown/nested types covered).
+- `flutter analyze` — only the known-unrelated `axisAlignment` info.
+- Acceptance criteria satisfied: handwritten discriminant switch replaced by schema-derived generated decoding; generator-extended, regenerated, regen-diff clean.
