@@ -38,7 +38,7 @@ installed and persisted; these notes are so a fresh agent does not re-derive it.
 
 **Toolchain (already installed as root, persisted in `/etc/profile.d/android.sh`):**
 
-- Flutter 3.44.4 at `~/projects/remote_pi/.tools/flutter` (Dart 3.12.2).
+- Flutter 3.44.4 at `~/projects/remote_pi/.tools/flutter` (Dart 3.12.2). Not on `PATH`; call the binary directly. Pub cache is repo-local at `~/projects/remote_pi/.pub-cache` (gitignored); always `export PUB_CACHE=~/projects/remote_pi/.pub-cache` because the default `/home/agent/.pub-cache` is mounted read-only. `app/` has no git-overridden deps, so `flutter pub get` works online (or `--offline` once seeded).
 - JDK `openjdk-21-jdk-headless`. Debian 13/trixie ships no `openjdk-17`; JDK 21
   compiles the app's pinned Java 17 target and is within AGP 8.11.1's supported
   range. `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64`.

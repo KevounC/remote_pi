@@ -46,12 +46,26 @@ Decisões fechadas (plano 37, 2026-06-05):
 
 ## Comandos
 
-- `flutter pub get` — instala deps
-- `flutter analyze` — lint estático (deve passar zero issues)
-- `flutter test` — testes
-- `flutter run -d macos` — abre no desktop
-- `dart format .` — formata
-- `flutter build macos` — build verificável
+O SDK do Flutter e o pub cache vivem no repositório (não em `/opt` ou `/tmp`).
+Defina `PUB_CACHE` e use o binário em `.tools/flutter`. Para cockpit, `pub get`
+precisa de `--offline` porque 3 deps git-overridden (`gpt_markdown`,
+`kyroon_pty`, `xterm` de `github.com/jacobaraujo7/*`) não clonam online — o
+config git global reescreve https→ssh e não há chave SSH neste sandbox; os mirrors
+bare em `.pub-cache/git/cache/` resolvem offline. Veja
+[`../.agents/skills/flutter-desktop-cockpit/SKILL.md`](../.agents/skills/flutter-desktop-cockpit/SKILL.md)
+para o porquê.
+
+```bash
+cd cockpit
+export PUB_CACHE=~/projects/remote_pi/.pub-cache
+~/projects/remote_pi/.tools/flutter/bin/flutter pub get --offline   # cockpit precisa de --offline
+~/projects/remote_pi/.tools/flutter/bin/flutter analyze              # deve passar zero issues
+~/projects/remote_pi/.tools/flutter/bin/flutter test
+~/projects/remote_pi/.tools/flutter/bin/flutter run -d macos
+~/projects/remote_pi/.tools/flutter/bin/flutter build macos
+```
+
+- `dart format .` — formata (ou `~/.tools/flutter/bin/cache/dart-sdk/bin/dart format .`)
 
 ## Arquitetura — fatias verticais por feature
 

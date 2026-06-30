@@ -24,12 +24,23 @@ app/extension/relay, leia `../.agents/skills/mobile-remote-coding/SKILL.md`.
 
 ## Comandos
 
-- `flutter pub get` — instala deps
-- `flutter analyze` — lint estático (deve passar zero issues)
-- `flutter test` — testes
-- `flutter run` — abre em simulador/device conectado
-- `dart format .` — formata
-- `flutter build ios --no-codesign` / `flutter build apk --debug` — build verificável
+O SDK do Flutter e o pub cache vivem no repositório (não em `/opt` ou `/tmp`).
+Defina `PUB_CACHE` e use o binário em `.tools/flutter`. `app/` não tem deps git,
+então `pub get` online funciona (ou `--offline` se o cache já estiver povoado).
+
+```bash
+cd app
+export PUB_CACHE=~/projects/remote_pi/.pub-cache
+~/projects/remote_pi/.tools/flutter/bin/flutter pub get
+~/projects/remote_pi/.tools/flutter/bin/flutter analyze              # deve passar zero issues
+~/projects/remote_pi/.tools/flutter/bin/flutter test
+~/projects/remote_pi/.tools/flutter/bin/flutter build apk --debug    # ou --no-codesign ios
+```
+
+- `dart format .` — formata (ou `~/.tools/flutter/bin/cache/dart-sdk/bin/dart format .`)
+
+Nota: `flutter analyze` em `app/` emite um `info` pré-existente e não relacionado:
+`axisAlignment` deprecated em `lib/ui/chat/widgets/input_bar.dart:802`. Não falhar revisões por isso.
 
 > Para o caminho completo de build de APK no dev VM (`codebox`) — toolchain JDK 21
 > + Android SDK API 36, build `--release --split-per-abi` (~31 MB por ABI), e os

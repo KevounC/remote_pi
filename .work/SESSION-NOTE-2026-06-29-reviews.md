@@ -1,17 +1,37 @@
 # Session note — 2026-06-29 — bold-refactor review pass
 
 **UPDATE 2026-06-29 (later):** The cockpit env blocker described below is now
-**RESOLVED**. pub.dev became reachable (200), and a writable pub cache was
-materialized at `/tmp/pi-pub-cache` via `PUB_CACHE=/tmp/pi-pub-cache
-HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter pub get` from
-`cockpit/`. `cockpit/.dart_tool/package_config.json` now exists. `flutter
-analyze` (full project) is green: "No issues found!". The two pending cockpit
-verifications were run:
-- `workspace-document-step-3` — 9 targeted tests pass; the static-only
-  approval is now backed by a green run. Stays `done`.
-- `settings-split-step-3` — the one committed test passes but is still only
-  import coverage; the bounce stands on its merits (AC needs fake VM/gateway
-  coverage). Stays `implementing`.
+**RESOLVED**, via a different mechanism than first tried. The Flutter SDK and pub
+cache were relocated into the repo (commits `4db720e` + `67f9138`): Flutter at
+`~/projects/remote_pi/.tools/flutter`, pub cache at `~/projects/remote_pi/.pub-cache`
+(gitignored). The `/tmp` shims (`/tmp/flutter-writable`, `/tmp/pi-pub-cache`,
+`/tmp/pi-dart-home`) are no longer used.
+
+Working incantation (cockpit needs `--offline`; app does not):
+```bash
+cd cockpit   # or app
+export PUB_CACHE=~/projects/remote_pi/.pub-cache
+~/projects/remote_pi/.tools/flutter/bin/flutter pub get --offline   # cockpit only
+~/projects/remote_pi/.tools/flutter/bin/flutter analyze
+~/projects/remote_pi/.tools/flutter/bin/flutter test
+```
+
+**Why cockpit needs `--offline`:** 3 deps are git-overridden from
+`github.com/jacobaraujo7/*` (`gpt_markdown`, `kyroon_pty`, `xterm`). A global git
+config rewrite (`url.git@github.com:.insteadof=https://github.com/`) forces these
+HTTPS URLs through SSH, and there's no SSH key in this sandbox, so online clone
+fails `Permission denied (publickey)`. The bare mirrors in
+`.pub-cache/git/cache/<pkg>-<sha>/` resolve cleanly under `--offline`. **Keep that
+cache populated** — if it's cleared, cockpit goes back to failing until re-seeded.
+
+Verification run (native paths, no `/tmp`): cockpit `flutter analyze` =
+"No issues found!"; `workspace-document-step-3` 9 tests pass; `settings-split-step-3`
+1 test passes (still import-only — bounce stands). `app/` pub get + analyze green
+(1 known-unrelated `axisAlignment` info at `lib/ui/chat/widgets/input_bar.dart:802`).
+Durable doc updated: `cockpit/CLAUDE.md`, `app/CLAUDE.md`, and the
+`flutter-desktop-cockpit` + `flutter-mobile` SKILL.md references now carry the
+working incantation.
+
 The "Fix options" section below is now historical; keep it only as a record of
 what was wrong. Resume from "Resume instructions" item 3 (the 8 bounces), not
 the env work.

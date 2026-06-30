@@ -21,16 +21,32 @@ provenance: skill-reference
 
 Run from `cockpit/`: [remote-pi-cockpit-guidance]{1}
 
-```bash
-flutter pub get
-flutter analyze
-flutter test
-dart format .
-flutter run -d macos
-flutter build macos
-```
+### Sandbox toolchain (dev VM / `codebox`)
 
-Flutter's desktop docs use `flutter run -d macos|windows|linux` and `flutter build macos|windows|linux` for platform-specific runs/builds. [flutter-desktop-support]{1} Cockpit is macOS-first, but native-boundary changes should be smoked on each platform they claim to support.
+The Flutter SDK and pub cache live **in the repo**, not under `/opt` or `/tmp`.
+Flutter 3.44.4 (Dart 3.12.2) at `~/projects/remote_pi/.tools/flutter`; pub cache at
+`~/projects/remote_pi/.pub-cache` (gitignored). Always set `PUB_CACHE` and call the
+binary directly — `flutter` is not on `PATH`, and the default
+`/home/agent/.pub-cache` is mounted read-only.
+
+**Cockpit requires `pub get --offline`.** Three deps are git-overridden from
+`github.com/jacobaraujo7/*` (`gpt_markdown`, `kyroon_pty`, `xterm`). A global git
+config rewrite (`url.git@github.com:.insteadof=https://github.com/`) forces these
+HTTPS URLs through SSH, and there is no SSH key in this sandbox, so online clone
+fails with `Permission denied (publickey)`. The bare mirrors in
+`.pub-cache/git/cache/` resolve cleanly under `--offline`; keep that cache
+populated (re-seed from another checkout if it is ever cleared).
+
+```bash
+cd cockpit
+export PUB_CACHE=~/projects/remote_pi/.pub-cache
+~/projects/remote_pi/.tools/flutter/bin/flutter pub get --offline
+~/projects/remote_pi/.tools/flutter/bin/flutter analyze
+~/projects/remote_pi/.tools/flutter/bin/flutter test
+~/projects/remote_pi/.tools/flutter/bin/dart format .
+~/projects/remote_pi/.tools/flutter/bin/flutter run -d macos
+~/projects/remote_pi/.tools/flutter/bin/flutter build macos
+```
 
 Do not commit `build/`, `.dart_tool/`, `macos/Pods/`, generated artifacts, local `.pi/`, logs, or secrets.
 
