@@ -24,9 +24,14 @@ final class ReachabilityAdapter {
     _connectInFlight = true;
   }
 
-  void onConnectSucceeded() {
+  /// The relay WebSocket factory succeeded and this app has a live socket.
+  ///
+  /// This is intentionally NOT proof that the Pi-side room is alive. Keep the
+  /// retry backoff attempt intact until [onAppFrameObserved] sees real inbound
+  /// app/Pi traffic; otherwise a relay that accepts sockets while the Pi is
+  /// down pins reconnects back to the 1s floor.
+  void onRelayConnectionEstablished() {
     _state = ReachabilityState.online;
-    _retryAttempt = 0;
     _missedPings = 0;
     _connectInFlight = false;
   }
@@ -63,6 +68,8 @@ final class ReachabilityAdapter {
 
   void onStopRequested() {
     _state = ReachabilityState.offline;
+    _retryAttempt = 0;
+    _missedPings = 0;
     _connectInFlight = false;
   }
 

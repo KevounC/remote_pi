@@ -430,7 +430,7 @@ class ConnectionManager extends Service {
         } catch (_) {}
       });
     }
-    _reachability.onConnectSucceeded();
+    _reachability.onRelayConnectionEstablished();
     _activePeer = peer;
     _emit(StatusOnline(channel));
     _startPing(peer, channel);
@@ -526,7 +526,7 @@ class ConnectionManager extends Service {
         await ch.close();
         return;
       }
-      _reachability.onConnectSucceeded();
+      _reachability.onRelayConnectionEstablished();
       // Push down the active room to the WS so the outer envelope
       // carries it from frame 1 (factory creates a fresh WsTransport
       // every reconnect — default _activeRoom='main' unless we set).

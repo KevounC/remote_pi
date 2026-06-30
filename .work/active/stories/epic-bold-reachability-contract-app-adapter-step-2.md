@@ -1,14 +1,14 @@
 ---
 id: epic-bold-reachability-contract-app-adapter-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app]
 parent: epic-bold-reachability-contract-app-adapter
 depends_on: [epic-bold-reachability-contract-app-adapter-step-1]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 2: Refactor ConnectionManager to consume the adapter
@@ -135,3 +135,11 @@ mutation while leaving the adapter file unused.
 - `HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter analyze` — red on the pre-existing `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802`.
 - Targeted tests passed: `HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter test test/protocol_codegen/dart_codegen_test.dart test/transport/reachability_adapter_test.dart test/transport/connection_manager_test.dart`.
 - Full `HOME=/tmp/pi-dart-home /tmp/flutter-writable/bin/flutter test` remains red on pre-existing unrelated actions/sync/chat session-identity failures; not used as the regression signal for this bounce.
+
+## Implementation notes
+- Files changed: `app/lib/data/transport/reachability_adapter.dart`, `app/lib/data/transport/connection_manager.dart`, `app/test/transport/reachability_adapter_test.dart`, `app/test/transport/connection_manager_test.dart`.
+- Bounce fix: split the adapter's relay-socket success transition into `onRelayConnectionEstablished()`, which clears `connectInFlight` and missed pings but deliberately preserves `retryAttempt`; `ConnectionManager` now calls that method for factory/adopt successes. `retryAttempt` resets only on `onAppFrameObserved()` (real inbound app/Pi traffic) or explicit stop/reset.
+- Regression coverage: added adapter coverage that relay connection success does not reset backoff, and a `ConnectionManager` offline-loop test proving consecutive factory-successes-without-inbound-traffic emit attempts `0`, `1`, then `2` with `1s`, `2s`, then `5s` delays.
+- Public contract preserved: first `StatusRetrying` emission remains attempt `0`; the retry counter still advances when the retry timer fires.
+- Verification: `PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache /home/agent/projects/remote_pi/.tools/flutter/bin/flutter test test/transport/reachability_adapter_test.dart test/transport/connection_manager_test.dart` passed. `PUB_CACHE=/home/agent/projects/remote_pi/.pub-cache /home/agent/projects/remote_pi/.tools/flutter/bin/flutter analyze` reported only the known unrelated `axisAlignment` deprecation info at `lib/ui/chat/widgets/input_bar.dart:802` and exited 1.
+- Adjacent issues parked: none.

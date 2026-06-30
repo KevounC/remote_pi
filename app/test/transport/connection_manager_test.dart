@@ -428,9 +428,7 @@ void main() {
     );
 
     test(
-      '_retryAttempt stays at 0 until the channel listener sees inbound; '
-      'a channel close right after connect keeps the backoff at attempt=0 '
-      '(rather than escalating)',
+      'first channel close before inbound emits the public retry attempt=0',
       () async {
         // Multiple controllable channels, each closes mid-flight before
         // delivering any inbound — simulates the death-spiral scenario
@@ -461,6 +459,73 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 20));
         expect(retries, hasLength(1));
         expect(retries.first.attempt, 0);
+
+        cm.dispose();
+      },
+    );
+
+    test(
+      'relay reconnect successes without inbound traffic keep advancing the backoff ladder',
+      () async {
+        final channels = <_ControllableChannel>[];
+        final cm = ConnectionManager(
+          factory: (_, _) async {
+            final ch = _ControllableChannel();
+            channels.add(ch);
+            return ch;
+          },
+          storage: _FakeStorage([_fakePeer()]),
+          emitDebounce: Duration.zero,
+        );
+
+        Future<StatusRetrying> nextRetrying() => cm.statusStream
+            .where((s) => s is StatusRetrying)
+            .cast<StatusRetrying>()
+            .first
+            .timeout(const Duration(seconds: 1));
+
+        Future<StatusOnline> nextOnline(Duration timeout) => cm.statusStream
+            .where((s) => s is StatusOnline)
+            .cast<StatusOnline>()
+            .first
+            .timeout(timeout);
+
+        await cm.connectTo(_fakePeer());
+        expect(channels, hasLength(1));
+        expect(cm.channel, same(channels[0]));
+
+        final retry0Future = nextRetrying();
+        await channels[0].closeStream();
+        final retry0 = await retry0Future;
+        expect(retry0.attempt, 0);
+        expect(retry0.nextRetry, const Duration(seconds: 1));
+
+        final online1Future = nextOnline(const Duration(seconds: 2));
+        await online1Future;
+        expect(channels, hasLength(2));
+        expect(cm.channel, same(channels[1]));
+
+        final retry1Future = nextRetrying();
+        await channels[1].closeStream();
+        final retry1 = await retry1Future;
+        expect(
+          retry1.attempt,
+          1,
+          reason:
+              'factory success without app/Pi traffic must not reset retryAttempt',
+        );
+        expect(retry1.nextRetry, const Duration(seconds: 2));
+
+        final online2Future = nextOnline(const Duration(seconds: 3));
+        await online2Future;
+        expect(channels, hasLength(3));
+        expect(cm.channel, same(channels[2]));
+
+        final retry2Future = nextRetrying();
+        await channels[2].closeStream();
+        final retry2 = await retry2Future;
+        expect(retry2.attempt, 2);
+        expect(retry2.nextRetry, const Duration(seconds: 5));
 
         cm.dispose();
       },

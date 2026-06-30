@@ -4,21 +4,34 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('ReachabilityAdapter', () {
-    test('connect success projects online and clears counters', () {
-      final adapter = ReachabilityAdapter();
+    test(
+      'relay connection success clears in-flight and ping misses, not retry backoff',
+      () {
+        final adapter = ReachabilityAdapter();
 
-      adapter.onConnectRequested();
-      expect(adapter.state, ReachabilityState.connecting);
-      expect(adapter.connectInFlight, isTrue);
+        adapter.onConnectRequested();
+        expect(adapter.state, ReachabilityState.connecting);
+        expect(adapter.connectInFlight, isTrue);
 
-      adapter.onPingMissed();
-      adapter.onConnectSucceeded();
+        adapter.onConnectFailedRetryable();
+        adapter.onRetryTimerFired();
+        adapter.onPingMissed();
+        expect(adapter.retryAttempt, 1);
+        expect(adapter.missedPings, 1);
 
-      expect(adapter.state, ReachabilityState.online);
-      expect(adapter.connectInFlight, isFalse);
-      expect(adapter.retryAttempt, 0);
-      expect(adapter.missedPings, 0);
-    });
+        adapter.onRelayConnectionEstablished();
+
+        expect(adapter.state, ReachabilityState.online);
+        expect(adapter.connectInFlight, isFalse);
+        expect(
+          adapter.retryAttempt,
+          1,
+          reason:
+              'factory success only proves relay auth; app/Pi traffic resets backoff',
+        );
+        expect(adapter.missedPings, 0);
+      },
+    );
 
     test(
       'retryable failures preserve current attempt until the retry timer fires',
@@ -46,7 +59,7 @@ void main() {
     test(
       'ping misses degrade after the contract threshold without forcing offline',
       () {
-        final adapter = ReachabilityAdapter()..onConnectSucceeded();
+        final adapter = ReachabilityAdapter()..onRelayConnectionEstablished();
 
         for (
           var i = 1;
@@ -94,6 +107,9 @@ void main() {
         final adapter = ReachabilityAdapter()
           ..onConnectRequested()
           ..onConnectFailedRetryable();
+
+        adapter.onRetryTimerFired();
+        expect(adapter.retryAttempt, 1);
 
         adapter.onStopRequested();
         expect(adapter.state, ReachabilityState.offline);
