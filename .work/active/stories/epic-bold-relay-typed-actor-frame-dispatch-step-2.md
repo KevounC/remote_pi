@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor-frame-dispatch-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-frame-dispatch
 depends_on: [epic-bold-relay-typed-actor-frame-dispatch-step-1]
@@ -110,3 +110,22 @@ Inline the actor state back into `handle_peer` and remove `connection_actor.rs`.
 - Preserved cleanup-once and sink-break behavior: any failed send from actor output, registry output, or heartbeat exits the routing loop and reaches the existing single unregister/unsubscribe tail.
 - Preserved wire behavior: existing outer forwarding rewrite, skip-sender `conn_id`, control dedup/rate-limit emissions, and cross-PC transport-error handling remain unchanged.
 - Verification: `cargo fmt --check && cargo clippy -- -D warnings`; `cargo test` (82 lib + 3 integration + 13 mesh + 8 pi_forward + 10 presence + 2 parity + 19 rooms; all passed); `cargo build`.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: relay `cargo fmt --check` clean;
+`cargo clippy -- -D warnings` clean; `cargo test` 137 passed / 0 failed (82 lib
++ 3 integ + 13 mesh + 8 pi_forward + 10 presence + 2 parity + 19 rooms). Commit
+`a31d19b` scoped to relay only (connection_actor.rs + peer.rs + mod.rs + the
+control.rs import-path update `peer::connection_actor`→`handlers::connection_actor`
+— legitimate wiring, not a collision with the done control-handlers work); no
+generated files touched.
+
+Lifecycle extraction verified: per-connection state (rate-limit/dedup caches,
+last_presence/rooms_resp) now in `ConnectionActor`; `handle_peer` is the
+transport loop — register (105), decode_relay_frame (145), actor.dispatch (161),
+rx.recv (180), single unregister/rooms cleanup tail (198). Cleanup-once
+preserved: any failed send (actor output / registry / heartbeat) exits the loop
+to the single unregister/unsubscribe tail. No wire behavior changes (outer
+forwarding rewrite, skip-sender conn_id, control dedup/rate-limit, cross-PC
+transport-error handling unchanged).
