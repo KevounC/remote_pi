@@ -34,4 +34,24 @@ repo-level v0.6.0) — phased delivery, informational under epic_cohesion: phase
 (none — unbound archived stubs are all multi-component → repo-level)
 
 ## Gate runs
-(populated in Phase 4)
+
+### gate-cruft (2026-07-01) — 5 findings (0 high, 2 medium, 3 low)
+
+- Medium: room-adoption persistence failures dropped (connection_manager.dart:1117)
+- Medium: _enqueue drops write-chain exceptions (sync_service.dart:1263)
+- Low: silent dynamic setActiveRoom fallback (connection_manager.dart:272), empty catch old-channel close (:431), legacy sync/turn compat shims (sync_service.dart:129-134 + transcript_projection.dart:7)
+5 items → backlog (all non-blocking). Scanner survived (1 compaction, returned clean output — app bundle ~19 files under the compaction threshold).
+
+### gate-tests (2026-07-01) — 1 gap (0 critical, 0 high, 1 medium) from 75 ACs (74 covered)
+
+- Medium: LocalBoxes.init restart preservation only partially covered (proves runtime wiped, not that sessions_index preserved across restart)
+1 item → backlog (non-blocking). Bundle had strong existing test coverage (most ACs already covered).
+
+(populated by remaining gates as they complete)
+
+### Binding-consistency warnings
+
+binding_guard=warn epic_cohesion=phased. CONFLICTS(6) + INCOMPLETES(4), all
+informational/non-halting — expected phased delivery where app-tagged stories ship
+here while their multi-component parent features/epics ship in v0.6.0. Not true
+orphans; same pattern as cockpit-v1.6.0.
