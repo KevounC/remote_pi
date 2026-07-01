@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index-relay-transport-module-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-split-pi-extension-index-relay-transport-module
 depends_on: [epic-bold-split-pi-extension-index-relay-transport-module-step-4]
@@ -105,3 +105,16 @@ were correct all along. Reverted the alignment; suite green at 655/658.
 Net: the agent's idempotent `attachCrossPcBridge` fix (commit `ebac18e`) stands
 correct — it eliminated the duplicate-listener bug. The orchestrator's fixture
 alignment was the error, now corrected. Story remains `done`.
+
+## Final stage advance (2026-06-30)
+
+Advanced to `done`. This story was implemented correctly in commit `ebac18e` (idempotent
+`attachCrossPcBridge` fixing the triple-attach duplicate-listener bug). The saga:
+1st/2nd attempts (`a3fde43`/`fecaa66`) were reverted for misclassifying real owner-
+ingress regressions as false-alarms; the orchestrator's independent vitest re-run
+caught them. The 3rd attempt (`ebac18e`) fixed the real root cause (triple
+`attachCrossPcBridge`) via idempotent dedupe. An orchestrator-side fixture-alignment
+error (commit `b95d828`, reverted in `ea94508`/`5c5ae0b`) transiently broke the suite
+but was corrected — the original listener-count fixtures were correct. Final state:
+pi-ext suite green (718 passed), the idempotent bridge fix stands. Story complete —
+loose `review` stage from the revert chain now resolved.
