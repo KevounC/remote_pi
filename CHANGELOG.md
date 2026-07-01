@@ -9,6 +9,43 @@ For the canonical protocol specification, see [PROTOCOL.md](PROTOCOL.md).
 
 ---
 
+## [cockpit-v1.6.0] — 2026-07-01
+
+Desktop cockpit minor over `cockpit-v1.5.1`. Ships the cockpit half of the
+bold-refactor arc (workspace projection, cockpit control RPC, transcript
+hydration) plus the first gate-enabled release pass.
+
+### Added
+- Workspace is now a pure document (`WorkspaceDocument` / `LeafPane` / `SplitPane`,
+  multiple tabs/sessions) with mutations as typed command transforms
+  (`WorkspaceDocumentCommands` → `WorkspaceCommandResult`) funneled through a
+  single reducer (`CockpitViewModel._applyWorkspaceCommand`).
+- Agent sessions are immutable projections (`AgentSessionProjection`) consumed
+  by the UI via derived getters, not direct mutable fields.
+- Cockpit ↔ Pi control RPC (schema command envelopes for remote-pi relay/mesh
+  control) — extensions now intentionally loaded.
+- Transcript event hydration/replay seam in the cockpit.
+
+### Changed
+- Settings split into a category registry + dispatch composition (appearance,
+  connectivity, daemon, language, notification, schedule).
+- `rpc-protocol.md` spawn contract updated: defaults `noSession=false` /
+  `noExtensions=false` (extensions loaded for remote-pi command discovery).
+- `cockpit/CLAUDE.md` scope rewritten from MVP/single-pane to current
+  workspace-projection architecture.
+
+### Fixed
+- Removed a temporary debug trace scaffold (`_trace`/`ck_trace.log`) left in the
+  workspace settings dialog.
+- `auto_retry_*` events no longer listed as ignored (parsed as `RpcAutoRetry`).
+
+### Internal (release-gate dogfood)
+- First release run through the gate-enabled substrate (security, tests, cruft,
+  docs, patterns, refactor). 24 gate findings produced; 4 critical/high + 1
+  medium (debug artifact) resolved before ship; 19 medium/low tracked in backlog.
+- 7 new widget/unit tests covering LSP command save/reset behavior and the
+  notification permission mounted guard.
+
 ## [app-v1.1.1] — 2026-06-29
 
 Mobile app patch over `app-v1.1.0`. Mobile-side fixes shipped to the
