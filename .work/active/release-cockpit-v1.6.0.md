@@ -49,6 +49,39 @@ file:line (the post-review grounding corrections paid off); two findings spot-ve
 
 (populated by remaining gates as they complete)
 
+### gate-security (2026-07-01) — 3 findings (0 critical, 0 high, 1 medium, 2 low)
+
+- Medium: raw RPC traffic printed to debug logs (pi_rpc_process.dart:222) — prompts/tokens/images
+- Low: raw child stderr surfaced in transcript (agent_session.dart:658)
+- Low: file-name validation misses Windows path separator (cockpit_viewmodel.dart:532)
+3 items written to .work/active/stories/gate-security-*.md.
+
+### gate-tests (2026-07-01) — 5 coverage gaps (2 critical, 0 high, 3 medium) from 103 ACs (98 covered)
+
+- Critical: no test for language LSP probe/save/reset (settings-split AC)
+- Critical: no test for notification permission mounted guard/instructions path (settings-split AC)
+- Medium: app-preference panels import-only coverage, not persistence/controller
+- Medium: daemon tests miss successful create flow
+- Medium: control-command serialization test samples only one relay action
+5 items written to .work/active/stories/gate-tests-*.md (critical→implementing, medium→drafting).
+
+### gate-docs (2026-07-01) — 5 findings (2 high, 2 medium, 1 low)
+
+- High: rpc-protocol.md stale spawn flags (--no-session/--no-extensions no longer defaults)
+- High: cockpit/CLAUDE.md stale single-pane/MVP constraints
+- Medium: auto_retry_* listed as ignored but implementation parses them
+- Medium: missing CHANGELOG entry for cockpit-v1.6.0 (Phase 5.5 will draft before ship)
+- Low: cockpit README is generic Flutter boilerplate
+5 items written to .work/active/stories/gate-docs-*.md.
+
+### gate-patterns (2026-07-01) — 6 pattern candidates discovered
+
+6 reusable shapes (3+ occurrences each): pure-workspace-command-transform, centralized-protocol-adapter-boundary, settings-category-registry-dispatch, projection-boundary-for-session-UI, single-reducer-workspace-mutation, settings-data-state-tri-state-render. Pattern-skill authoring deferred (gate-patterns is the final gate; pattern skills are a separate artifact under .agents/skills/patterns/, lower priority for this dogfood). Recorded here for traceability.
+
+### gate-cruft (2026-07-01) — re-scanning (first scanner hit compaction)
+
+(refactor gate run recorded above; total gate-produced items so far: 22)
+
 ### Binding-consistency warnings
 
 binding_guard=warn  epic_cohesion=phased
