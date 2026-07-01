@@ -113,6 +113,15 @@ not whichever component release is running.
   `findings-route: none` — findings route through story/feature design, not
   refactor-design, because the fixes are not black-box-preserving). The libraries are
   grounded in `.agents/rules/code-design.md` and were cross-model-reviewed before commit.
+- `gate_finding_routing: { critical: implementing, high: implementing, medium: backlog, low: backlog }`
+  — gate findings are routed by severity into blocking vs trackable work. **critical/high
+  are release-blocking**: they bind to the release and ship blocks on them reaching `done`.
+  **medium/low are non-blocking**: they are unbound from the release (`release_binding: null`)
+  and land in `.work/backlog/` as tracked improvements, so the release ships once its
+  blocking findings resolve. This is the fork's deliberate posture: the gate surfaces real
+  issues without low/medium findings stalling every ship. (An operator may still mark a
+  medium/low finding blocking case-by-case by leaving it bound — e.g., a debug artifact left
+  in production is worth fixing before ship regardless of nominal severity.)
 - `terminal-tier retention: retain-bodies` — bound item bodies stay on disk.
   Active done items move to `.work/releases/<version>/`; archived items stay in
   `.work/archive/`. A release summary doc is produced at

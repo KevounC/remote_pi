@@ -84,9 +84,30 @@ file:line (the post-review grounding corrections paid off); two findings spot-ve
 - Low: empty catch-swallow in formatter reload path (file_viewer.dart:368)
 2 items written to .work/active/stories/gate-cruft-*.md.
 
-### gate-cruft (2026-07-01) — re-scanning (first scanner hit compaction) — RESOLVED above
+## Gate finding routing (per CONVENTIONS gate_finding_routing)
 
-(refactor gate run recorded above; total gate-produced items so far: 22) → final total: 24
+`gate_finding_routing: { critical: implementing, high: implementing, medium: backlog, low: backlog }`.
+Critical/high are release-blocking (stay bound, advance to implementing); medium/low are
+non-blocking (unbound to .work/backlog/, tracked improvements). Applied to this release's
+24 gate findings:
+
+- **Blocking (4)** — stay bound to cockpit-v1.6.0, at stage: implementing:
+  - gate-tests-language-lsp-probe-coverage (critical)
+  - gate-tests-notification-permission-mounted-guard (critical)
+  - gate-docs-rpc-protocol-stale-spawn-flags (high)
+  - gate-docs-claudemd-stale-mvp-constraints (high)
+- **Non-blocking (20)** — moved to .work/backlog/, release_binding: null:
+  - 7 refactor (9 medium → 2 kept blocking? no: all 9 refactor findings were medium → backlog)
+  - 3 security (1 medium + 2 low → backlog)
+  - 3 tests medium → backlog
+  - 3 docs (2 medium + 1 low → backlog)
+  - 2 cruft (1 medium + 1 low → backlog)
+  - 1 changelog-gap (medium → backlog; Phase 5.5 will draft the changelog before ship regardless)
+
+NOTE: cruft gate-cruft-temp-debug-trace-scaffold is medium (non-blocking by policy) but is a
+debug artifact left in production — the convention allows keeping it blocking case-by-case.
+Operator deferred this decision; currently routed to backlog per the default. If the operator
+wants it fixed before ship, rebind it.
 
 ### Binding-consistency warnings
 

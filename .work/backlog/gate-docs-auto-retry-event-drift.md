@@ -5,7 +5,7 @@ stage: drafting
 tags: [documentation]
 parent: null
 depends_on: []
-release_binding: cockpit-v1.6.0
+release_binding: null
 gate_origin: docs
 created: 2026-07-01
 updated: 2026-07-01
