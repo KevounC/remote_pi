@@ -1,7 +1,7 @@
 ---
 id: release-extension-0.6.0
 kind: release
-stage: quality-gate
+stage: released
 tags: []
 parent: null
 depends_on: []
@@ -181,3 +181,43 @@ convention). The 5 `generated-protocol-ts-codegen` steps touch shared
 One data-integrity flag for v0.6.0 (not blocking here):
 `turn-state-machine-algebraic-state-step-3` is stage:done but has no
 `implement:` commit — investigate when picking up v0.6.0.
+
+## Shipped items
+
+Bodies live on disk (retain-bodies retention). `git show <git ref>:<former active
+path>` recovers any body; under retain-bodies they also remain in
+`.work/releases/extension-0.6.0/`.
+
+| id | title | kind | git ref |
+|----|-------|------|---------|
+| epic-bold-split-pi-extension-index | pi-extension/src/index.ts is four modules pretending to be one file | epic | fc9541c |
+| epic-bold-generated-protocol-ts-codegen | Generated protocol — TypeScript codegen target | feature | 7ffe82c |
+| epic-bold-reachability-contract-pi-adapter | Reachability — pi-extension relay + mesh adapter | feature | a227eaa |
+| epic-bold-split-pi-extension-index-cli-daemon-pairing-module | Split pi-extension index — CLI / daemon / pairing module | feature | defbd09 |
+| epic-bold-split-pi-extension-index-composition-root | Split pi-extension index — composition root | feature | 1c03e76 |
+| epic-bold-split-pi-extension-index-owner-multiplexer-module | Split pi-extension index — owner multiplexer module | feature | 7394dd4 |
+| epic-bold-split-pi-extension-index-relay-transport-module | Split pi-extension index — relay transport module | feature | ebac18e |
+| epic-bold-split-pi-extension-index-sdk-session-projection-module | Split pi-extension index — SDK session projection module | feature | fc9541c |
+| epic-bold-turn-state-machine-algebraic-state | Turn — algebraic state set | feature | b4d8539 |
+| epic-bold-generated-protocol-cockpit-control-rpc-step-2 | Step 2: Parse schema control envelopes in pi-extension input path | story | 7a94ca1 |
+| epic-bold-reachability-contract-pi-adapter-step-1 | Step 1: Add pi-extension reachability contract projection module | story | 9ad3558 |
+| epic-bold-reachability-contract-pi-adapter-step-2 | Step 2: Consume shared backoff in extension relay reconnect | story | 11007b5 |
+| epic-bold-reachability-contract-pi-adapter-step-3 | Step 3: Consume shared backoff in MeshNode relay reconnect | story | 84402d8 |
+| epic-bold-reachability-contract-pi-adapter-step-4 | Step 4: Consume shared liveness timings in RelayClient | story | a227eaa |
+| epic-bold-reachability-contract-state-machine-step-2 | Step 2: Add the TypeScript Reachability projection module | story | 6f06bd0 |
+| epic-bold-transcript-event-log-hydration-replay-step-3 | Step 3: Make session_history replay-compatible | story | c0751a2 |
+| epic-bold-transcript-event-log-projection-derive-step-4 | Step 4: Make session history a projection from transcript events | story | 6df733d |
+| epic-bold-transcript-event-log-store-step-3 | Step 3: Replace _messageBuffer with TranscriptEventLog | story | 46af73f |
+| gate-cruft-unused-command-surface-legacy-deps | Remove unused command-surface legacy deps seam | story | 5f7d388 |
+| gate-refactor-protocol-pi-forward-crosspc-dtos | Pi forward client redeclares generated cross-PC frame DTOs | story | c390b55 |
+| gate-tests-session-start-model-thinking-actions | Add stale-context model/thinking tests for session_start replacements | story | c390b55 |
+| gate-patterns-extension-0.6.0 | Patterns extracted for extension-0.6.0 | story | c390b55 |
+
+## Release metadata
+
+- **Date shipped**: 2026-07-01
+- **Mapping**: tag-based (`extension-0.6.0`; push is external — operator runs from their machine)
+- **Total items shipped**: 22 (18 done work items + 4 gate findings resolved/tracked)
+- **Gate finding totals**: docs 2 (2m) · cruft 4 (1h-resolved, 3m) · security 13 (2h pre-existing→backlog, 11m) · refactor 8 (1h-resolved, 3h+4m pre-existing→backlog) · tests 6 (1 crit-resolved, 5m) · patterns 3 documented
+- **Pre-existing findings deferred to backlog**: 5 high (2 security, 3 refactor) + 24 medium/low — all non-bundle-introduced (provenance grounded to MVP-era commits / reachability-only diffs)
+- **External publishing**: `git push origin main extension-0.6.0` (tag points at the ship commit)

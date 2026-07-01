@@ -9,6 +9,50 @@ For the canonical protocol specification, see [PROTOCOL.md](PROTOCOL.md).
 
 ---
 
+## [extension-0.6.0] — 2026-07-01
+
+Pi extension minor over `extension-0.5.4`. Ships the pi-extension half of the
+bold-refactor arc: the monolithic `src/index.ts` is split into typed
+`src/extension/*` modules (command surface, composition root, owner multiplexer,
+relay transport, SDK session projection), generated TypeScript protocol codegen
+replaces handwritten wire unions, the reachability contract becomes a single
+value-projection source, and transcript-event-log / turn-state-machine
+projections land. Plus three gate-surfaced fixes (orphaned split seam removed,
+cross-PC frame DTOs now consume generated types, stale-context test coverage
+for `session_start` replacements).
+
+**Wire-compatible with relay-0.2.0.** The sender emits `to_room` on cross-PC
+`pi_envelope` frames (commit `13701ee`, carried from the relay-0.2.0 paired
+deploy); the remaining sender-side room-targeting work is deferred to design
+(see release notes — does not change the wire contract).
+
+### Changed
+- Split the monolithic `src/index.ts` into `src/extension/*` modules:
+  command surface (`command_surface/*`), composition root, owner multiplexer,
+  relay transport, SDK session projection, and legacy ports. Behavior-preserving.
+- Replaced handwritten TypeScript protocol unions, validators, and codec
+  registries with generated output (`src/protocol/generated/`); eliminates the
+  `SERVER_TYPES` registry drift class.
+- Consolidated relay/mesh reconnect backoff and liveness timing into a single
+  reachability-contract projection derived from `protocol/schema/reachability.json`.
+- Added transcript-event-log storage, projection-derive, and hydration-replay
+  projections; added the algebraic turn-state-machine projection.
+
+### Fixed
+- Removed an orphaned incremental-split seam (`command_surface/legacy_deps.ts`)
+  left behind after the `index.ts` split completed.
+- Cross-PC `pi_envelope` frame DTOs in `pi_forward_client.ts` now consume the
+generated `CrossPcFramePiEnvelope*` types instead of a hand-maintained mirror
+  (introduced when the `to_room` field was added).
+- Extended stale-context test coverage: `model_set`/`thinking_set` after
+  `session_start` replacement reasons (`new`/`resume`/`fork`/`reload`) now
+  assert the fresh action API is used and stale `_pi` setters are not called.
+
+### Internal
+- 6-gate release pass: docs (2m), cruft (1h-resolved, 3m), security (2h
+  pre-existing→backlog, 11m), refactor (1h-resolved, 3h+4m pre-existing→backlog),
+  tests (1 critical-resolved, 5m), patterns (3 documented).
+
 ## [relay-0.2.0] — 2026-07-01
 
 Relay minor over `relay-0.1.0` (first relay release). Ships the relay half of the
