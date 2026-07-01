@@ -5,7 +5,7 @@ stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor-frame-dispatch
 depends_on: [epic-bold-generated-protocol-rust-codegen]
-release_binding: null
+release_binding: relay-0.2.0
 gate_origin: null
 created: 2026-06-29
 updated: 2026-06-30

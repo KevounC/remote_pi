@@ -5,7 +5,7 @@ stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-relay-typed-actor
 depends_on: []
-release_binding: null
+release_binding: relay-0.2.0
 gate_origin: null
 created: 2026-06-29
 updated: 2026-06-30
