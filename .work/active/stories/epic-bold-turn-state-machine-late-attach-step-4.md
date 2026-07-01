@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-late-attach-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-turn-state-machine-late-attach
 depends_on: [epic-bold-turn-state-machine-late-attach-step-3]
@@ -127,3 +127,18 @@ Revert the added convergence tests and any minimal app projection correction. Do
   - `corepack pnpm exec vitest run src/session/turn_state.test.ts`: 17 passed.
   - `corepack pnpm exec vitest run src/extension.test.ts`: 165 passed, 4 failed with known environment false-alarm names: `after a clean reset, connect works again (flag is per-instance, not sticky)`, `join emits remote-pi:name-assigned with requested + assigned + changed`, `rename:<name> renames live (broker re-register + relay swap), process/session survive`, `a second same-name agent joins as <name>#2 instead of being refused`.
   - `flutter test test/transport/connection_manager_working_test.dart test/data/sync/sync_service_test.dart`: 70 passed.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: **pi-ext 718 passed (up from 715 — +3
+convergence tests)**; **app 614 passed (up from 612 — +2 hydration tests)**; pi-ext
+typecheck clean. Commit `54bf75f` scoped to pi-ext + app test files; collision guard held.
+
+Convergence coverage verified: pi-ext `turn_state.test.ts` reducer matrix asserts
+`working:false`/`activeTurnId:null`/`cancelTargetId:null`/target-collection across
+terminal success, late sync flush, queued drain, compaction, and shutdown.
+`extension.test.ts` covers late-attach history flush clearing targets + shutdown-before-
+late-flush no-history. App `connection_manager_working_test.dart` covers `working:true`
+attach hydration → terminal `working:false` + `session_history` not reviving room working.
+`sync_service_test.dart` proves `session_history` replay after terminal false doesn't
+reopen `isWorking`/`workingReplyTo`/streaming/room working/durable session activity.
