@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-ts-codegen-step-2
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-generated-protocol-ts-codegen
 depends_on: [epic-bold-generated-protocol-ts-codegen-step-1]
@@ -103,3 +103,24 @@ Implemented generated TypeScript unions and shared app/Pi value types in the gen
 - Pi-extension vitest: orchestrator command fell back to `pi-extension` and ran 674 tests: 605 passed / 66 failed / 3 skipped. Failures are the pre-existing sandbox UDS/cwd-lock environment class (`listen EPERM`, leader-election/cwd-lock failures), not generated-protocol failures.
 
 No production import was switched in this step.
+
+## Review
+
+Approved (2026-06-30) with GENERATED-CONTRACT verification. Independently verified
+all three generated-contract invariants:
+1. **Determinism double-run**: two temp dirs, `diff -r` EMPTY ✓
+2. **No hand-edits**: regen-diff vs committed `protocol.generated.ts` EMPTY ✓
+3. **pi-ext typecheck + suite**: clean; **671 passed | 3 skipped | 0 failed (44 files)** ✓
+
+The agent reported "605 passed / 66 failed" — a transient false-alarm spike (the agent
+noted "known sandbox"). Clean orchestrator re-run: 0 failures, 671 passed (count held
+— generated type refinement, no new tests). The 66-failure spike was the harness close
+timeout cascading, NOT a real regression.
+
+Commit `d8de4b9` scoped to tools/ + pi-ext only (generator `index.ts` + generated
+`protocol.generated.ts` ±310 + `index.test.ts`); collision guard held. Runtime imports
+unchanged (`types.ts` remains handwritten facade). Generated unions + shared value types
+(`WireImage`/`Usage`/`WireModel`/`ThinkingLevel`/`StreamingBehavior`/`ByeReason`/
+`PairErrorCode`/`KnownErrorCode`/open `ErrorCode`/`SessionHistoryEvent`) emitted via
+the generator; stable message interface names + unions match the compatibility variant
+set. Generator tests 4 passed.
