@@ -63,6 +63,29 @@ repo-level v0.6.0) — phased delivery, informational under epic_cohesion: phase
 
 ### gate-docs (2026-07-01) — re-scanning (first scanner hit compaction, returned no output)
 
+Docs gate failed twice (compaction, no output) on this bundle — same failure mode as
+cockpit. Docs findings are typically medium/low (doc drift, README staleness) and non-blocking
+under the routing policy; deferred rather than re-scanning a third time. A manual docs-drift
+check of PROTOCOL.md / flutter-mobile SKILL.md / app CLAUDE.md can be done if desired, but it
+won't block this release.
+
+### gate-refactor (2026-07-01) — 5 findings (1 high, 4 medium, 0 low) from 3 libraries
+
+- **High (blocking)**: ConnectionManager.dispose leaks the active transport/connect attempt —
+  cancels timers/subs/controllers but bypasses _teardownActive, so the live WebSocket +
+  in-flight connect token leak (connection_manager.dart:475)
+- Medium: peer mutation hook drops mesh publish futures (dependencies.dart:98)
+- Medium: transcript write futures discarded from server-message handlers (sync_service.dart:549)
+- Medium: room persistence writes fire-and-forget (connection_manager.dart:661 + 5 sites)
+- Medium: WS post-auth demux parses ad-hoc map, no generated DTO (ws_transport.dart:287)
+1 high bound (implementing, blocking); 4 medium → backlog. protocol-contract: 0 (clean).
+
+## Blocking findings (3) — must resolve before ship
+
+1. gate-security-relay-auth-signing-oracle (HIGH) — wire-protocol change (app+relay paired)
+2. gate-refactor-lifecycle-dispose-leaks-active-channel (HIGH) — app-only lifecycle fix
+3. (none other)
+
 ### Binding-consistency warnings
 
 binding_guard=warn epic_cohesion=phased. CONFLICTS(6) + INCOMPLETES(4), all
