@@ -36,6 +36,8 @@ export interface RemotePiIrVariant {
   interfaceName: string;
   schemaRef: string;
   fields: RemotePiIrField[];
+  validationFunctionName: string;
+  validationFunctionBody: string;
 }
 
 export interface RemotePiIrFamily {
@@ -51,12 +53,22 @@ export interface RemotePiIrSharedType {
   declaration: string;
 }
 
+export interface RemotePiIrNestedRegistry {
+  constName: string;
+  typeName: string;
+  unionName: string;
+  predicateName: string;
+  validatorsName: string;
+  variants: RemotePiIrVariant[];
+}
+
 export interface RemotePiIr {
   schemaVersion: number;
   source: string;
   profile: string;
   sharedTypes: RemotePiIrSharedType[];
   families: RemotePiIrFamily[];
+  nestedRegistries: RemotePiIrNestedRegistry[];
 }
 
 export interface EmitTypeScriptProtocolOptions {
@@ -302,6 +314,99 @@ function requiredNamesForSchema(schema: JsonObject, profile: string): Set<string
   return required;
 }
 
+function validatorFunctionNameForInterface(interfaceName: string): string {
+  return `is${interfaceName}`;
+}
+
+function propertyAccess(recordExpression: string, name: string): string {
+  return `${recordExpression}[${literal(name)}]`;
+}
+
+function allowedKeysExpression(properties: JsonObject, schema: JsonObject): string {
+  if (schema.additionalProperties !== false) return "undefined";
+  return `[${Object.keys(properties).map(literal).join(", ")}]`;
+}
+
+function combineExpressions(expressions: string[], operator: "&&" | "||", empty: string): string {
+  if (expressions.length === 0) return empty;
+  if (expressions.length === 1) return expressions[0] ?? empty;
+  return `(${expressions.join(` ${operator} `)})`;
+}
+
+async function validatorExpressionForSchema(
+  schemaInput: unknown,
+  valueExpression: string,
+  contextPath: string,
+  protocolRoot: string,
+  cache: DocumentCache,
+  profile: string,
+): Promise<string> {
+  const { schema, path } = await dereferenceSchema(schemaInput, contextPath, protocolRoot, cache);
+  if (schema === true) return "true";
+  if (schema === false) return "false";
+  const object = asObject(schema, "validator schema");
+
+  const values = constOrEnumValues(object);
+  if (values) {
+    return combineExpressions(
+      values.map((value) => `${valueExpression} === ${literal(value)}`),
+      "||",
+      "false",
+    );
+  }
+
+  if (Array.isArray(object.oneOf) || Array.isArray(object.anyOf)) {
+    const options = (Array.isArray(object.oneOf) ? object.oneOf : object.anyOf) as unknown[];
+    const expressions = await Promise.all(options.map((option) => validatorExpressionForSchema(option, valueExpression, path, protocolRoot, cache, profile)));
+    return combineExpressions(expressions, "||", "false");
+  }
+
+  if (Array.isArray(object.allOf)) {
+    const expressions = await Promise.all(object.allOf.map((option) => validatorExpressionForSchema(option, valueExpression, path, protocolRoot, cache, profile)));
+    return combineExpressions(expressions, "&&", "true");
+  }
+
+  if (Array.isArray(object.type)) {
+    const expressions = await Promise.all(object.type.map((type) => validatorExpressionForSchema({ ...object, type }, valueExpression, path, protocolRoot, cache, profile)));
+    return combineExpressions(expressions, "||", "false");
+  }
+
+  switch (object.type) {
+    case "string":
+      return typeof object.minLength === "number" ? `isStringWithMinLength(${valueExpression}, ${object.minLength})` : `typeof ${valueExpression} === "string"`;
+    case "integer":
+      return typeof object.minimum === "number" ? `isIntegerAtLeast(${valueExpression}, ${object.minimum})` : `isInteger(${valueExpression})`;
+    case "number":
+      return typeof object.minimum === "number" ? `isFiniteNumberAtLeast(${valueExpression}, ${object.minimum})` : `isFiniteNumber(${valueExpression})`;
+    case "boolean":
+      return `typeof ${valueExpression} === "boolean"`;
+    case "null":
+      return `${valueExpression} === null`;
+    case "array": {
+      const itemExpression = await validatorExpressionForSchema(object.items ?? true, "item", path, protocolRoot, cache, profile);
+      return `(Array.isArray(${valueExpression}) && ${valueExpression}.every((item) => ${itemExpression}))`;
+    }
+    case "object":
+    case undefined: {
+      const properties = optionalObject(object.properties) ?? {};
+      const required = requiredNamesForSchema(object, profile);
+      const expressions: string[] = [];
+      for (const [name, propertySchema] of Object.entries(properties)) {
+        const access = propertyAccess("record", name);
+        const expression = await validatorExpressionForSchema(propertySchema, access, path, protocolRoot, cache, profile);
+        expressions.push(required.has(name) ? `(Object.hasOwn(record, ${literal(name)}) && ${expression})` : `(${access} === undefined || ${expression})`);
+      }
+      return `isObjectLike(${valueExpression}, ${allowedKeysExpression(properties, object)}, (record) => ${combineExpressions(expressions, "&&", "true")})`;
+    }
+    default:
+      throw new ProtocolCodegenError(`Unsupported JSON Schema type ${JSON.stringify(object.type)} at ${path}`);
+  }
+}
+
+async function validatorFunctionBodyForSchema(schemaInput: unknown, contextPath: string, protocolRoot: string, cache: DocumentCache, profile: string): Promise<string> {
+  return `  return ${await validatorExpressionForSchema(schemaInput, "value", contextPath, protocolRoot, cache, profile)};`;
+}
+
 async function tsTypeForSchema(
   schemaInput: unknown,
   contextPath: string,
@@ -450,12 +555,15 @@ async function variantsForFamily(family: RemotePiManifestFamily, familySchemaPat
       // TS-codegen steps.
       if (seenTypes.has(discriminator.type)) continue;
       seenTypes.add(discriminator.type);
+      const interfaceName = interfaceNameForVariant(unionName, discriminator.type);
       variants.push({
         type: discriminator.type,
         discriminator: discriminator.discriminator,
-        interfaceName: interfaceNameForVariant(unionName, discriminator.type),
+        interfaceName,
         schemaRef: `${family.schema}#oneOf/${index}`,
         fields: await fieldsForVariant(schema, path, protocolRoot, cache, profile),
+        validationFunctionName: validatorFunctionNameForInterface(interfaceName),
+        validationFunctionBody: await validatorFunctionBodyForSchema(schema, path, protocolRoot, cache, profile),
       });
     }
   }
@@ -490,16 +598,21 @@ async function appPiCommonSharedTypes(protocolRoot: string, cache: DocumentCache
   return shared;
 }
 
-async function appPiServerSharedTypes(protocolRoot: string, cache: DocumentCache, profile: string): Promise<RemotePiIrSharedType[]> {
+async function appPiServerSharedTypes(
+  protocolRoot: string,
+  cache: DocumentCache,
+  profile: string,
+): Promise<{ sharedTypes: RemotePiIrSharedType[]; nestedRegistries: RemotePiIrNestedRegistry[] }> {
   const serverPath = join(protocolRoot, "schema", "app-pi-server.schema.json");
   let defs: JsonObject;
   try {
     defs = asObject((await readDocument(serverPath, cache)).$defs, "app-pi-server.$defs");
   } catch {
-    return [];
+    return { sharedTypes: [], nestedRegistries: [] };
   }
 
   const shared: RemotePiIrSharedType[] = [];
+  const nestedRegistries: RemotePiIrNestedRegistry[] = [];
   const bye = optionalObject(defs.bye);
   const byeProperties = optionalObject(bye?.properties);
   if (byeProperties?.reason) {
@@ -509,7 +622,8 @@ async function appPiServerSharedTypes(protocolRoot: string, cache: DocumentCache
   const sessionHistoryEvent = optionalObject(defs.sessionHistoryEvent);
   const oneOf = Array.isArray(sessionHistoryEvent?.oneOf) ? sessionHistoryEvent.oneOf : [];
   const historyVariants: string[] = [];
-  for (const option of oneOf) {
+  const historyEventVariants: RemotePiIrVariant[] = [];
+  for (const [index, option] of oneOf.entries()) {
     const optionObject = optionalObject(option);
     const ref = typeof optionObject?.$ref === "string" ? optionObject.$ref : undefined;
     if (!ref) continue;
@@ -519,10 +633,20 @@ async function appPiServerSharedTypes(protocolRoot: string, cache: DocumentCache
     const discriminator = discriminatorValues(schema)[0];
     if (!discriminator) continue;
     const name = `History${pascalCase(discriminator.type)}`;
+    const fields = await fieldsForVariant(schema, path, protocolRoot, cache, profile);
     historyVariants.push(name);
+    historyEventVariants.push({
+      type: discriminator.type,
+      discriminator: discriminator.discriminator,
+      interfaceName: name,
+      schemaRef: `app-pi-server.schema.json#/$defs/sessionHistoryEvent/oneOf/${index}`,
+      fields,
+      validationFunctionName: validatorFunctionNameForInterface(name),
+      validationFunctionBody: await validatorFunctionBodyForSchema(schema, path, protocolRoot, cache, profile),
+    });
     shared.push({
       name,
-      declaration: emitInterfaceDeclaration(name, await fieldsForVariant(schema, path, protocolRoot, cache, profile)),
+      declaration: emitInterfaceDeclaration(name, fields),
     });
   }
   if (historyVariants.length > 0) {
@@ -530,19 +654,35 @@ async function appPiServerSharedTypes(protocolRoot: string, cache: DocumentCache
       name: "SessionHistoryEvent",
       declaration: `export type SessionHistoryEvent =\n${historyVariants.map((name) => `  | ${name}`).join("\n")};`,
     });
+    nestedRegistries.push({
+      constName: "SESSION_HISTORY_EVENT_TYPES",
+      typeName: "SessionHistoryEventType",
+      unionName: "SessionHistoryEvent",
+      predicateName: "isSessionHistoryEvent",
+      validatorsName: "SESSION_HISTORY_EVENT_VALIDATORS",
+      variants: historyEventVariants,
+    });
   }
 
-  return shared;
+  return { sharedTypes: shared, nestedRegistries };
 }
 
-async function sharedTypesForProtocol(protocolRoot: string, cache: DocumentCache, profile: string): Promise<RemotePiIrSharedType[]> {
-  const shared = [...(await appPiCommonSharedTypes(protocolRoot, cache, profile)), ...(await appPiServerSharedTypes(protocolRoot, cache, profile))];
+async function sharedTypesForProtocol(
+  protocolRoot: string,
+  cache: DocumentCache,
+  profile: string,
+): Promise<{ sharedTypes: RemotePiIrSharedType[]; nestedRegistries: RemotePiIrNestedRegistry[] }> {
+  const server = await appPiServerSharedTypes(protocolRoot, cache, profile);
+  const shared = [...(await appPiCommonSharedTypes(protocolRoot, cache, profile)), ...server.sharedTypes];
   const seen = new Set<string>();
-  return shared.filter((entry) => {
-    if (seen.has(entry.name)) return false;
-    seen.add(entry.name);
-    return true;
-  });
+  return {
+    sharedTypes: shared.filter((entry) => {
+      if (seen.has(entry.name)) return false;
+      seen.add(entry.name);
+      return true;
+    }),
+    nestedRegistries: server.nestedRegistries,
+  };
 }
 
 export async function buildRemotePiIr(manifest: RemotePiManifest, options: BuildRemotePiIrOptions = {}): Promise<RemotePiIr> {
@@ -561,12 +701,14 @@ export async function buildRemotePiIr(manifest: RemotePiManifest, options: Build
       variants,
     });
   }
+  const shared = await sharedTypesForProtocol(protocolRoot, cache, profile);
   return {
     schemaVersion: manifest.schemaVersion ?? 1,
     source: manifest.source ?? "json-schema-2020-12",
     profile,
-    sharedTypes: await sharedTypesForProtocol(protocolRoot, cache, profile),
+    sharedTypes: shared.sharedTypes,
     families,
+    nestedRegistries: shared.nestedRegistries,
   };
 }
 
@@ -580,6 +722,102 @@ function familyTypeName(familyId: string): string {
 
 function emitInterface(variant: RemotePiIrVariant): string {
   return emitInterfaceDeclaration(variant.interfaceName, variant.fields);
+}
+
+interface PublicFamilyRegistry {
+  constName: string;
+  typeName: string;
+  validatorsName: string;
+  predicateName: string;
+}
+
+function publicRegistryForFamily(family: RemotePiIrFamily): PublicFamilyRegistry | undefined {
+  switch (family.unionName) {
+    case "ClientMessage":
+      return {
+        constName: "CLIENT_MESSAGE_TYPES",
+        typeName: "ClientMessageType",
+        validatorsName: "CLIENT_MESSAGE_VALIDATORS",
+        predicateName: "isClientMessage",
+      };
+    case "ServerMessage":
+      return {
+        constName: "SERVER_MESSAGE_TYPES",
+        typeName: "ServerMessageType",
+        validatorsName: "SERVER_MESSAGE_VALIDATORS",
+        predicateName: "isServerMessage",
+      };
+    default:
+      return undefined;
+  }
+}
+
+function emitRegistryConst(constName: string, variants: RemotePiIrVariant[]): string[] {
+  const lines = [`export const ${constName} = [`];
+  for (const variant of variants) lines.push(`  ${literal(variant.type)},`);
+  lines.push("] as const;");
+  return lines;
+}
+
+function emitValidatorHelpers(): string {
+  return `type ProtocolRecord = Record<string, unknown>;
+
+type ProtocolValidator<T> = (value: unknown) => value is T;
+
+function asRecord(value: unknown): ProtocolRecord | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as ProtocolRecord : undefined;
+}
+
+function hasOnlyKeys(record: ProtocolRecord, allowedKeys: readonly string[]): boolean {
+  return Object.keys(record).every((key) => allowedKeys.includes(key));
+}
+
+function isObjectLike(value: unknown, allowedKeys: readonly string[] | undefined, validate: (record: ProtocolRecord) => boolean): boolean {
+  const record = asRecord(value);
+  return record !== undefined && (allowedKeys === undefined || hasOnlyKeys(record, allowedKeys)) && validate(record);
+}
+
+function isStringWithMinLength(value: unknown, minLength: number): value is string {
+  return typeof value === "string" && value.length >= minLength;
+}
+
+function isInteger(value: unknown): value is number {
+  return Number.isInteger(value);
+}
+
+function isIntegerAtLeast(value: unknown, minimum: number): value is number {
+  return isInteger(value) && value >= minimum;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isFiniteNumberAtLeast(value: unknown, minimum: number): value is number {
+  return isFiniteNumber(value) && value >= minimum;
+}`;
+}
+
+function emitValidatorFunction(variant: RemotePiIrVariant): string {
+  return `function ${variant.validationFunctionName}(value: unknown): value is ${variant.interfaceName} {\n${variant.validationFunctionBody}\n}`;
+}
+
+function emitValidatorRegistry(
+  registry: { constName: string; typeName: string; unionName: string; predicateName: string; validatorsName: string; variants: RemotePiIrVariant[] },
+  discriminator: string,
+): string[] {
+  const sections: string[] = [];
+  sections.push(`const ${registry.validatorsName}: { readonly [K in ${registry.typeName}]: ProtocolValidator<Extract<${registry.unionName}, { readonly ${propertyName(discriminator)}: K }>> } = {`);
+  for (const variant of registry.variants) sections.push(`  ${literal(variant.type)}: ${variant.validationFunctionName},`);
+  sections.push("};");
+  sections.push("");
+  sections.push(`export function ${registry.predicateName}(value: unknown): value is ${registry.unionName} {`);
+  sections.push("  const record = asRecord(value);");
+  sections.push(`  if (!record || typeof record[${literal(discriminator)}] !== "string") return false;`);
+  sections.push(`  const validate = ${registry.validatorsName}[record[${literal(discriminator)}] as ${registry.typeName}];`);
+  sections.push("  return validate?.(record) ?? false;");
+  sections.push("}");
+  return sections;
 }
 
 export function renderTypeScriptProtocol(ir: RemotePiIr): string {
@@ -610,10 +848,16 @@ export function renderTypeScriptProtocol(ir: RemotePiIr): string {
   for (const family of ir.families) {
     const constName = familyConstName(family.id);
     const typeName = familyTypeName(family.id);
-    sections.push(`export const ${constName} = [`);
-    for (const variant of family.variants) sections.push(`  ${literal(variant.type)},`);
-    sections.push("] as const;");
-    sections.push(`export type ${typeName} = (typeof ${constName})[number];`);
+    const publicRegistry = publicRegistryForFamily(family);
+    if (publicRegistry) {
+      sections.push(...emitRegistryConst(publicRegistry.constName, family.variants));
+      sections.push(`export type ${publicRegistry.typeName} = (typeof ${publicRegistry.constName})[number];`);
+      sections.push(`export const ${constName} = ${publicRegistry.constName};`);
+      sections.push(`export type ${typeName} = ${publicRegistry.typeName};`);
+    } else {
+      sections.push(...emitRegistryConst(constName, family.variants));
+      sections.push(`export type ${typeName} = (typeof ${constName})[number];`);
+    }
     sections.push("");
     for (const variant of family.variants) {
       const declaration = emitInterface(variant);
@@ -632,6 +876,58 @@ export function renderTypeScriptProtocol(ir: RemotePiIr): string {
       sections.push(`${prefix} ${variant.interfaceName}`);
     }
     sections[sections.length - 1] += ";";
+    sections.push("");
+  }
+
+  for (const registry of ir.nestedRegistries) {
+    sections.push(...emitRegistryConst(registry.constName, registry.variants));
+    sections.push(`export type ${registry.typeName} = (typeof ${registry.constName})[number];`);
+    sections.push("");
+  }
+
+  sections.push(emitValidatorHelpers());
+  sections.push("");
+
+  const emittedValidators = new Map<string, string>();
+  for (const registry of ir.nestedRegistries) {
+    for (const variant of registry.variants) {
+      const declaration = emitValidatorFunction(variant);
+      const previous = emittedValidators.get(variant.validationFunctionName);
+      if (previous === undefined) {
+        emittedValidators.set(variant.validationFunctionName, declaration);
+        sections.push(declaration);
+        sections.push("");
+      } else if (previous !== declaration) {
+        throw new ProtocolCodegenError(`Generated TypeScript validator name collision for ${variant.validationFunctionName}`);
+      }
+    }
+  }
+
+  for (const family of ir.families) {
+    const publicRegistry = publicRegistryForFamily(family);
+    if (!publicRegistry) continue;
+    for (const variant of family.variants) {
+      const declaration = emitValidatorFunction(variant);
+      const previous = emittedValidators.get(variant.validationFunctionName);
+      if (previous === undefined) {
+        emittedValidators.set(variant.validationFunctionName, declaration);
+        sections.push(declaration);
+        sections.push("");
+      } else if (previous !== declaration) {
+        throw new ProtocolCodegenError(`Generated TypeScript validator name collision for ${variant.validationFunctionName}`);
+      }
+    }
+  }
+
+  for (const registry of ir.nestedRegistries) {
+    sections.push(...emitValidatorRegistry(registry, "type"));
+    sections.push("");
+  }
+
+  for (const family of ir.families) {
+    const publicRegistry = publicRegistryForFamily(family);
+    if (!publicRegistry) continue;
+    sections.push(...emitValidatorRegistry({ ...publicRegistry, unionName: family.unionName, variants: family.variants }, "type"));
     sections.push("");
   }
 

@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-ts-codegen-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-generated-protocol-ts-codegen
 depends_on: [epic-bold-generated-protocol-ts-codegen-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # TS codegen step 3 — generated registries and compatibility validators
@@ -85,10 +85,20 @@ export function isServerMessage(value: unknown): value is ServerMessage {
 
 ## Acceptance Criteria
 
-- [ ] Generated server registry includes `user_message`, `compaction`, `action_ok`, `action_error`, and `models_list`.
-- [ ] Generated validators accept representative current fixtures for all client/server variants.
-- [ ] Generated validators reject malformed objects with missing `type` or wrong required-field types.
-- [ ] No handwritten message-type allowlist remains in generated code.
+- [x] Generated server registry includes `user_message`, `compaction`, `action_ok`, `action_error`, and `models_list`.
+- [x] Generated validators accept representative current fixtures for all client/server variants.
+- [x] Generated validators reject malformed objects with missing `type` or wrong required-field types.
+- [x] No handwritten message-type allowlist remains in generated code.
+
+## Implementation
+
+- Extended `tools/protocol-codegen/src/index.ts` so the TS IR carries generated validator function bodies and the renderer emits schema-derived `CLIENT_MESSAGE_TYPES`, `SERVER_MESSAGE_TYPES`, `SESSION_HISTORY_EVENT_TYPES`, and self-contained compatibility predicates (`isClientMessage`, `isServerMessage`, `isSessionHistoryEvent`).
+- Validators keep compatibility-session fields optional, preserve open JSON pockets for tool `args`/`result`, accept open `ErrorCode` strings, and enforce required property presence plus schema type/minimum/minLength checks.
+- Regenerated `pi-extension/src/protocol/generated/protocol.generated.ts` via the code generator; no generated file was hand-edited.
+- Added generator tests for drifted server registry entries, all app/Pi client and server variant fixtures, malformed missing/wrong-field rejection, open error-code/tool-result behavior, nested history-event registry validation, and deterministic output.
+- Determinism double-run: two temp output dirs produced an empty `diff -r`.
+- Regen-diff: a fresh temp regen matched `pi-extension/src/protocol/generated` with empty `diff -r`; fresh generated output is included in this commit.
+- Verification: targeted generator node test passed (`5` tests); `corepack pnpm typecheck` passed. Full `corepack pnpm exec vitest run --reporter=dot` reached `606 passed`, `66 failed`, `3 skipped` (`675` total); failures are existing environment UDS/cwd-lock `EPERM`/leader-election sandbox failures unrelated to generated protocol output.
 
 ## Risk
 Medium — validators must harden malformed inputs without accidentally rejecting valid compatibility payloads.

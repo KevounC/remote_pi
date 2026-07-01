@@ -96,7 +96,7 @@ export const protocolManifest = {
   ],
 } as const;
 
-export const appPiClientTypes = [
+export const CLIENT_MESSAGE_TYPES = [
   "pair_request",
   "user_message",
   "queued_message_set",
@@ -111,7 +111,9 @@ export const appPiClientTypes = [
   "thinking_set",
   "list_models",
 ] as const;
-export type AppPiClientType = (typeof appPiClientTypes)[number];
+export type ClientMessageType = (typeof CLIENT_MESSAGE_TYPES)[number];
+export const appPiClientTypes = CLIENT_MESSAGE_TYPES;
+export type AppPiClientType = ClientMessageType;
 
 export interface PairRequest {
   readonly type: "pair_request";
@@ -217,7 +219,7 @@ export type ClientMessage =
   | ThinkingSet
   | ListModels;
 
-export const appPiServerTypes = [
+export const SERVER_MESSAGE_TYPES = [
   "pair_ok",
   "pair_error",
   "user_input",
@@ -238,7 +240,9 @@ export const appPiServerTypes = [
   "action_error",
   "models_list",
 ] as const;
-export type AppPiServerType = (typeof appPiServerTypes)[number];
+export type ServerMessageType = (typeof SERVER_MESSAGE_TYPES)[number];
+export const appPiServerTypes = SERVER_MESSAGE_TYPES;
+export type AppPiServerType = ServerMessageType;
 
 export interface PairOk {
   readonly type: "pair_ok";
@@ -670,3 +674,260 @@ export type CockpitControlFrame =
   | CockpitControlFrameRemotePiPairCode
   | CockpitControlFrameRemotePiPaired
   | CockpitControlFrameRemotePiMeshRevoked;
+
+export const SESSION_HISTORY_EVENT_TYPES = [
+  "user_input",
+  "tool_request",
+  "tool_result",
+  "agent_message",
+  "compaction",
+] as const;
+export type SessionHistoryEventType = (typeof SESSION_HISTORY_EVENT_TYPES)[number];
+
+type ProtocolRecord = Record<string, unknown>;
+
+type ProtocolValidator<T> = (value: unknown) => value is T;
+
+function asRecord(value: unknown): ProtocolRecord | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as ProtocolRecord : undefined;
+}
+
+function hasOnlyKeys(record: ProtocolRecord, allowedKeys: readonly string[]): boolean {
+  return Object.keys(record).every((key) => allowedKeys.includes(key));
+}
+
+function isObjectLike(value: unknown, allowedKeys: readonly string[] | undefined, validate: (record: ProtocolRecord) => boolean): boolean {
+  const record = asRecord(value);
+  return record !== undefined && (allowedKeys === undefined || hasOnlyKeys(record, allowedKeys)) && validate(record);
+}
+
+function isStringWithMinLength(value: unknown, minLength: number): value is string {
+  return typeof value === "string" && value.length >= minLength;
+}
+
+function isInteger(value: unknown): value is number {
+  return Number.isInteger(value);
+}
+
+function isIntegerAtLeast(value: unknown, minimum: number): value is number {
+  return isInteger(value) && value >= minimum;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isFiniteNumberAtLeast(value: unknown, minimum: number): value is number {
+  return isFiniteNumber(value) && value >= minimum;
+}
+
+function isHistoryUserInput(value: unknown): value is HistoryUserInput {
+  return isObjectLike(value, ["ts", "type", "id", "text", "images"], (record) => ((Object.hasOwn(record, "ts") && isIntegerAtLeast(record["ts"], 0)) && (Object.hasOwn(record, "type") && record["type"] === "user_input") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (Object.hasOwn(record, "text") && typeof record["text"] === "string") && (record["images"] === undefined || (Array.isArray(record["images"]) && record["images"].every((item) => isObjectLike(item, ["data", "mime"], (record) => ((Object.hasOwn(record, "data") && isStringWithMinLength(record["data"], 1)) && (Object.hasOwn(record, "mime") && isStringWithMinLength(record["mime"], 1)))))))));
+}
+
+function isHistoryToolRequest(value: unknown): value is HistoryToolRequest {
+  return isObjectLike(value, ["ts", "type", "tool_call_id", "tool", "args"], (record) => ((Object.hasOwn(record, "ts") && isIntegerAtLeast(record["ts"], 0)) && (Object.hasOwn(record, "type") && record["type"] === "tool_request") && (Object.hasOwn(record, "tool_call_id") && isStringWithMinLength(record["tool_call_id"], 1)) && (Object.hasOwn(record, "tool") && isStringWithMinLength(record["tool"], 1)) && (Object.hasOwn(record, "args") && true)));
+}
+
+function isHistoryToolResult(value: unknown): value is HistoryToolResult {
+  return isObjectLike(value, ["ts", "type", "tool_call_id", "result", "error"], (record) => ((Object.hasOwn(record, "ts") && isIntegerAtLeast(record["ts"], 0)) && (Object.hasOwn(record, "type") && record["type"] === "tool_result") && (Object.hasOwn(record, "tool_call_id") && isStringWithMinLength(record["tool_call_id"], 1)) && (record["result"] === undefined || true) && (record["error"] === undefined || typeof record["error"] === "string")));
+}
+
+function isHistoryAgentMessage(value: unknown): value is HistoryAgentMessage {
+  return isObjectLike(value, ["ts", "type", "in_reply_to", "text", "usage"], (record) => ((Object.hasOwn(record, "ts") && isIntegerAtLeast(record["ts"], 0)) && (Object.hasOwn(record, "type") && record["type"] === "agent_message") && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "text") && typeof record["text"] === "string") && (record["usage"] === undefined || isObjectLike(record["usage"], ["input_tokens", "output_tokens"], (record) => ((Object.hasOwn(record, "input_tokens") && isIntegerAtLeast(record["input_tokens"], 0)) && (Object.hasOwn(record, "output_tokens") && isIntegerAtLeast(record["output_tokens"], 0)))))));
+}
+
+function isHistoryCompaction(value: unknown): value is HistoryCompaction {
+  return isObjectLike(value, ["ts", "type", "summary", "tokens_before"], (record) => ((Object.hasOwn(record, "ts") && isIntegerAtLeast(record["ts"], 0)) && (Object.hasOwn(record, "type") && record["type"] === "compaction") && (Object.hasOwn(record, "summary") && typeof record["summary"] === "string") && (Object.hasOwn(record, "tokens_before") && isIntegerAtLeast(record["tokens_before"], 0))));
+}
+
+function isPairRequest(value: unknown): value is PairRequest {
+  return isObjectLike(value, ["type", "id", "token", "device_name"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "pair_request") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (Object.hasOwn(record, "token") && isStringWithMinLength(record["token"], 1)) && (Object.hasOwn(record, "device_name") && isStringWithMinLength(record["device_name"], 1))));
+}
+
+function isUserMessage(value: unknown): value is UserMessage {
+  return isObjectLike(value, ["type", "id", "session_id", "text", "images", "streaming_behavior"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "user_message") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "text") && typeof record["text"] === "string") && (record["images"] === undefined || (Array.isArray(record["images"]) && record["images"].every((item) => isObjectLike(item, ["data", "mime"], (record) => ((Object.hasOwn(record, "data") && isStringWithMinLength(record["data"], 1)) && (Object.hasOwn(record, "mime") && isStringWithMinLength(record["mime"], 1))))))) && (record["streaming_behavior"] === undefined || record["streaming_behavior"] === "steer")));
+}
+
+function isQueuedMessageSet(value: unknown): value is QueuedMessageSet {
+  return isObjectLike(value, ["type", "id", "session_id", "text"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "queued_message_set") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "text") && typeof record["text"] === "string")));
+}
+
+function isQueuedMessageClear(value: unknown): value is QueuedMessageClear {
+  return isObjectLike(value, ["type", "id", "session_id"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "queued_message_clear") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1))));
+}
+
+function isApproveTool(value: unknown): value is ApproveTool {
+  return isObjectLike(value, ["type", "id", "session_id", "tool_call_id", "decision"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "approve_tool") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "tool_call_id") && isStringWithMinLength(record["tool_call_id"], 1)) && (Object.hasOwn(record, "decision") && (record["decision"] === "allow" || record["decision"] === "deny"))));
+}
+
+function isCancel(value: unknown): value is Cancel {
+  return isObjectLike(value, ["type", "id", "session_id", "target_id"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "cancel") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "target_id") && isStringWithMinLength(record["target_id"], 1))));
+}
+
+function isPing(value: unknown): value is Ping {
+  return isObjectLike(value, ["type", "id"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "ping") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1))));
+}
+
+function isSessionSync(value: unknown): value is SessionSync {
+  return isObjectLike(value, ["type", "id", "session_id", "limit"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "session_sync") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (record["limit"] === undefined || isIntegerAtLeast(record["limit"], 1))));
+}
+
+function isSessionNew(value: unknown): value is SessionNew {
+  return isObjectLike(value, ["type", "id", "session_id"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "session_new") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1))));
+}
+
+function isSessionCompact(value: unknown): value is SessionCompact {
+  return isObjectLike(value, ["type", "id", "session_id"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "session_compact") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1))));
+}
+
+function isModelSet(value: unknown): value is ModelSet {
+  return isObjectLike(value, ["type", "id", "session_id", "provider", "model_id"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "model_set") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "provider") && isStringWithMinLength(record["provider"], 1)) && (Object.hasOwn(record, "model_id") && isStringWithMinLength(record["model_id"], 1))));
+}
+
+function isThinkingSet(value: unknown): value is ThinkingSet {
+  return isObjectLike(value, ["type", "id", "session_id", "level"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "thinking_set") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "level") && (record["level"] === "off" || record["level"] === "minimal" || record["level"] === "low" || record["level"] === "medium" || record["level"] === "high" || record["level"] === "xhigh"))));
+}
+
+function isListModels(value: unknown): value is ListModels {
+  return isObjectLike(value, ["type", "id", "session_id"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "list_models") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1))));
+}
+
+function isPairOk(value: unknown): value is PairOk {
+  return isObjectLike(value, ["type", "in_reply_to", "session_name", "session_started_at", "session_id", "room_id", "harness", "hostname"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "pair_ok") && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "session_name") && isStringWithMinLength(record["session_name"], 1)) && (Object.hasOwn(record, "session_started_at") && isIntegerAtLeast(record["session_started_at"], 0)) && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "room_id") && isStringWithMinLength(record["room_id"], 1)) && (record["harness"] === undefined || isObjectLike(record["harness"], ["name", "version"], (record) => ((Object.hasOwn(record, "name") && isStringWithMinLength(record["name"], 1)) && (Object.hasOwn(record, "version") && isStringWithMinLength(record["version"], 1))))) && (record["hostname"] === undefined || isStringWithMinLength(record["hostname"], 1))));
+}
+
+function isPairError(value: unknown): value is PairError {
+  return isObjectLike(value, ["type", "in_reply_to", "code", "message"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "pair_error") && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "code") && (record["code"] === "token_expired" || record["code"] === "token_consumed" || record["code"] === "token_unknown" || record["code"] === "internal_error")) && (Object.hasOwn(record, "message") && typeof record["message"] === "string")));
+}
+
+function isUserInput(value: unknown): value is UserInput {
+  return isObjectLike(value, ["type", "id", "session_id", "text", "images", "streaming_behavior"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "user_input") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "text") && typeof record["text"] === "string") && (record["images"] === undefined || (Array.isArray(record["images"]) && record["images"].every((item) => isObjectLike(item, ["data", "mime"], (record) => ((Object.hasOwn(record, "data") && isStringWithMinLength(record["data"], 1)) && (Object.hasOwn(record, "mime") && isStringWithMinLength(record["mime"], 1))))))) && (record["streaming_behavior"] === undefined || record["streaming_behavior"] === "steer")));
+}
+
+function isQueuedMessageState(value: unknown): value is QueuedMessageState {
+  return isObjectLike(value, ["type", "session_id", "id", "text"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "queued_message_state") && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (record["id"] === undefined || isStringWithMinLength(record["id"], 1)) && (record["text"] === undefined || typeof record["text"] === "string")));
+}
+
+function isAgentChunk(value: unknown): value is AgentChunk {
+  return isObjectLike(value, ["type", "session_id", "in_reply_to", "delta"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "agent_chunk") && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "delta") && typeof record["delta"] === "string")));
+}
+
+function isAgentDone(value: unknown): value is AgentDone {
+  return isObjectLike(value, ["type", "session_id", "in_reply_to", "usage"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "agent_done") && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (record["usage"] === undefined || isObjectLike(record["usage"], ["input_tokens", "output_tokens"], (record) => ((Object.hasOwn(record, "input_tokens") && isIntegerAtLeast(record["input_tokens"], 0)) && (Object.hasOwn(record, "output_tokens") && isIntegerAtLeast(record["output_tokens"], 0)))))));
+}
+
+function isAgentMessage(value: unknown): value is AgentMessage {
+  return isObjectLike(value, ["type", "session_id", "in_reply_to", "text", "usage"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "agent_message") && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "text") && typeof record["text"] === "string") && (record["usage"] === undefined || isObjectLike(record["usage"], ["input_tokens", "output_tokens"], (record) => ((Object.hasOwn(record, "input_tokens") && isIntegerAtLeast(record["input_tokens"], 0)) && (Object.hasOwn(record, "output_tokens") && isIntegerAtLeast(record["output_tokens"], 0)))))));
+}
+
+function isCompaction(value: unknown): value is Compaction {
+  return isObjectLike(value, ["type", "session_id", "summary", "tokens_before", "ts"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "compaction") && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "summary") && typeof record["summary"] === "string") && (Object.hasOwn(record, "tokens_before") && isIntegerAtLeast(record["tokens_before"], 0)) && (record["ts"] === undefined || isIntegerAtLeast(record["ts"], 0))));
+}
+
+function isToolRequest(value: unknown): value is ToolRequest {
+  return isObjectLike(value, ["type", "session_id", "tool_call_id", "tool", "args"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "tool_request") && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "tool_call_id") && isStringWithMinLength(record["tool_call_id"], 1)) && (Object.hasOwn(record, "tool") && isStringWithMinLength(record["tool"], 1)) && (Object.hasOwn(record, "args") && true)));
+}
+
+function isToolResult(value: unknown): value is ToolResult {
+  return isObjectLike(value, ["type", "session_id", "tool_call_id", "result", "error"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "tool_result") && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "tool_call_id") && isStringWithMinLength(record["tool_call_id"], 1)) && (record["result"] === undefined || true) && (record["error"] === undefined || typeof record["error"] === "string")));
+}
+
+function isErrorMessage(value: unknown): value is ErrorMessage {
+  return isObjectLike(value, ["type", "session_id", "in_reply_to", "code", "message"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "error") && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (record["in_reply_to"] === undefined || isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "code") && isStringWithMinLength(record["code"], 1)) && (Object.hasOwn(record, "message") && typeof record["message"] === "string")));
+}
+
+function isCancelled(value: unknown): value is Cancelled {
+  return isObjectLike(value, ["type", "session_id", "in_reply_to", "target_id"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "cancelled") && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "target_id") && isStringWithMinLength(record["target_id"], 1))));
+}
+
+function isPong(value: unknown): value is Pong {
+  return isObjectLike(value, ["type", "in_reply_to"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "pong") && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1))));
+}
+
+function isBye(value: unknown): value is Bye {
+  return isObjectLike(value, ["type", "reason"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "bye") && (Object.hasOwn(record, "reason") && (record["reason"] === "peer_stop" || record["reason"] === "session_replaced" || record["reason"] === "shutdown"))));
+}
+
+function isSessionHistory(value: unknown): value is SessionHistory {
+  return isObjectLike(value, ["type", "session_id", "in_reply_to", "session_started_at", "events", "eos", "truncated"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "session_history") && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "session_started_at") && isIntegerAtLeast(record["session_started_at"], 0)) && (Object.hasOwn(record, "events") && (Array.isArray(record["events"]) && record["events"].every((item) => (isObjectLike(item, ["ts", "type", "id", "text", "images"], (record) => ((Object.hasOwn(record, "ts") && isIntegerAtLeast(record["ts"], 0)) && (Object.hasOwn(record, "type") && record["type"] === "user_input") && (Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (Object.hasOwn(record, "text") && typeof record["text"] === "string") && (record["images"] === undefined || (Array.isArray(record["images"]) && record["images"].every((item) => isObjectLike(item, ["data", "mime"], (record) => ((Object.hasOwn(record, "data") && isStringWithMinLength(record["data"], 1)) && (Object.hasOwn(record, "mime") && isStringWithMinLength(record["mime"], 1))))))))) || isObjectLike(item, ["ts", "type", "tool_call_id", "tool", "args"], (record) => ((Object.hasOwn(record, "ts") && isIntegerAtLeast(record["ts"], 0)) && (Object.hasOwn(record, "type") && record["type"] === "tool_request") && (Object.hasOwn(record, "tool_call_id") && isStringWithMinLength(record["tool_call_id"], 1)) && (Object.hasOwn(record, "tool") && isStringWithMinLength(record["tool"], 1)) && (Object.hasOwn(record, "args") && true))) || isObjectLike(item, ["ts", "type", "tool_call_id", "result", "error"], (record) => ((Object.hasOwn(record, "ts") && isIntegerAtLeast(record["ts"], 0)) && (Object.hasOwn(record, "type") && record["type"] === "tool_result") && (Object.hasOwn(record, "tool_call_id") && isStringWithMinLength(record["tool_call_id"], 1)) && (record["result"] === undefined || true) && (record["error"] === undefined || typeof record["error"] === "string"))) || isObjectLike(item, ["ts", "type", "in_reply_to", "text", "usage"], (record) => ((Object.hasOwn(record, "ts") && isIntegerAtLeast(record["ts"], 0)) && (Object.hasOwn(record, "type") && record["type"] === "agent_message") && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "text") && typeof record["text"] === "string") && (record["usage"] === undefined || isObjectLike(record["usage"], ["input_tokens", "output_tokens"], (record) => ((Object.hasOwn(record, "input_tokens") && isIntegerAtLeast(record["input_tokens"], 0)) && (Object.hasOwn(record, "output_tokens") && isIntegerAtLeast(record["output_tokens"], 0))))))) || isObjectLike(item, ["ts", "type", "summary", "tokens_before"], (record) => ((Object.hasOwn(record, "ts") && isIntegerAtLeast(record["ts"], 0)) && (Object.hasOwn(record, "type") && record["type"] === "compaction") && (Object.hasOwn(record, "summary") && typeof record["summary"] === "string") && (Object.hasOwn(record, "tokens_before") && isIntegerAtLeast(record["tokens_before"], 0)))))))) && (Object.hasOwn(record, "eos") && typeof record["eos"] === "boolean") && (Object.hasOwn(record, "truncated") && typeof record["truncated"] === "boolean")));
+}
+
+function isActionOk(value: unknown): value is ActionOk {
+  return isObjectLike(value, ["type", "in_reply_to", "action"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "action_ok") && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "action") && (record["action"] === "session_new" || record["action"] === "session_compact" || record["action"] === "model_set" || record["action"] === "thinking_set"))));
+}
+
+function isActionError(value: unknown): value is ActionError {
+  return isObjectLike(value, ["type", "in_reply_to", "action", "error"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "action_error") && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "action") && (record["action"] === "session_new" || record["action"] === "session_compact" || record["action"] === "model_set" || record["action"] === "thinking_set")) && (Object.hasOwn(record, "error") && typeof record["error"] === "string")));
+}
+
+function isModelsList(value: unknown): value is ModelsList {
+  return isObjectLike(value, ["type", "in_reply_to", "models", "current"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "models_list") && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "models") && (Array.isArray(record["models"]) && record["models"].every((item) => isObjectLike(item, ["id", "name", "provider", "reasoning", "context_window", "vision"], (record) => ((Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (Object.hasOwn(record, "name") && isStringWithMinLength(record["name"], 1)) && (Object.hasOwn(record, "provider") && isStringWithMinLength(record["provider"], 1)) && (Object.hasOwn(record, "reasoning") && typeof record["reasoning"] === "boolean") && (Object.hasOwn(record, "context_window") && isIntegerAtLeast(record["context_window"], 0)) && (record["vision"] === undefined || typeof record["vision"] === "boolean")))))) && (record["current"] === undefined || isObjectLike(record["current"], ["id", "name", "provider", "reasoning", "context_window", "vision"], (record) => ((Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (Object.hasOwn(record, "name") && isStringWithMinLength(record["name"], 1)) && (Object.hasOwn(record, "provider") && isStringWithMinLength(record["provider"], 1)) && (Object.hasOwn(record, "reasoning") && typeof record["reasoning"] === "boolean") && (Object.hasOwn(record, "context_window") && isIntegerAtLeast(record["context_window"], 0)) && (record["vision"] === undefined || typeof record["vision"] === "boolean"))))));
+}
+
+const SESSION_HISTORY_EVENT_VALIDATORS: { readonly [K in SessionHistoryEventType]: ProtocolValidator<Extract<SessionHistoryEvent, { readonly type: K }>> } = {
+  "user_input": isHistoryUserInput,
+  "tool_request": isHistoryToolRequest,
+  "tool_result": isHistoryToolResult,
+  "agent_message": isHistoryAgentMessage,
+  "compaction": isHistoryCompaction,
+};
+
+export function isSessionHistoryEvent(value: unknown): value is SessionHistoryEvent {
+  const record = asRecord(value);
+  if (!record || typeof record["type"] !== "string") return false;
+  const validate = SESSION_HISTORY_EVENT_VALIDATORS[record["type"] as SessionHistoryEventType];
+  return validate?.(record) ?? false;
+}
+
+const CLIENT_MESSAGE_VALIDATORS: { readonly [K in ClientMessageType]: ProtocolValidator<Extract<ClientMessage, { readonly type: K }>> } = {
+  "pair_request": isPairRequest,
+  "user_message": isUserMessage,
+  "queued_message_set": isQueuedMessageSet,
+  "queued_message_clear": isQueuedMessageClear,
+  "approve_tool": isApproveTool,
+  "cancel": isCancel,
+  "ping": isPing,
+  "session_sync": isSessionSync,
+  "session_new": isSessionNew,
+  "session_compact": isSessionCompact,
+  "model_set": isModelSet,
+  "thinking_set": isThinkingSet,
+  "list_models": isListModels,
+};
+
+export function isClientMessage(value: unknown): value is ClientMessage {
+  const record = asRecord(value);
+  if (!record || typeof record["type"] !== "string") return false;
+  const validate = CLIENT_MESSAGE_VALIDATORS[record["type"] as ClientMessageType];
+  return validate?.(record) ?? false;
+}
+
+const SERVER_MESSAGE_VALIDATORS: { readonly [K in ServerMessageType]: ProtocolValidator<Extract<ServerMessage, { readonly type: K }>> } = {
+  "pair_ok": isPairOk,
+  "pair_error": isPairError,
+  "user_input": isUserInput,
+  "user_message": isUserMessage,
+  "queued_message_state": isQueuedMessageState,
+  "agent_chunk": isAgentChunk,
+  "agent_done": isAgentDone,
+  "agent_message": isAgentMessage,
+  "compaction": isCompaction,
+  "tool_request": isToolRequest,
+  "tool_result": isToolResult,
+  "error": isErrorMessage,
+  "cancelled": isCancelled,
+  "pong": isPong,
+  "bye": isBye,
+  "session_history": isSessionHistory,
+  "action_ok": isActionOk,
+  "action_error": isActionError,
+  "models_list": isModelsList,
+};
+
+export function isServerMessage(value: unknown): value is ServerMessage {
+  const record = asRecord(value);
+  if (!record || typeof record["type"] !== "string") return false;
+  const validate = SERVER_MESSAGE_VALIDATORS[record["type"] as ServerMessageType];
+  return validate?.(record) ?? false;
+}
