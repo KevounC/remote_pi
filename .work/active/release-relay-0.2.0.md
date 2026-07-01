@@ -58,6 +58,12 @@ plus reachability-contract-state-machine-step-4 (parent is multi-component → r
 
 (populated by refactor/tests/patterns as they complete)
 
+### gate-patterns (2026-07-01) — 5 pattern candidates discovered
+
+5 reusable shapes (3+ occurrences each): typed-frame-dispatch-chain, control-frame-guard-and-execute-handlers, subscriber-fanout-with-empty-short-circuit, shared-reverse-index-subscription-graph, generated-protocol-boundary-adapter. Pattern-skill authoring deferred (separate artifact under .agents/skills/patterns/). Recorded for traceability.
+
+(populated by refactor/tests as they complete)
+
 ### Binding-consistency warnings
 
 binding_guard=warn epic_cohesion=phased. CONFLICTS(3) + INCOMPLETES(5), all
