@@ -25,6 +25,12 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../pairing/pair_request_flow.dart';
 
+/// Domain-separation prefix for relay-auth signatures. Appended before the
+/// relay-provided nonce before signing, so the owner key cannot be abused as a
+/// cross-protocol signing oracle. MUST stay byte-for-byte identical to the
+/// relay's `RELAY_AUTH_DOMAIN_PREFIX` (relay/src/auth/challenge.rs).
+final List<int> relayAuthDomainPrefix = utf8.encode('remote-pi-relay-auth-v1\n');
+
 class WsTransportError implements Exception {
   final String message;
   const WsTransportError(this.message);
@@ -180,8 +186,15 @@ class WsTransport implements PeerTransport, IControlLink {
       }
       final nonce = _b64Decode(ch['nonce'] as String);
 
-      // 3. Auth
-      final sig = await Ed25519().sign(nonce, keyPair: ed25519Key);
+      // 3. Auth — domain-separated signature over the relay nonce.
+      // Signing the bare nonce with the long-term owner key would create a
+      // cross-protocol signing oracle (a malicious relay could harvest
+      // signatures on attacker-chosen bytes). The fixed prefix binds the
+      // signature to the relay-auth context so it is useless as a forgery of
+      // any other protocol's signature. MUST stay in lockstep with the relay's
+      // `verify_auth` (relay/src/auth/challenge.rs).
+      final signed = Uint8List.fromList([...relayAuthDomainPrefix, ...nonce]);
+      final sig = await Ed25519().sign(signed, keyPair: ed25519Key);
       ws.sink.add(
         jsonEncode({'type': 'auth', 'sig': base64.encode(sig.bytes)}),
       );

@@ -343,7 +343,12 @@ async fn room_announced_includes_model_from_hello() {
         .unwrap()
         .try_into()
         .unwrap();
-    let sig = sk_pi.sign(&nonce_arr);
+    // Domain-separated signature (prefix ++ nonce) — matches verify_auth.
+    let prefix = relay::auth::challenge::RELAY_AUTH_DOMAIN_PREFIX;
+    let mut signed = Vec::with_capacity(prefix.len() + nonce_arr.len());
+    signed.extend_from_slice(prefix);
+    signed.extend_from_slice(&nonce_arr);
+    let sig = sk_pi.sign(&signed);
     ws_pi
         .send(Message::text(
             json!({"type": "auth", "sig": B64.encode(sig.to_bytes())}).to_string(),
@@ -689,7 +694,12 @@ async fn room_announced_and_rooms_check_include_thinking_from_hello() {
         .unwrap()
         .try_into()
         .unwrap();
-    let sig = sk_pi.sign(&nonce_arr);
+    // Domain-separated signature (prefix ++ nonce) — matches verify_auth.
+    let prefix = relay::auth::challenge::RELAY_AUTH_DOMAIN_PREFIX;
+    let mut signed = Vec::with_capacity(prefix.len() + nonce_arr.len());
+    signed.extend_from_slice(prefix);
+    signed.extend_from_slice(&nonce_arr);
+    let sig = sk_pi.sign(&signed);
     ws_pi
         .send(Message::text(
             json!({"type": "auth", "sig": B64.encode(sig.to_bytes())}).to_string(),
@@ -918,7 +928,12 @@ async fn room_announced_and_rooms_check_include_working_from_hello() {
         .unwrap()
         .try_into()
         .unwrap();
-    let sig = sk_pi.sign(&nonce_arr);
+    // Domain-separated signature (prefix ++ nonce) — matches verify_auth.
+    let prefix = relay::auth::challenge::RELAY_AUTH_DOMAIN_PREFIX;
+    let mut signed = Vec::with_capacity(prefix.len() + nonce_arr.len());
+    signed.extend_from_slice(prefix);
+    signed.extend_from_slice(&nonce_arr);
+    let sig = sk_pi.sign(&signed);
     ws_pi
         .send(Message::text(
             json!({"type": "auth", "sig": B64.encode(sig.to_bytes())}).to_string(),

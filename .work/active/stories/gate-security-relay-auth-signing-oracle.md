@@ -1,7 +1,7 @@
 ---
 id: gate-security-relay-auth-signing-oracle
 kind: story
-stage: implementing
+stage: done
 tags: [security]
 parent: null
 depends_on: []

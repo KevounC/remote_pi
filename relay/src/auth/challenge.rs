@@ -89,6 +89,15 @@ pub fn challenge_line(nonce_b64: &str) -> String {
 
 /// Parses an "auth" line and verifies the Ed25519 signature against `nonce`.
 /// Relay never decodes `ct` — this only verifies the auth-handshake signature.
+///
+/// The signature is verified over `[RELAY_AUTH_DOMAIN_PREFIX] ++ nonce`, NOT the
+/// bare nonce, so the peer's long-term key cannot be abused as a cross-protocol
+/// signing oracle (a malicious relay cannot harvest signatures on
+/// attacker-chosen bytes that some other protocol would accept). MUST stay
+/// byte-for-byte identical to the app's `relayAuthDomainPrefix`
+/// (app/lib/data/transport/ws_transport.dart).
+pub const RELAY_AUTH_DOMAIN_PREFIX: &[u8] = b"remote-pi-relay-auth-v1\n";
+
 pub fn verify_auth(nonce: &[u8; 32], vk: &VerifyingKey, line: &str) -> Result<(), AuthError> {
     let msg: ClientAuthMsg = serde_json::from_str(line)?;
     let sig_b64 = match msg {
@@ -98,6 +107,9 @@ pub fn verify_auth(nonce: &[u8; 32], vk: &VerifyingKey, line: &str) -> Result<()
     let sig_bytes = B64.decode(&sig_b64)?;
     let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| AuthError::InvalidSig)?;
     let sig = Signature::from_bytes(&sig_arr);
+    let mut signed = Vec::with_capacity(RELAY_AUTH_DOMAIN_PREFIX.len() + nonce.len());
+    signed.extend_from_slice(RELAY_AUTH_DOMAIN_PREFIX);
+    signed.extend_from_slice(nonce);
     use ed25519_dalek::Verifier as _;
-    vk.verify(nonce, &sig).map_err(|_| AuthError::InvalidSig)
+    vk.verify(&signed, &sig).map_err(|_| AuthError::InvalidSig)
 }

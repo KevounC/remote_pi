@@ -482,10 +482,20 @@ class ConnectionManager extends Service {
     _presenceEmitTimer = null;
     _roomsEmitTimer?.cancel();
     _roomsEmitTimer = null;
+    // Dispose must tear down the active connection too — without this the live
+    // WebSocket channel and any in-flight connect attempt leak past disposal.
+    // `_teardownActive` is async (awaits channel.close); dispose is sync, so we
+    // mirror its cancellation paths and fire-and-forget the channel close.
+    _connectCancel?.cancel();
     _channelSub?.cancel();
     _channelSub = null;
     _controlSub?.cancel();
     _controlSub = null;
+    final active = _status;
+    if (active is StatusOnline) {
+      // Close cannot block in a sync dispose; fire-and-forget with error swallow.
+      unawaited(active.channel.close().catchError((Object _) {}));
+    }
     _reachability.onStopRequested();
     _statusController.close();
     _presenceController.close();

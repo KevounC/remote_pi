@@ -1,7 +1,7 @@
 ---
 id: gate-refactor-lifecycle-dispose-leaks-active-channel
 kind: story
-stage: implementing
+stage: done
 tags: []
 parent: null
 depends_on: []

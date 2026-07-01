@@ -78,7 +78,12 @@ pub async fn connect_and_auth_with_room(
     let nonce_b64 = challenge_json["nonce"].as_str().unwrap();
     let nonce_arr: [u8; 32] = B64.decode(nonce_b64).unwrap().try_into().unwrap();
 
-    let sig = sk.sign(&nonce_arr);
+    // Domain-separated signature (prefix ++ nonce) — matches verify_auth.
+    let prefix = relay::auth::challenge::RELAY_AUTH_DOMAIN_PREFIX;
+    let mut signed = Vec::with_capacity(prefix.len() + nonce_arr.len());
+    signed.extend_from_slice(prefix);
+    signed.extend_from_slice(&nonce_arr);
+    let sig = sk.sign(&signed);
     ws.send(Message::text(
         json!({"type": "auth", "sig": B64.encode(sig.to_bytes())}).to_string(),
     ))

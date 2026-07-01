@@ -1,7 +1,7 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use ed25519_dalek::{Signer as _, SigningKey};
 
-use super::challenge::{AuthError, gen_nonce, parse_hello, parse_hello_bootstrap, verify_auth};
+use super::challenge::{AuthError, RELAY_AUTH_DOMAIN_PREFIX, gen_nonce, parse_hello, parse_hello_bootstrap, verify_auth};
 
 /// First message is not "hello" → NoHello error.
 #[test]
@@ -52,7 +52,7 @@ fn sig_invalida() {
     let sk = SigningKey::generate(&mut rand::thread_rng());
     let vk = sk.verifying_key();
 
-    // Sign something other than the nonce
+    // Sign something other than the domain-separated nonce
     let wrong_sig = sk.sign(b"not the nonce");
     let sig_b64 = B64.encode(wrong_sig.to_bytes());
     let line = format!(r#"{{"type":"auth","sig":"{}"}}"#, sig_b64);
@@ -68,7 +68,11 @@ fn sig_valida() {
     let sk = SigningKey::generate(&mut rand::thread_rng());
     let vk = sk.verifying_key();
 
-    let sig = sk.sign(&nonce);
+    // Sign the domain-separated nonce (prefix ++ nonce) — matches verify_auth.
+    let mut signed = Vec::with_capacity(RELAY_AUTH_DOMAIN_PREFIX.len() + nonce.len());
+    signed.extend_from_slice(RELAY_AUTH_DOMAIN_PREFIX);
+    signed.extend_from_slice(&nonce);
+    let sig = sk.sign(&signed);
     let sig_b64 = B64.encode(sig.to_bytes());
     let line = format!(r#"{{"type":"auth","sig":"{}"}}"#, sig_b64);
 
