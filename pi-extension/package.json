@@ -11,10 +11,12 @@
   },
   "scripts": {
     "build": "tsc",
+    "generate:protocol": "node --import tsx ../tools/protocol-codegen/src/index.ts --target ts --out src/protocol/generated/protocol.generated.ts",
+    "check:protocol": "corepack pnpm generate:protocol --check",
     "typecheck": "tsc --noEmit",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
-    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
+    "prepublishOnly": "pnpm check:protocol && pnpm typecheck && pnpm test && pnpm build"
   },
   "keywords": [
     "pi",

@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import { DecodeError, decodeClient, decodeServer, encodeClient } from "./codec.js";
@@ -6,10 +7,13 @@ import {
   CLIENT_MESSAGE_TYPES,
   SERVER_MESSAGE_TYPES,
 } from "./generated/protocol.generated.js";
+import {
+  buildRemotePiIr,
+  loadRemotePiManifest,
+} from "../../../tools/protocol-codegen/src/index.ts";
 
-const fixtureDir = fileURLToPath(
-  new URL("../../../.orchestration/contracts/fixtures", import.meta.url),
-);
+const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+const fixtureDir = join(repoRoot, ".orchestration", "contracts", "fixtures");
 
 const SERVER_TYPES = new Set<string>(SERVER_MESSAGE_TYPES);
 const CLIENT_TYPES = new Set<string>(CLIENT_MESSAGE_TYPES);
@@ -36,6 +40,30 @@ function captureDecodeError(fn: () => unknown): DecodeError {
   expect(caught).toBeInstanceOf(DecodeError);
   return caught as DecodeError;
 }
+
+async function schemaTypeSet(familyId: "appPiClient" | "appPiServer"): Promise<Set<string>> {
+  const manifest = await loadRemotePiManifest(join(repoRoot, "protocol", "schema", "manifest.json"));
+  const ir = await buildRemotePiIr(manifest, { profile: "compat", protocolRoot: manifest.protocolRoot });
+  const family = ir.families.find((candidate) => candidate.id === familyId);
+  if (!family) throw new Error(`Missing protocol schema family: ${familyId}`);
+  return new Set(family.variants.map((variant) => variant.type));
+}
+
+describe("generated registry schema parity", () => {
+  test("server registry is generated from the app/Pi server schema family", async () => {
+    const schemaServerTypeSet = await schemaTypeSet("appPiServer");
+
+    expect(SERVER_MESSAGE_TYPES).toContain("models_list");
+    expect(new Set(SERVER_MESSAGE_TYPES)).toEqual(schemaServerTypeSet);
+  });
+
+  test("client registry is generated from the app/Pi client schema family", async () => {
+    const schemaClientTypeSet = await schemaTypeSet("appPiClient");
+
+    expect(CLIENT_MESSAGE_TYPES).toContain("list_models");
+    expect(new Set(CLIENT_MESSAGE_TYPES)).toEqual(schemaClientTypeSet);
+  });
+});
 
 describe("fixtures", () => {
   const files = readdirSync(fixtureDir).filter((f) => f.endsWith(".jsonl"));

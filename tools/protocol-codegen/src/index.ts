@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 export interface RemotePiManifestFamily {
   id: string;
@@ -960,6 +961,7 @@ function defaultManifestCandidates(schemaPath?: string): string[] {
   const candidates = [
     join(cwd, "schema", "manifest.json"),
     join(cwd, "protocol", "schema", "manifest.json"),
+    join(cwd, "..", "protocol", "schema", "manifest.json"),
   ];
   if (schemaPath && schemaPath !== "-") {
     candidates.unshift(join(dirname(resolve(schemaPath)), "manifest.json"));
@@ -1009,4 +1011,54 @@ export async function buildRemotePiIrFromSchemaInput(schemaPath: string, options
     return buildRemotePiIr(manifest, options);
   }
   throw new ProtocolCodegenError("TypeScript target expects a list-types catalog or protocol manifest JSON schema input");
+}
+
+function usage(): string {
+  return [
+    "Usage:",
+    "  tsx tools/protocol-codegen/src/index.ts --target ts --out <protocol.generated.ts> [--schema <manifest.json|list-types.json|->] [--check]",
+    "  tsx tools/protocol-codegen/src/index.ts --target ts --out-dir <dir> [--schema <manifest.json|list-types.json|->] [--check]",
+  ].join("\n");
+}
+
+function parseCliArgs(argv: string[]): Map<string, string> {
+  const args = new Map<string, string>();
+  for (let index = 0; index < argv.length; index += 1) {
+    const key = argv[index];
+    if (!key?.startsWith("--")) throw new ProtocolCodegenError(usage());
+    const next = argv[index + 1];
+    if (next === undefined || next.startsWith("--")) {
+      args.set(key.slice(2), "true");
+    } else {
+      args.set(key.slice(2), next);
+      index += 1;
+    }
+  }
+  return args;
+}
+
+async function buildCliIr(schemaPath: string | undefined): Promise<RemotePiIr> {
+  if (schemaPath) return buildRemotePiIrFromSchemaInput(schemaPath, { profile: "compat" });
+  const manifest = await loadDefaultManifest();
+  return buildRemotePiIr(manifest, { profile: "compat", protocolRoot: manifest.protocolRoot });
+}
+
+async function main(argv: string[]): Promise<void> {
+  const args = parseCliArgs(argv);
+  const target = args.get("target");
+  if (target !== "ts") throw new ProtocolCodegenError(usage());
+  const outPath = args.get("out");
+  const outDir = args.get("out-dir");
+  if (!outPath && !outDir) throw new ProtocolCodegenError(usage());
+  const ir = await buildCliIr(args.get("schema"));
+  const outFile = outPath ?? join(outDir as string, "protocol.generated.ts");
+  await emitTypeScriptProtocol(ir, { outFile, check: args.get("check") === "true" });
+}
+
+const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : undefined;
+if (invokedPath === import.meta.url) {
+  void main(process.argv.slice(2)).catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
 }
