@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-ts-codegen
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-generated-protocol
 depends_on: [epic-bold-generated-protocol-schema-source]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Generated protocol — TypeScript codegen target
@@ -451,3 +451,12 @@ expect(new Set(SERVER_MESSAGE_TYPES)).toEqual(schemaServerTypeSet);
 - Scope: skipped; this nested worker has no subagent/peer tool exposed. The requested raised-tier sub-delegation could not be performed from this harness, so direct-read evidence and sibling designs were used instead.
 - Accepted: align TS with the Dart feature's custom deterministic schema/IR generator rather than direct TS-only JSON Schema generation, because parity and patchbay portability matter more than one-language convenience.
 
+
+## Review — advanced to done (2026-06-30)
+
+All 5 child steps `done` (generator target/spike → generated unions/value-types →
+registries/validators → atomic runtime facade+codec swap → parity checks + package
+scripts). The pi-extension TypeScript protocol is now generated from
+`protocol/schema/manifest.json` through the shared codegen IR: `types.ts` re-exports
+generated types, `codec.ts` uses generated registries/validators + `decodeClient`, and
+`check:protocol` guards against stale generated output. Epic complete.
