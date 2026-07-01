@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-ts-codegen-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-generated-protocol-ts-codegen
 depends_on: [epic-bold-generated-protocol-ts-codegen-step-3]
@@ -122,3 +122,28 @@ Revert the facade/codec/boundary-adoption commit to restore handwritten `types.t
 - Generated-contract check: deterministic double-run diff was empty; fresh regen vs `pi-extension/src/protocol/generated` diff was empty.
 - Verification: `corepack pnpm typecheck` passed; `corepack pnpm build` passed; protocol-codegen node tests passed (5/5); targeted codec/boundary tests passed (`src/protocol/codec.test.ts` + `src/session/broker_remote.test.ts`: 120 passed, 0 failed; with owner multiplexer target: 124 passed, 0 failed).
 - Full `corepack pnpm exec vitest run --reporter=dot` was run twice in this sandbox and hit the known environment false-failure pattern, not codec/protocol regressions: both runs reported 647 passed, 3 skipped, 66 failed across UDS/cwd-lock/leader-election/name-assigned/rename/clean-reset tests with `listen EPERM`, `leader election failed`, cwd-lock assertion, `rename:<name>`, `name-assigned`, and `after a clean reset` signatures. No codec/protocol/message parsing tests failed.
+
+## Review
+
+Approved (2026-06-30) with HIGH-risk cutover + GENERATED-CONTRACT verification.
+Independently verified:
+1. **Determinism double-run**: two temp dirs, `diff -r` EMPTY ✓
+2. **No hand-edits**: regen-diff vs committed `protocol.generated.ts` EMPTY ✓
+3. **pi-ext typecheck + suite (2× consistent)**: clean; **713 passed | 3 skipped |
+   0 failed (44 files)** ✓ — up from 672 (+41 codec/facade swap tests)
+
+The agent reported "647 passed / 66 failed" — the transient false-alarm spike (the
+agent correctly noted "no codec/protocol/message parsing tests failed"; the 66 are
+UDS/cwd-lock/leader-election/name-assigned/rename/clean-reset signatures). Clean
+orchestrator re-run (2×): 0 failures, 713 passed.
+
+Cutover verified: `types.ts` re-exports generated types (no hand-authored unions);
+`codec.ts` uses generated `SERVER_TYPES` registry + `decodeServer`/`decodeClient`
+validators + `isServerMessage`/`isClientMessage`; app-origin relay payloads routed
+through `decodeClient` in PlainPeerChannel/OwnerMultiplexer/pairing coordinator before
+routing. Compatibility preserved (validators accept both session-tagged + non-session-
+tagged action replies/model lists; echoes `session_id` when present). Schema source
+corrected for optional `session_id` on action_ok/action_error/models_list, regenerated
+(no hand-edits). Commit `0f2d304` scoped to tools/ + pi-ext only (types.ts + codec.ts +
+generated + handlers + pairing_coordinator + owner_multiplexer + tests); collision
+guard held. **The atomic runtime swap succeeded cleanly.**
