@@ -5,7 +5,7 @@ stage: done
 tags: [refactor, bold, cockpit]
 parent: null
 depends_on: [epic-bold-generated-protocol]
-release_binding: null
+release_binding: cockpit-v1.6.0
 gate_origin: null
 created: 2026-06-29
 updated: 2026-06-29

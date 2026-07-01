@@ -5,7 +5,7 @@ stage: done
 tags: [refactor, bold, cockpit]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-4]
-release_binding: null
+release_binding: cockpit-v1.6.0
 gate_origin: null
 created: 2026-06-29
 updated: 2026-06-30

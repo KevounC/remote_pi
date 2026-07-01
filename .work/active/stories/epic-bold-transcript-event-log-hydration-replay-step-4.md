@@ -5,7 +5,7 @@ stage: done
 tags: [refactor, bold, cockpit]
 parent: epic-bold-transcript-event-log-hydration-replay
 depends_on: [epic-bold-transcript-event-log-hydration-replay-step-3]
-release_binding: null
+release_binding: cockpit-v1.6.0
 gate_origin: null
 created: 2026-06-29
 updated: 2026-06-30
