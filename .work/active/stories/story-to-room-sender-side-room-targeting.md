@@ -5,7 +5,7 @@ stage: drafting
 tags: [pi-extension, bug, security]
 parent: epic-bold-canonical-session
 depends_on: [epic-bold-canonical-session-relay-opaque-targeting]
-release_binding: extension-0.6.0
+release_binding: null
 gate_origin: null
 created: 2026-07-01
 updated: 2026-07-01

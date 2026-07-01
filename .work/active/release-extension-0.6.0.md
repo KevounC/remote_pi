@@ -24,9 +24,7 @@ docs/research deliverables route to repo-level `v0.6.0`.
 
 ## Bound items
 
-18 active done items (pi-extension-attributed), plus 1 in-flight story for the
-`to_room` sender-side room-targeting fix (the remaining half of the relay-0.2.0
-`to_room` wire change — see story body).
+18 active done items (pi-extension-attributed).
 
 ### Active done items (18)
 
@@ -49,9 +47,28 @@ Stories:
 - epic-bold-transcript-event-log-projection-derive-step-4
 - epic-bold-transcript-event-log-store-step-3
 
-### In-flight story (to_room sender fix)
+### Excluded — to_room sender fix (unbound, deferred to design)
 
-- story-to-room-sender-side-room-targeting (stage: drafting → implementing → review)
+`story-to-room-sender-side-room-targeting` (kept at `stage: drafting`, unbound).
+
+The handoff framed this as a mechanical “thread it through,” but scoping
+revealed it is design-bearing: the ACK and data-envelope sites are clean (relay
+echoes `to_room`; destination room is derivable from the cached roster via
+`roomIdFor(cwd, name)`), but the control-envelope site (`peers_request`/
+`peers_update` bootstrap) hits a real chicken-and-egg — the first `peers_request`
+that should *warm* the roster cache can't be sent because targeting it requires
+already knowing the sibling's room. The bootstrap solution needs a deliberate
+design choice (well-known control room joined by every MeshNode; or a
+control-only relay fanout; or `room_id` in the out-of-band `mesh_versions`
+member). Routing through `refactor-design` (it is the sender half of the
+already-`[refactor]`-tagged `relay-opaque-targeting` feature) before implementing.
+
+**This does not block extension-0.6.0:** commit `13701ee` already made the
+sender emit `to_room` (with a temporary `"main"` value), so wire-compatibility
+with relay-0.2.0 is satisfied — the field is present and the relay accepts it.
+The `"main"` default is pre-existing breakage (cross-PC delivery to a real room
+non-functional since `13701ee`), not a regression the 18 done items introduce.
+None of the 18 touch the `to_room` sender path.
 
 ### Excluded archived stubs (2)
 
@@ -71,10 +88,13 @@ Excluded deliberately; documented here so the gather is auditable.
 ## Wire-change deployment note
 
 Carried from relay-0.2.0: the `to_room` field is now required on cross-PC
-`pi_envelope` frames. relay-0.2.0 + the extension-0.6.0 sender must deploy
-paired (an old sender omitting `to_room` → `bad_envelope`). This release
-completes the sender side by targeting the sibling's actual room instead of
-the temporary `"main"` default (commit 13701ee).
+`pi_envelope` frames. The extension-0.6.0 sender (per commit `13701ee`, already
+in tree before this release) emits `to_room` with a temporary `"main"` value —
+so the wire shape is compatible with relay-0.2.0 (field present, relay accepts
+it). The remaining sender-side work — targeting the sibling's *actual* room
+instead of the `"main"` placeholder — is deferred to design (see Excluded
+section above); it does not change the wire contract, only which room value the
+sender writes.
 
 ### Binding-consistency warnings
 
