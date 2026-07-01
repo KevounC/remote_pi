@@ -1161,6 +1161,122 @@ void main() {
   );
 
   test(
+    'reconnect-history fixture replays additively without replace semantics',
+    () async {
+      final s = await setup();
+      final read = SessionReadRepository(LocalBoxes());
+      var emits = 0;
+      final sub = read.watchMessages(refFor(s.epk)).listen((_) => emits++);
+      await _settle();
+
+      await s.sync.sendMessage('still visible');
+      await _settle();
+      final localId = s.ch.sent.whereType<UserMessage>().last.id;
+      expect(messages(s.epk).map((row) => row.text), <String>['still visible']);
+
+      final replay = SessionHistory(
+        sessionId: s.sessionId,
+        inReplyTo: 'reconnect-history-is-replay-not-replace-1',
+        sessionStartedAt: 10,
+        events: const [
+          UserInputEvt(ts: 10, id: 'srv_1', text: 'authoritative older row'),
+        ],
+        eos: true,
+        truncated: true,
+      );
+      s.ch.pushRaw(replay);
+      await _settle();
+
+      expect(messages(s.epk).map((row) => row.text), <String>[
+        'authoritative older row',
+        'still visible',
+      ]);
+      expect(
+        messages(s.epk).singleWhere((row) => row.id == localId).pending,
+        isTrue,
+      );
+      final afterFirstLog = await s.sync.debugTranscriptEventStore.readSession(
+        transcriptKeyFor(s.epk),
+      );
+      final afterFirstRows = [for (final row in messages(s.epk)) row.toJson()];
+      final afterFirstEmits = emits;
+      expect(afterFirstLog.map((event) => event.eventId).toSet(), hasLength(2));
+
+      s.ch.pushRaw(
+        SessionHistory(
+          sessionId: s.sessionId,
+          inReplyTo: 'reconnect-history-is-replay-not-replace-duplicate',
+          sessionStartedAt: replay.sessionStartedAt,
+          events: replay.events,
+          eos: true,
+          truncated: true,
+        ),
+      );
+      await _settle();
+      expect(
+        await s.sync.debugTranscriptEventStore.readSession(
+          transcriptKeyFor(s.epk),
+        ),
+        hasLength(afterFirstLog.length),
+      );
+      expect([for (final row in messages(s.epk)) row.toJson()], afterFirstRows);
+      expect(emits, afterFirstEmits);
+
+      s.ch.pushRaw(
+        SessionHistory(
+          sessionId: s.sessionId,
+          inReplyTo: 'reconnect-history-is-replay-not-replace-empty',
+          sessionStartedAt: replay.sessionStartedAt,
+          events: const [],
+          eos: true,
+          truncated: true,
+        ),
+      );
+      await _settle();
+      expect(
+        await s.sync.debugTranscriptEventStore.readSession(
+          transcriptKeyFor(s.epk),
+        ),
+        hasLength(afterFirstLog.length),
+      );
+      expect([for (final row in messages(s.epk)) row.toJson()], afterFirstRows);
+      expect(emits, afterFirstEmits);
+
+      final workingBeforeForeign = s.sync.isWorking;
+      final streamingBeforeForeign = s.sync.streaming;
+      s.ch.pushRaw(
+        SessionHistory(
+          sessionId: 'foreign-session',
+          inReplyTo: 'reconnect-history-is-replay-not-replace-foreign',
+          sessionStartedAt: replay.sessionStartedAt + 1,
+          events: const [
+            UserInputEvt(ts: 11, id: 'foreign_1', text: 'must not appear'),
+          ],
+          eos: true,
+        ),
+      );
+      await _settle();
+      expect(
+        await s.sync.debugTranscriptEventStore.readSession(
+          transcriptKeyFor(s.epk),
+        ),
+        hasLength(afterFirstLog.length),
+      );
+      expect([for (final row in messages(s.epk)) row.toJson()], afterFirstRows);
+      expect(s.sync.isWorking, workingBeforeForeign);
+      expect(s.sync.streaming, streamingBeforeForeign);
+      expect(
+        messages(s.epk).map((row) => row.text),
+        isNot(contains('must not appear')),
+      );
+
+      await sub.cancel();
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
     'msgs projection is disposable and rebuilds from transcript event store',
     () async {
       final s = await setup();

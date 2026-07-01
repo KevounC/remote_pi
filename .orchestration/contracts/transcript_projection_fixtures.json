@@ -214,6 +214,84 @@
         },
         "streaming": null
       }
+    },
+    {
+      "name": "reconnect-history-is-replay-not-replace",
+      "session_id": "sess-replay-fixture",
+      "local_events": [
+        {
+          "kind": "user_submitted",
+          "eventId": "local:cli_1",
+          "clientMessageId": "cli_1",
+          "text": "still visible"
+        }
+      ],
+      "server_replay": [
+        {
+          "type": "user_input",
+          "ts": 10,
+          "id": "srv_1",
+          "text": "authoritative older row"
+        }
+      ],
+      "assertions": [
+        "server replay appends deterministic events",
+        "local event remains visible",
+        "duplicate replay appends zero events",
+        "foreign session is ignored before projection",
+        "truncated or empty replay does not delete local log"
+      ],
+      "events": [
+        {
+          "kind": "user_confirmed",
+          "event_id": "server:sess-replay-fixture:user_input:srv_1:10",
+          "session_id": "sess-replay-fixture",
+          "clientMessageId": "srv_1",
+          "text": "authoritative older row"
+        },
+        {
+          "kind": "user_confirmed",
+          "event_id": "server:sess-replay-fixture:user_input:srv_1:10",
+          "session_id": "sess-replay-fixture",
+          "clientMessageId": "srv_1",
+          "text": "authoritative older row"
+        },
+        {
+          "kind": "user_submitted",
+          "event_id": "local:cli_1",
+          "session_id": "sess-replay-fixture",
+          "clientMessageId": "cli_1",
+          "text": "still visible"
+        },
+        {
+          "kind": "user_confirmed",
+          "event_id": "server:sess-foreign:user_input:foreign_1:11",
+          "session_id": "sess-foreign",
+          "clientMessageId": "foreign_1",
+          "text": "must not appear"
+        }
+      ],
+      "projection": {
+        "messages": [
+          {
+            "role": "user",
+            "id": "srv_1",
+            "status": "confirmed",
+            "text": "authoritative older row"
+          },
+          {
+            "role": "user",
+            "id": "cli_1",
+            "status": "pending",
+            "text": "still visible"
+          }
+        ],
+        "turn": {
+          "status": "working",
+          "working": true
+        },
+        "streaming": null
+      }
     }
   ]
 }

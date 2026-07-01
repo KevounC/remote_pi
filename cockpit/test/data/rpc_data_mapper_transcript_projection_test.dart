@@ -247,6 +247,20 @@ void main() {
       expect(projection.turn.status.name, fixture.expectedTurnStatus);
     });
 
+    test('reconnect replay fixture is additive, deduped, and scoped', () {
+      final fixture = _fixtureNamed('reconnect-history-is-replay-not-replace');
+      final projection = deriveCockpitTranscript(
+        _cockpitEventsForAuthoritativeReplay(fixture),
+      );
+
+      expect(_cockpitProjectionMessages(projection), fixture.expectedMessages);
+      expect(projection.turn.status.name, fixture.expectedTurnStatus);
+      expect(
+        projection.entries.whereType<ProjectedUserMessage>().map((m) => m.text),
+        isNot(contains('must not appear')),
+      );
+    });
+
     test('failed send and assistant done converge to non-working states', () {
       final failed = deriveCockpitTranscript(<CockpitTranscriptEvent>[
         CockpitUserMessageSubmitted(

@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-hydration-replay-step-5
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, app, pi-extension, cockpit]
 parent: epic-bold-transcript-event-log-hydration-replay
 depends_on: [epic-bold-transcript-event-log-hydration-replay-step-4]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 5: Add replay regression fixtures and remove replacement assumptions
@@ -63,6 +63,25 @@ pi-extension still say the app substitutes its cache wholesale.
 - [ ] A regression proves foreign-session replay is ignored before touching event log, projection rows, streaming, or working state.
 - [ ] Replacement-oriented comments/tests are removed or rewritten to the replay model.
 - [ ] Verification commands for app, pi-extension, and Cockpit targeted tests are recorded in story implementation notes.
+
+## Implementation
+
+- Added shared contract fixture `.orchestration/contracts/transcript_projection_fixtures.json` entry `reconnect-history-is-replay-not-replace`, carrying the story's local event/server replay/assertions plus app/cockpit projection expectations for future generated-contract coverage.
+- App regression coverage:
+  - `app/test/data/sync/sync_service_test.dart` now proves reconnect replay appends deterministic server events without deleting a local pending event, duplicate replay appends zero event-store entries and emits no projection-cache churn, empty/truncated replay is non-destructive, and foreign-session replay leaves the event log, rows, streaming, and working state untouched.
+  - `app/test/domain/transcript/transcript_projection_test.dart` consumes the shared fixture and proves duplicate event ids and foreign-session events are ignored while local and replayed rows remain visible.
+- Cockpit regression coverage: `cockpit/test/data/rpc_data_mapper_transcript_projection_test.dart` consumes the shared fixture and proves the local event-log/projection seam is additive, deduped, and session-scoped.
+- Pi-extension regression coverage: `pi-extension/src/extension.test.ts` consumes the shared fixture and proves `session_sync` derives replay-compatible `session_history` from the transcript event log without replacement assumptions, deduping duplicate event ids and filtering foreign-session facts.
+- Replacement-oriented comments/tests encountered in the touched replay surfaces now describe append/dedupe replay or compatibility fixture mirroring; no production code changes were required.
+- Verification:
+  - App targeted: `PUB_CACHE=~/projects/remote_pi/.pub-cache ~/projects/remote_pi/.tools/flutter/bin/flutter test test/domain/transcript/transcript_projection_test.dart` passed: 14 tests passed.
+  - App targeted: `PUB_CACHE=~/projects/remote_pi/.pub-cache ~/projects/remote_pi/.tools/flutter/bin/flutter test test/data/sync/sync_service_test.dart` passed: 61 tests passed.
+  - App full: `PUB_CACHE=~/projects/remote_pi/.pub-cache ~/projects/remote_pi/.tools/flutter/bin/flutter test` passed: 612 tests passed.
+  - Cockpit targeted: `PUB_CACHE=~/projects/remote_pi/.pub-cache ~/projects/remote_pi/.tools/flutter/bin/flutter test test/data/rpc_data_mapper_transcript_projection_test.dart` passed: 10 tests passed.
+  - Cockpit full: `PUB_CACHE=~/projects/remote_pi/.pub-cache ~/projects/remote_pi/.tools/flutter/bin/flutter pub get --offline && PUB_CACHE=~/projects/remote_pi/.pub-cache ~/projects/remote_pi/.tools/flutter/bin/flutter test` passed: 231 tests passed.
+  - Pi-extension typecheck: `corepack pnpm typecheck` passed.
+  - Pi-extension targeted replay test: `corepack pnpm exec vitest run src/extension.test.ts -t "reconnect replay contract"` passed: 1 passed, 166 skipped.
+  - Pi-extension full targeted file: `corepack pnpm exec vitest run src/extension.test.ts` reported 163 passed / 4 failed in 167 tests. The failing test names match the documented false-alarm bucket, not replay integrity: `after a clean reset, connect works again (flag is per-instance, not sticky)`, `join emits remote-pi:name-assigned with requested + assigned + changed`, `rename:<name> renames live (broker re-register + relay swap), process/session survive`, and `a second same-name agent joins as <name>#2 instead of being refused`.
 
 ## Rollback
 

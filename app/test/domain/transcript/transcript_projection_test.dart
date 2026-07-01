@@ -323,6 +323,28 @@ void main() {
         );
       },
     );
+
+    test(
+      'reconnect replay fixture is additive, deduped, and session-scoped',
+      () {
+        final fixture = _fixtureNamed(
+          'reconnect-history-is-replay-not-replace',
+        );
+        final projection = deriveTranscriptProjection(
+          sessionId: fixture.sessionId,
+          events: fixture.events,
+        );
+
+        expect(_appProjectionMessages(projection), fixture.expectedMessages);
+        expect(projection.streaming, isNull);
+        expect(projection.turn.status.name, fixture.expectedTurnStatus);
+        expect(projection.turn.working, isTrue);
+        expect(
+          projection.messages.whereType<UserMsg>().map((m) => m.id),
+          isNot(contains('foreign_1')),
+        );
+      },
+    );
   });
 }
 

@@ -4725,6 +4725,78 @@ describe("cumulative transcript event log", () => {
     ]);
   });
 
+  test("session_sync projects reconnect replay contract fixture without replacement assumptions", async () => {
+    await _pairForTest("peer-replay-contract");
+    const sessionId = currentSessionIdFromSends();
+    _setSessionStartedAtForTest(10);
+    const contractPath = fileURLToPath(
+      new URL("../../.orchestration/contracts/transcript_projection_fixtures.json", import.meta.url),
+    );
+    const root = JSON.parse(readFileSync(contractPath, "utf8")) as {
+      fixtures: Array<{
+        name: string;
+        local_events?: Array<{ eventId: string; clientMessageId: string; text: string }>;
+        server_replay?: Array<{ ts: number; id: string; text: string }>;
+        assertions?: string[];
+      }>;
+    };
+    const fixture = root.fixtures.find((candidate) => candidate.name === "reconnect-history-is-replay-not-replace")!;
+    expect(fixture.assertions).toContain("duplicate replay appends zero events");
+    const local = fixture.local_events![0]!;
+    const server = fixture.server_replay![0]!;
+    const serverEvent = {
+      kind: "user_confirmed" as const,
+      eventId: `server:${sessionId}:user_input:${server.id}:${server.ts}`,
+      sessionId,
+      ts: server.ts,
+      clientMessageId: server.id,
+      text: server.text,
+    };
+    _setTranscriptEventsForTest([
+      {
+        kind: "user_submitted",
+        eventId: local.eventId,
+        sessionId,
+        ts: server.ts + 1,
+        clientMessageId: local.clientMessageId,
+        text: local.text,
+      },
+      serverEvent,
+      serverEvent,
+      {
+        kind: "user_confirmed",
+        eventId: "foreign:replay-contract",
+        sessionId: "foreign-session",
+        ts: server.ts + 2,
+        clientMessageId: "foreign_1",
+        text: "must not appear",
+      },
+    ]);
+
+    const sendsBefore = relayRef.current!.send.mock.calls.length;
+    routeClientMessage(
+      { type: "session_sync", id: "replay-contract-sync", session_id: sessionId, limit: 50 },
+      { abort: () => undefined },
+    );
+
+    const history = relayRef.current!.send.mock.calls.slice(sendsBefore)
+      .map((c) => c[0] as string)
+      .map(decodeSentCt)
+      .find((d) => d.inner.type === "session_history")!;
+    expect(history.inner).toMatchObject({
+      type: "session_history",
+      in_reply_to: "replay-contract-sync",
+      session_id: sessionId,
+      session_started_at: 10,
+      eos: true,
+      truncated: false,
+    });
+    expect(history.inner["events"]).toEqual([
+      { ts: server.ts + 1, type: "user_input", id: local.clientMessageId, text: local.text },
+      { ts: server.ts, type: "user_input", id: server.id, text: server.text },
+    ]);
+  });
+
   test("session_sync projects the transcript event log fixture across canonical-session boundary", async () => {
     await _pairForTest("peer-store-fixture");
     const sessionId = currentSessionIdFromSends();
