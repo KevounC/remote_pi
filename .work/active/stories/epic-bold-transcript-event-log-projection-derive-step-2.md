@@ -5,7 +5,7 @@ stage: done
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-1]
-release_binding: null
+release_binding: app-v1.2.0
 gate_origin: null
 created: 2026-06-29
 updated: 2026-06-29

@@ -5,7 +5,7 @@ stage: done
 tags: [refactor, bold, app]
 parent: epic-bold-reachability-contract-state-machine
 depends_on: [epic-bold-reachability-contract-state-machine-step-2]
-release_binding: null
+release_binding: app-v1.2.0
 gate_origin: null
 created: 2026-06-29
 updated: 2026-06-29

@@ -5,7 +5,7 @@ stage: done
 tags: [refactor, bold, app]
 parent: epic-bold-transcript-event-log-hydration-replay
 depends_on: [epic-bold-transcript-event-log-store]
-release_binding: null
+release_binding: app-v1.2.0
 gate_origin: null
 created: 2026-06-29
 updated: 2026-06-30

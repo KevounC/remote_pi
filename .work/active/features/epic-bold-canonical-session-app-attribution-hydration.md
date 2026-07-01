@@ -5,7 +5,7 @@ stage: done
 tags: [refactor, bold, app, security]
 parent: epic-bold-canonical-session
 depends_on: [epic-bold-canonical-session-wire-discriminator]
-release_binding: null
+release_binding: app-v1.2.0
 gate_origin: null
 created: 2026-06-29
 updated: 2026-06-29
