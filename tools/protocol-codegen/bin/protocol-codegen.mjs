@@ -11,6 +11,7 @@ function usage() {
     '  node tools/protocol-codegen/bin/protocol-codegen.mjs --target dart --schema <ir.json> --out <file.dart>',
     '  node tools/protocol-codegen/bin/protocol-codegen.mjs --target rust --schema <list-types.json|-> --out-dir <dir> [--check true]',
     '  node tools/protocol-codegen/bin/protocol-codegen.mjs --target rust --schema <relay-outer.schema.json> --out <file.rs>',
+    '  node tools/protocol-codegen/bin/protocol-codegen.mjs --target ts --schema <list-types.json|manifest.json|-> --out-dir <dir> [--check true]',
   ].join('\n');
 }
 
@@ -1409,7 +1410,7 @@ function writeRustOutputs(outputs, outDir, check) {
   }
 }
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   const target = args.get('target');
   const schemaPath = args.get('schema');
@@ -1442,11 +1443,20 @@ function main() {
     return;
   }
 
+  if (target === 'ts') {
+    if (!schemaPath || (!outDir && !outPath)) throw new Error(usage());
+    const { buildRemotePiIrFromSchemaInput, emitTypeScriptProtocol } = await import('../src/index.ts');
+    const ir = await buildRemotePiIrFromSchemaInput(schemaPath, { profile: 'compat' });
+    const outFile = outPath ?? join(outDir, 'protocol.generated.ts');
+    await emitTypeScriptProtocol(ir, { outFile, check });
+    return;
+  }
+
   throw new Error(usage());
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
