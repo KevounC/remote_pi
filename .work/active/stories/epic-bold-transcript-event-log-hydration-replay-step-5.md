@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-hydration-replay-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, app, pi-extension, cockpit]
 parent: epic-bold-transcript-event-log-hydration-replay
 depends_on: [epic-bold-transcript-event-log-hydration-replay-step-4]
@@ -86,3 +86,21 @@ pi-extension still say the app substitutes its cache wholesale.
 ## Rollback
 
 Remove the new replay fixtures/tests only if the replay implementation is rolled back. Do not weaken existing session-sync, pending-send, or compaction tests.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran all three subprojects: **pi-ext 672
+passed (up from 671)**; **app 612 passed (up from 610)**; **cockpit 231 passed (up
+from 230)**; pi-ext typecheck clean. Commit `41dd808` scoped to app + pi-ext + cockpit
+test files + shared contract fixture; collision guard held.
+
+Regression coverage verified: shared contract fixture
+`.orchestration/contracts/transcript_projection_fixtures.json` (entry
+`reconnect-history-is-replay-not-replace`) consumed across all 3 subprojects. App
+proves reconnect replay appends deterministic server events WITHOUT deleting local
+pending events; duplicate replay idempotent by event/message id (no box churn);
+empty/truncated replay non-destructive; foreign-session replay leaves log/rows/
+streaming/working untouched. Cockpit proves the local event-log/projection seam is
+additive, deduped, session-scoped. Pi-ext proves `session_sync` derives
+replay-compatible `session_history` without replacement assumptions. **transcript-
+event-log-hydration-replay arc complete (5/5).**
