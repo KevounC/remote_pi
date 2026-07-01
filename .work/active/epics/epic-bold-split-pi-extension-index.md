@@ -1,7 +1,7 @@
 ---
 id: epic-bold-split-pi-extension-index
 kind: epic
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: null
 depends_on: [epic-bold-generated-protocol, epic-bold-canonical-session, epic-bold-turn-state-machine]

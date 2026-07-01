@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract
 kind: epic
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension, app, relay]
 parent: null
 depends_on: []

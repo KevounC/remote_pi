@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection
 kind: epic
-stage: implementing
+stage: done
 tags: [refactor, bold, cockpit]
 parent: null
 depends_on: [epic-bold-generated-protocol]

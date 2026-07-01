@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session
 kind: epic
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension, app, relay, cockpit, security]
 parent: null
 depends_on: [epic-bold-generated-protocol]

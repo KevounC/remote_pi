@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log
 kind: epic
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension, app, cockpit]
 parent: null
 depends_on: [epic-bold-canonical-session]

@@ -1,7 +1,7 @@
 ---
 id: epic-bold-relay-typed-actor
 kind: epic
-stage: implementing
+stage: done
 tags: [refactor, bold, relay]
 parent: null
 depends_on: [epic-bold-generated-protocol]

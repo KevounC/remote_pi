@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine
 kind: epic
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: null
 depends_on: [epic-bold-generated-protocol]
