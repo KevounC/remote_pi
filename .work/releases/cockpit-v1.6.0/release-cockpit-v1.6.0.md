@@ -1,7 +1,7 @@
 ---
 id: release-cockpit-v1.6.0
 kind: release
-stage: quality-gate
+stage: released
 tags: []
 parent: null
 depends_on: []
@@ -126,3 +126,22 @@ carry only `refactor` (no component tag → repo-level attribution), so they rou
 not cockpit. The cockpit features ship here; their step-stories ship in the repo-level release.
 Design note: bold-refactor step-stories don't carry component tags, so they always route to
 repo-level even when implementing a component feature. Worth revisiting the tag discipline.
+
+## Shipped items
+
+Bodies live on disk (retain-bodies) and in git history — `git show <git ref>:<former active path>` recovers any.
+
+| id | title | kind | archived_atop | git ref |
+|----|-------|------|---------------|---------|
+| epic-bold-cockpit-workspace-projection | Cockpit workspace is a document; the agent session is a projection | epic | — | b1eba69 |
+| epic-bold-cockpit-workspace-projection-agent-session | Cockpit workspace — AgentSession as transcript projection | feature | — | b1eba69 |
+| epic-bold-cockpit-workspace-projection-settings-split | Cockpit workspace — settings_page split | feature | — | b1eba69 |
+| epic-bold-cockpit-workspace-projection-workspace-document | Cockpit workspace — workspace as document (riskiest — design first) | feature | — | b1eba69 |
+| epic-bold-generated-protocol-cockpit-control-rpc-step-3 | Step 3: Emit schema-compatible control commands from Cockpit and align custom-event parsing with protocol map | story | — | b1eba69 |
+| epic-bold-transcript-event-log-hydration-replay-step-4 | Step 4: Convert Cockpit `get_messages` hydration to event replay projection | story | — | b1eba69 |
+| epic-bold-transcript-event-log-projection-derive-step-5 | Step 5: Make Cockpit transcript entries immutable projection outputs | story | — | b1eba69 |
+| gate-cruft-temp-debug-trace-scaffold | Temporary debug trace scaffold remains in production UI flow | story | — | b1eba69 |
+| gate-docs-claudemd-stale-mvp-constraints | cockpit/CLAUDE.md still describes single-pane/MVP constraints that are no longer true | story | — | b1eba69 |
+| gate-docs-rpc-protocol-stale-spawn-flags | rpc-protocol.md documents stale pi --mode rpc spawn flags and relay assumptions | story | — | b1eba69 |
+| gate-tests-language-lsp-probe-coverage | No test covers language LSP probe/save/reset behavior | story | — | b1eba69 |
+| gate-tests-notification-permission-mounted-guard | No test covers notification permission request mounted guard/instructions path | story | — | b1eba69 |
