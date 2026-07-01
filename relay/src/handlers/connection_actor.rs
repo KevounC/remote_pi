@@ -171,6 +171,8 @@ impl ConnectionActor {
         self.pi_forward_result_to_dispatch(
             handle_pi_envelope(
                 &self.peer_id,
+                self.conn_id,
+                &self.room_id,
                 frame,
                 &self.delivery,
                 &self.mesh,
@@ -181,7 +183,7 @@ impl ConnectionActor {
     }
 
     async fn dispatch_malformed_pi_envelope(&mut self, frame: serde_json::Value) -> ActorDispatch {
-        self.pi_forward_result_to_dispatch(handle_malformed_pi_envelope(&frame))
+        self.pi_forward_result_to_dispatch(handle_malformed_pi_envelope(&frame, &self.room_id))
     }
 
     fn pi_forward_result_to_dispatch(&self, result: PiForwardResult) -> ActorDispatch {

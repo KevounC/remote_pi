@@ -14,9 +14,9 @@ import { PiForwardClient } from "../transport/pi_forward_client.js";
  * `emit("envelope", env, fromPc)` so tests can simulate inbound delivery.
  */
 class FakePi extends EventEmitter {
-  readonly sent: { toPc: string; env: Envelope }[] = [];
-  sendEnvelopeToPi(toPc: string, env: Envelope): void {
-    this.sent.push({ toPc, env });
+  readonly sent: { toPc: string; toRoom: string; env: Envelope }[] = [];
+  sendEnvelopeToPi(toPc: string, toRoom: string, env: Envelope): void {
+    this.sent.push({ toPc, toRoom, env });
   }
   detach(): void { /* no-op */ }
 }
@@ -630,7 +630,7 @@ describe("detached cross-PC bridge components", () => {
     pi.on("envelope", onEnvelope);
 
     pi.detach();
-    pi.sendEnvelopeToPi("K_B", envelope("casa:sess", "trab:agent", { hello: "after-detach" }));
+    pi.sendEnvelopeToPi("K_B", "main", envelope("casa:sess", "trab:agent", { hello: "after-detach" }));
     expect(relay.send).not.toHaveBeenCalled();
 
     queuedInbound?.(JSON.stringify({

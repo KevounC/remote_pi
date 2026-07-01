@@ -39,10 +39,11 @@
     },
     "piEnvelope": {
       "type": "object",
-      "required": ["type", "to_pc", "envelope"],
+      "required": ["type", "to_pc", "to_room", "envelope"],
       "properties": {
         "type": { "const": "pi_envelope" },
         "to_pc": { "type": "string", "minLength": 1 },
+        "to_room": { "type": "string", "minLength": 1 },
         "envelope": { "$ref": "#/$defs/agentEnvelope" }
       },
       "additionalProperties": false,
@@ -50,10 +51,11 @@
     },
     "piEnvelopeIn": {
       "type": "object",
-      "required": ["type", "from_pc", "envelope"],
+      "required": ["type", "from_pc", "to_room", "envelope"],
       "properties": {
         "type": { "const": "pi_envelope_in" },
         "from_pc": { "type": "string", "minLength": 1 },
+        "to_room": { "type": "string", "minLength": 1 },
         "envelope": {
           "anyOf": [
             { "$ref": "#/$defs/transportErrorEnvelope" },

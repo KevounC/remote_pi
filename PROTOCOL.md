@@ -107,9 +107,13 @@ Hoje cross-PC é mediado pelo relay (não P2P direto — fica pra futuro).
 {
   "type": "pi_envelope",
   "to_pc": "<pi-b-pubkey-base64>",
+  "to_room": "main",
   "envelope": { "from": "casa:sess-3", "to": "trab:agent-1", ... }
 }
 ```
+
+`to_room` direciona a entrega somente àquela sala do peer destino (room-targeted,
+não fanout peer-wide). `to_room` vazio/ausente → `transport_error: bad_envelope`.
 
 ### Frame entregue pelo relay (Relay → Pi-B)
 
@@ -117,6 +121,7 @@ Hoje cross-PC é mediado pelo relay (não P2P direto — fica pra futuro).
 {
   "type": "pi_envelope_in",
   "from_pc": "<pi-a-pubkey-base64>",
+  "to_room": "main",
   "envelope": { ... }
 }
 ```

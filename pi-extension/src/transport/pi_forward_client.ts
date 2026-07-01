@@ -22,12 +22,14 @@ import type { Envelope } from "../session/envelope.js";
 interface PiEnvelopeFrame {
   type: "pi_envelope";
   to_pc: string;
+  to_room: string;
   envelope: Envelope;
 }
 
 interface PiEnvelopeInFrame {
   type: "pi_envelope_in";
   from_pc: string;
+  to_room: string;
   envelope: Envelope;
 }
 
@@ -52,15 +54,18 @@ export class PiForwardClient extends EventEmitter {
   }
 
   /**
-   * Pack `env` in a `pi_envelope` frame addressed to `toPc` and send via
+   * Pack `env` in a `pi_envelope` frame addressed to `toPc` / `toRoom` and send via
    * the relay WS. Best-effort: if the relay is not connected, the call is
    * silently dropped. The caller (broker_remote) handles the timeout via
    * its outstanding-ACK map — a missing ACK from the destination wrapper
    * surfaces as `status: "timeout"` upstream regardless.
+   *
+   * `toRoom` targets a specific room of the destination peer (room-targeted
+   * delivery, not peer-wide fanout); the relay routes only to that room.
    */
-  sendEnvelopeToPi(toPc: string, env: Envelope): void {
+  sendEnvelopeToPi(toPc: string, toRoom: string, env: Envelope): void {
     if (this.detached) return;
-    const frame: PiEnvelopeFrame = { type: "pi_envelope", to_pc: toPc, envelope: env };
+    const frame: PiEnvelopeFrame = { type: "pi_envelope", to_pc: toPc, to_room: toRoom, envelope: env };
     try {
       this.relay.send(JSON.stringify(frame));
     } catch {

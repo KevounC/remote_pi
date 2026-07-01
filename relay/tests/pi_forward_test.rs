@@ -4,6 +4,10 @@
 //! more Owner-signed mesh blobs that determine membership, connects Pi-A
 //! (and sometimes Pi-B) via WebSocket, and asserts the forwarding /
 //! transport-error behavior.
+//!
+//! Cross-PC `pi_envelope` carries `to_room`: the relay routes the frame only
+//! to the addressed room of the destination peer (room-targeted delivery,
+//! not peer-wide fanout), and the delivered `pi_envelope_in` echoes `to_room`.
 
 mod common;
 use common::{connect_and_auth_with_key, connect_and_auth_with_room, start_relay};
@@ -36,6 +40,9 @@ fn is_uuid_like(value: &str) -> bool {
         })
 }
 
+/// Asserts `frame` is a relay `_relay` transport-error `pi_envelope_in`.
+/// `to_room` defaults to `"main"` — the sender's room (errors are sent back to
+/// the sender on their own socket, so `to_room` is the sender's room).
 fn assert_transport_error(frame: &Value, reason: &str, re: Option<&str>) {
     assert_eq!(frame["type"], "pi_envelope_in");
     assert_eq!(frame["from_pc"], "_relay");
@@ -89,12 +96,14 @@ async fn publish_owner_blob(
     assert_eq!(r.status(), 200, "mesh blob publish must succeed");
 }
 
-/// Sends a `pi_envelope` frame from an already-authenticated Pi WS.
-async fn send_pi_envelope(ws: &mut common::WsStream, to_pc: &str, envelope: Value) {
+/// Sends a `pi_envelope` frame from an already-authenticated Pi WS, addressed
+/// to `to_pc` / `to_room`.
+async fn send_pi_envelope(ws: &mut common::WsStream, to_pc: &str, to_room: &str, envelope: Value) {
     ws.send(Message::text(
         json!({
             "type": "pi_envelope",
             "to_pc": to_pc,
+            "to_room": to_room,
             "envelope": envelope,
         })
         .to_string(),
@@ -114,13 +123,23 @@ async fn recv_json(ws: &mut common::WsStream, label: &str) -> Value {
         .unwrap_or_else(|e| panic!("{label} got non-JSON frame: {e}"))
 }
 
+/// Asserts that no frame arrives on `ws` within `ms` (used to prove a room was
+/// NOT targeted by room-targeted delivery).
+async fn assert_no_frame(ws: &mut common::WsStream, label: &str, ms: u64) {
+    let got = tokio::time::timeout(tokio::time::Duration::from_millis(ms), ws.next()).await;
+    assert!(
+        got.is_err(),
+        "{label}: expected no frame (room not targeted), got one"
+    );
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Tests
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Happy path: Pi-A and Pi-B belong to the same Owner's mesh and both are
-/// online. Envelope from A arrives at B verbatim, wrapped as `pi_envelope_in`
-/// with `from_pc = peer_a_pk`.
+/// online in room "main". Envelope from A arrives at B verbatim, wrapped as
+/// `pi_envelope_in` with `from_pc = peer_a_pk` and `to_room = "main"`.
 #[tokio::test]
 async fn happy_path_same_owner_envelope_delivered_verbatim() {
     let port = start_relay().await;
@@ -145,7 +164,7 @@ async fn happy_path_same_owner_envelope_delivered_verbatim() {
         "body": { "type": "hello", "text": "ping", "session_id": "opaque-session" },
     });
     let t0 = std::time::Instant::now();
-    send_pi_envelope(&mut ws_a, &peer_b, envelope.clone()).await;
+    send_pi_envelope(&mut ws_a, &peer_b, "main", envelope.clone()).await;
 
     let frame = recv_json(&mut ws_b, "ws_b").await;
     let latency = t0.elapsed();
@@ -154,9 +173,9 @@ async fn happy_path_same_owner_envelope_delivered_verbatim() {
         frame["from_pc"], peer_a,
         "must carry authenticated sender pk"
     );
-    assert!(
-        frame.get("to_room").is_none(),
-        "cross-PC wrapper remains peer-wide and does not add relay-owned room targeting"
+    assert_eq!(
+        frame["to_room"], "main",
+        "delivered pi_envelope_in echoes the addressed to_room"
     );
     assert_eq!(
         frame["envelope"], envelope,
@@ -169,7 +188,7 @@ async fn happy_path_same_owner_envelope_delivered_verbatim() {
 }
 
 /// Session identity inside the generic envelope body is endpoint-owned data.
-/// Relay forwarding must target only the wrapper's `to_pc` and carry the
+/// Relay forwarding targets only the wrapper's `to_pc`/`to_room` and carries the
 /// envelope JSON through unchanged.
 #[tokio::test]
 async fn session_id_in_body_is_opaque_and_forwarded_verbatim() {
@@ -205,7 +224,7 @@ async fn session_id_in_body_is_opaque_and_forwarded_verbatim() {
             ]
         },
     });
-    send_pi_envelope(&mut ws_a, &peer_b, envelope.clone()).await;
+    send_pi_envelope(&mut ws_a, &peer_b, "main", envelope.clone()).await;
 
     let frame = recv_json(&mut ws_b, "ws_b opaque-session forward").await;
     let wrapper = frame
@@ -213,20 +232,23 @@ async fn session_id_in_body_is_opaque_and_forwarded_verbatim() {
         .expect("forwarded frame must be a JSON object");
     assert_eq!(
         wrapper.len(),
-        3,
-        "relay wrapper should only add owned fields"
+        4,
+        "relay wrapper should only add owned fields (type, from_pc, to_room, envelope)"
     );
     assert_eq!(frame["type"], "pi_envelope_in");
     assert_eq!(frame["from_pc"], peer_a);
-    assert!(frame.get("to_room").is_none());
+    assert_eq!(frame["to_room"], "main");
     assert_eq!(
         frame["envelope"], envelope,
         "relay must carry the generic envelope as opaque JSON, including body.session_id"
     );
 }
 
+/// Room-targeted delivery: Pi-B is live in TWO rooms ("main" and "work"). A
+/// frame addressed `to_room: "work"` reaches ONLY the "work" connection, not
+/// "main". (Replaces the legacy peer-wide fanout behavior.)
 #[tokio::test]
-async fn peer_wide_forward_reaches_all_live_rooms() {
+async fn room_targeted_forward_reaches_only_addressed_room() {
     let port = start_relay().await;
     let base_http = format!("http://127.0.0.1:{port}");
 
@@ -245,21 +267,25 @@ async fn peer_wide_forward_reaches_all_live_rooms() {
     let envelope = json!({
         "from": "casa:sess-3",
         "to": "trab:agent-1",
-        "id": "peer-wide-forward",
+        "id": "room-targeted-forward",
         "re": null,
         "body": { "type": "ping", "session_id": "opaque-session" },
     });
-    send_pi_envelope(&mut ws_a, &peer_b, envelope.clone()).await;
+    send_pi_envelope(&mut ws_a, &peer_b, "work", envelope.clone()).await;
 
-    for (label, ws) in [("ws_b_main", &mut ws_b_main), ("ws_b_work", &mut ws_b_work)] {
-        let frame = recv_json(ws, label).await;
-        assert_eq!(frame["type"], "pi_envelope_in");
-        assert_eq!(frame["from_pc"], peer_a);
-        assert!(frame.get("to_room").is_none());
-        assert_eq!(frame["envelope"], envelope);
-    }
+    // Only the "work" connection receives the frame.
+    let frame = recv_json(&mut ws_b_work, "ws_b_work").await;
+    assert_eq!(frame["type"], "pi_envelope_in");
+    assert_eq!(frame["from_pc"], peer_a);
+    assert_eq!(frame["to_room"], "work");
+    assert_eq!(frame["envelope"], envelope);
+
+    // The "main" connection must NOT receive it (room-targeted, not peer-wide).
+    assert_no_frame(&mut ws_b_main, "ws_b_main (not targeted)", 150).await;
 }
 
+/// B is offline entirely (no connection). A's frame to `to_room: "main"`
+/// returns `transport_error: offline` correlated to the original id.
 #[tokio::test]
 async fn pi_b_offline_returns_transport_error_offline() {
     let port = start_relay().await;
@@ -284,12 +310,47 @@ async fn pi_b_offline_returns_transport_error_offline() {
         "re": null,
         "body": { "type": "ping" },
     });
-    send_pi_envelope(&mut ws_a, &peer_b, envelope).await;
+    send_pi_envelope(&mut ws_a, &peer_b, "main", envelope).await;
 
     let frame = recv_json(&mut ws_a, "ws_a transport_error").await;
     assert_transport_error(&frame, "offline", Some(original_id));
     assert_eq!(frame["envelope"]["from"], "_relay");
     assert_eq!(frame["envelope"]["to"], "casa:sess-3");
+}
+
+/// Unknown destination ROOM: B is online in "main", but A targets `to_room:
+/// "work"` (which B is not in). A receives `transport_error: offline`
+/// correlated to the original id. (Room-targeted: a peer online in a
+/// different room is effectively offline for this `to_room`.)
+#[tokio::test]
+async fn unknown_destination_room_returns_offline() {
+    let port = start_relay().await;
+    let base_http = format!("http://127.0.0.1:{port}");
+
+    let owner = random_key();
+    let sk_a = random_key();
+    let sk_b = random_key();
+    let peer_a = B64.encode(sk_a.verifying_key().to_bytes());
+    let peer_b = B64.encode(sk_b.verifying_key().to_bytes());
+
+    publish_owner_blob(&base_http, &owner, &[&peer_a, &peer_b], 1).await;
+
+    let (mut ws_a, _) = connect_and_auth_with_key(port, &sk_a).await;
+    // B is online, but only in "main" — not "work".
+    let (_ws_b_main, _) = connect_and_auth_with_room(port, &sk_b, "main").await;
+
+    let original_id = "018f3333-3333-7333-8333-333333333333";
+    let envelope = json!({
+        "from": "casa:sess-3",
+        "to": "trab:agent-1",
+        "id": original_id,
+        "re": null,
+        "body": { "type": "ping" },
+    });
+    send_pi_envelope(&mut ws_a, &peer_b, "work", envelope).await;
+
+    let frame = recv_json(&mut ws_a, "ws_a transport_error (unknown room)").await;
+    assert_transport_error(&frame, "offline", Some(original_id));
 }
 
 /// Pi-A and Pi-B belong to DIFFERENT Owners. The relay's mesh authorization
@@ -321,7 +382,7 @@ async fn cross_owner_returns_transport_error_not_authorized() {
         "re": null,
         "body": { "type": "ping" },
     });
-    send_pi_envelope(&mut ws_a, &peer_b, envelope).await;
+    send_pi_envelope(&mut ws_a, &peer_b, "main", envelope).await;
 
     let frame = recv_json(&mut ws_a, "ws_a transport_error").await;
     assert_transport_error(&frame, "not_authorized", Some(original_id));
@@ -337,7 +398,7 @@ async fn malformed_pi_envelope_returns_transport_error_bad_envelope() {
     let sk_a = random_key();
     let (mut ws_a, _) = connect_and_auth_with_key(port, &sk_a).await;
 
-    // No `to_pc`, no `envelope` — pure stub.
+    // No `to_pc`, no `to_room`, no `envelope` — pure stub.
     ws_a.send(Message::text(json!({ "type": "pi_envelope" }).to_string()))
         .await
         .unwrap();
@@ -346,11 +407,12 @@ async fn malformed_pi_envelope_returns_transport_error_bad_envelope() {
     assert_transport_error(&frame, "bad_envelope", None);
 }
 
-/// A syntactically valid `pi_envelope` without relay-owned room targeting
-/// reaches mesh authorization. The original envelope is still available, so
-/// the relay can correlate the transport error via `re` when auth fails.
+/// A `pi_envelope` with a valid `to_pc` but MISSING `to_room` returns
+/// `transport_error: bad_envelope` — the relay requires `to_room` for
+/// room-targeted routing. (Was `no_to_room_reaches_authorization` under the
+/// legacy peer-wide contract; the AC now mandates bad_envelope, not auth.)
 #[tokio::test]
-async fn no_to_room_reaches_authorization() {
+async fn missing_to_room_returns_bad_envelope() {
     let port = start_relay().await;
 
     let sk_a = random_key();
@@ -363,6 +425,7 @@ async fn no_to_room_reaches_authorization() {
         json!({
             "type": "pi_envelope",
             "to_pc": peer_b,
+            // deliberately no to_room
             "envelope": {
                 "from": "casa:sess-3",
                 "to": "trab:agent-1",
@@ -376,8 +439,8 @@ async fn no_to_room_reaches_authorization() {
     .await
     .unwrap();
 
-    let frame = recv_json(&mut ws_a, "ws_a no-to-room not_authorized").await;
-    assert_transport_error(&frame, "not_authorized", Some(original_id));
+    let frame = recv_json(&mut ws_a, "ws_a missing-to-room bad_envelope").await;
+    assert_transport_error(&frame, "bad_envelope", Some(original_id));
     assert_eq!(frame["envelope"]["to"], "casa:sess-3");
 }
 
@@ -409,7 +472,7 @@ async fn cache_warm_subsequent_envelopes_still_delivered() {
             "re": null,
             "body": { "type": "ping", "seq": i },
         });
-        send_pi_envelope(&mut ws_a, &peer_b, env.clone()).await;
+        send_pi_envelope(&mut ws_a, &peer_b, "main", env.clone()).await;
         let frame = recv_json(&mut ws_b, &format!("ws_b iter {i}")).await;
         assert_eq!(frame["envelope"]["id"], format!("u{i}"));
         assert_eq!(frame["envelope"]["body"]["seq"], i);

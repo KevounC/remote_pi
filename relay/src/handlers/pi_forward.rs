@@ -159,14 +159,17 @@ pub enum PiForwardResult {
 /// Pi-A pubkey (already verified by the WS handshake).
 pub(crate) async fn handle_pi_envelope(
     sender_peer_id: &str,
+    sender_conn_id: u64,
+    sender_room_id: &str,
     frame: PiEnvelopeFrame,
     delivery: &ConnectionRegistry,
     mesh: &MeshStore,
     cache: &MeshAuthCache,
 ) -> PiForwardResult {
-    if frame.to_pc.is_empty() {
+    if frame.to_pc.is_empty() || frame.to_room.is_empty() {
         return PiForwardResult::TransportError(make_transport_error_from_agent(
             Some(&frame.envelope),
+            sender_room_id,
             "bad_envelope",
         ));
     }
@@ -174,41 +177,54 @@ pub(crate) async fn handle_pi_envelope(
     if !cache.is_authorized(sender_peer_id, frame.to_pc.as_str(), mesh) {
         return PiForwardResult::TransportError(make_transport_error_from_agent(
             Some(&frame.envelope),
+            sender_room_id,
             "not_authorized",
         ));
     }
 
     let outbound = PiEnvelopeInFrame {
         from_pc: sender_peer_id.to_owned(),
+        to_room: frame.to_room.clone(),
         envelope: frame.envelope,
     };
 
-    if delivery.send_to_peer(
+    // Room-targeted delivery: only the addressed room of the destination peer
+    // receives the frame, and the sender's own connection is skipped so
+    // multi-device Owners don't echo their own outbound messages.
+    if delivery.send_to_room(
         frame.to_pc.as_str(),
+        frame.to_room.as_str(),
         Message::Text(
             serde_json::to_string(&CrossPcFrame::PiEnvelopeIn(outbound.clone()))
                 .expect("generated pi_envelope_in must serialize"),
         ),
+        sender_conn_id,
     ) {
         PiForwardResult::Forwarded
     } else {
         PiForwardResult::TransportError(make_transport_error_from_agent(
             Some(&outbound.envelope),
+            sender_room_id,
             "offline",
         ))
     }
 }
 
-pub(crate) fn handle_malformed_pi_envelope(frame: &serde_json::Value) -> PiForwardResult {
+pub(crate) fn handle_malformed_pi_envelope(
+    frame: &serde_json::Value,
+    sender_room_id: &str,
+) -> PiForwardResult {
     PiForwardResult::TransportError(make_transport_error_from_raw(
         frame.get("envelope"),
+        sender_room_id,
         "bad_envelope",
     ))
 }
 
-fn make_pi_envelope_in(from_pc: &str, envelope: AgentEnvelope) -> Message {
+fn make_pi_envelope_in(from_pc: &str, to_room: &str, envelope: AgentEnvelope) -> Message {
     let frame = CrossPcFrame::PiEnvelopeIn(PiEnvelopeInFrame {
         from_pc: from_pc.to_string(),
+        to_room: to_room.to_string(),
         envelope,
     });
     Message::Text(serde_json::to_string(&frame).expect("generated pi_envelope_in must serialize"))
@@ -216,15 +232,23 @@ fn make_pi_envelope_in(from_pc: &str, envelope: AgentEnvelope) -> Message {
 
 /// Builds a `pi_envelope_in` frame whose inner envelope carries
 /// `body.type = "transport_error"`, correlated to the original via `re`.
-fn make_transport_error_from_agent(envelope: Option<&AgentEnvelope>, reason: &str) -> Message {
+fn make_transport_error_from_agent(
+    envelope: Option<&AgentEnvelope>,
+    to_room: &str,
+    reason: &str,
+) -> Message {
     let (re, to_addr) = match envelope {
         Some(envelope) => (Some(envelope.id.clone()), envelope.from.clone()),
         None => (None, "_unknown".to_string()),
     };
-    make_transport_error(re, to_addr, reason)
+    make_transport_error(re, to_addr, to_room, reason)
 }
 
-fn make_transport_error_from_raw(envelope: Option<&serde_json::Value>, reason: &str) -> Message {
+fn make_transport_error_from_raw(
+    envelope: Option<&serde_json::Value>,
+    to_room: &str,
+    reason: &str,
+) -> Message {
     let (re, to_addr) = match envelope {
         Some(e) => (
             e.get("id").and_then(|v| v.as_str()).map(String::from),
@@ -235,10 +259,15 @@ fn make_transport_error_from_raw(envelope: Option<&serde_json::Value>, reason: &
         ),
         None => (None, "_unknown".to_string()),
     };
-    make_transport_error(re, to_addr, reason)
+    make_transport_error(re, to_addr, to_room, reason)
 }
 
-fn make_transport_error(re: Option<String>, to_addr: String, reason: &str) -> Message {
+fn make_transport_error(
+    re: Option<String>,
+    to_addr: String,
+    to_room: &str,
+    reason: &str,
+) -> Message {
     let err_envelope = AgentEnvelope {
         from: "_relay".to_string(),
         to: serde_json::Value::String(to_addr),
@@ -246,7 +275,7 @@ fn make_transport_error(re: Option<String>, to_addr: String, reason: &str) -> Me
         re,
         body: serde_json::json!({ "type": "transport_error", "reason": reason }),
     };
-    make_pi_envelope_in("_relay", err_envelope)
+    make_pi_envelope_in("_relay", to_room, err_envelope)
 }
 
 fn make_relay_envelope_id() -> String {
@@ -458,7 +487,17 @@ mod tests {
         write_invalid_owner_blob(&store, &owner, &["pi_a", "pi_b"], 1);
         let delivery = registry.connections();
 
-        match handle_pi_envelope("pi_a", valid_frame(), &delivery, &store, &cache).await {
+        match handle_pi_envelope(
+            "pi_a",
+            u64::MAX,
+            "main",
+            valid_frame(),
+            &delivery,
+            &store,
+            &cache,
+        )
+        .await
+        {
             PiForwardResult::TransportError(message) => {
                 let frame = transport_error_json(message);
                 assert_eq!(frame["envelope"]["body"]["reason"], "not_authorized");
@@ -501,6 +540,7 @@ mod tests {
     fn valid_frame() -> PiEnvelopeFrame {
         PiEnvelopeFrame {
             to_pc: "pi_b".to_string(),
+            to_room: "main".to_string(),
             envelope: valid_envelope(),
         }
     }
@@ -517,7 +557,7 @@ mod tests {
         let store = MeshStore::open_in_memory().unwrap();
         let cache = MeshAuthCache::new();
         let delivery = registry.connections();
-        match handle_pi_envelope("pi_a", frame, &delivery, &store, &cache).await {
+        match handle_pi_envelope("pi_a", u64::MAX, "main", frame, &delivery, &store, &cache).await {
             PiForwardResult::TransportError(message) => {
                 transport_error_json(message)["envelope"]["body"]["reason"]
                     .as_str()
@@ -529,7 +569,7 @@ mod tests {
     }
 
     fn malformed_transport_error_reason(frame: serde_json::Value) -> String {
-        match handle_malformed_pi_envelope(&frame) {
+        match handle_malformed_pi_envelope(&frame, "main") {
             PiForwardResult::TransportError(message) => {
                 transport_error_json(message)["envelope"]["body"]["reason"]
                     .as_str()
@@ -544,6 +584,13 @@ mod tests {
     async fn typed_bad_envelope_when_to_pc_empty() {
         let mut frame = valid_frame();
         frame.to_pc.clear();
+        assert_eq!(typed_transport_error_reason(frame).await, "bad_envelope");
+    }
+
+    #[tokio::test]
+    async fn typed_bad_envelope_when_to_room_empty() {
+        let mut frame = valid_frame();
+        frame.to_room.clear();
         assert_eq!(typed_transport_error_reason(frame).await, "bad_envelope");
     }
 
@@ -580,7 +627,17 @@ mod tests {
         write_owner_blob(&store, &owner, &["pi_a", "pi_b"], 1);
         let delivery = registry.connections();
 
-        match handle_pi_envelope("pi_a", valid_frame(), &delivery, &store, &cache).await {
+        match handle_pi_envelope(
+            "pi_a",
+            u64::MAX,
+            "main",
+            valid_frame(),
+            &delivery,
+            &store,
+            &cache,
+        )
+        .await
+        {
             PiForwardResult::TransportError(message) => {
                 let frame = transport_error_json(message);
                 assert_eq!(frame["envelope"]["body"]["reason"], "offline");
@@ -595,7 +652,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn authorized_forward_targets_all_live_peer_rooms() {
+    async fn authorized_forward_targets_only_addressed_room() {
         let registry = make_registry();
         let (tx_main, mut rx_main) = tokio::sync::mpsc::unbounded_channel::<Message>();
         let (tx_work, mut rx_work) = tokio::sync::mpsc::unbounded_channel::<Message>();
@@ -610,30 +667,32 @@ mod tests {
         let cache = MeshAuthCache::new();
         let owner = make_owner_key();
         write_owner_blob(&store, &owner, &["pi_a", "pi_b"], 1);
-        let frame = valid_frame();
+        // Address the frame to the "work" room only.
+        let mut frame = valid_frame();
+        frame.to_room = "work".to_string();
         let expected_envelope = serde_json::to_value(&frame.envelope).unwrap();
         let delivery = registry.connections();
 
-        match handle_pi_envelope("pi_a", frame, &delivery, &store, &cache).await {
+        match handle_pi_envelope("pi_a", u64::MAX, "main", frame, &delivery, &store, &cache).await {
             PiForwardResult::Forwarded => {}
             PiForwardResult::TransportError(_) => {
-                panic!("authorized peer-wide forward should deliver")
+                panic!("authorized room-targeted forward should deliver")
             }
         }
 
-        for (label, rx) in [("main", &mut rx_main), ("work", &mut rx_work)] {
-            let Message::Text(text) = rx.try_recv().unwrap() else {
-                panic!("forwarded message to {label} must be text");
-            };
-            let forwarded: serde_json::Value = serde_json::from_str(&text).unwrap();
-            assert_eq!(forwarded["type"], "pi_envelope_in");
-            assert_eq!(forwarded["from_pc"], "pi_a");
-            assert_eq!(forwarded["envelope"], expected_envelope);
-            assert!(
-                forwarded.get("to_room").is_none(),
-                "cross-PC generated wrapper must not add relay-owned room targeting in this slice"
-            );
-        }
+        // Only the addressed "work" room receives the frame; "main" does not.
+        let Message::Text(text) = rx_work.try_recv().unwrap() else {
+            panic!("forwarded message to work must be text");
+        };
+        let forwarded: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(forwarded["type"], "pi_envelope_in");
+        assert_eq!(forwarded["from_pc"], "pi_a");
+        assert_eq!(forwarded["to_room"], "work");
+        assert_eq!(forwarded["envelope"], expected_envelope);
+        assert!(
+            rx_main.try_recv().is_err(),
+            "room-targeted forward must not deliver to the non-addressed \"main\" room"
+        );
     }
 
     #[tokio::test]
@@ -654,7 +713,7 @@ mod tests {
         let expected_from = frame.envelope.from.clone();
         let delivery = registry.connections();
 
-        match handle_pi_envelope("pi_a", frame, &delivery, &store, &cache).await {
+        match handle_pi_envelope("pi_a", u64::MAX, "main", frame, &delivery, &store, &cache).await {
             PiForwardResult::Forwarded => {}
             PiForwardResult::TransportError(_) => {
                 panic!("authenticated sender peer id must authorize this forward")

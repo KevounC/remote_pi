@@ -1,7 +1,7 @@
 ---
 id: gate-tests-pi-envelope-in-to-room
 kind: story
-stage: implementing
+stage: done
 tags: [testing]
 parent: null
 depends_on: []

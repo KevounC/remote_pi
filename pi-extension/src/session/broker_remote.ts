@@ -354,7 +354,7 @@ export class BrokerRemote implements RemoteRouter {
     // yet, the recipient's wrapper still injects (the broker just decides
     // received/busy/denied on actual local UDS state). A simultaneous
     // `peers_request` warms the cache for next time.
-    this.pi.sendEnvelopeToPi(siblingPk, rewritten);
+    this.pi.sendEnvelopeToPi(siblingPk, "main", rewritten);
     if (this.remotePeers.get(pcLabel) === undefined) {
       this._sendControlEnvelope(siblingPk, { type: "peers_request" } satisfies PeersRequestBody);
       void this._awaitPeersFill(pcLabel, PEERS_REQUEST_TIMEOUT_MS);
@@ -463,7 +463,7 @@ export class BrokerRemote implements RemoteRouter {
       re: env.id,
       body: ackBody,
     };
-    this.pi.sendEnvelopeToPi(fromPc, ackEnv);
+    this.pi.sendEnvelopeToPi(fromPc, "main", ackEnv);
   }
 
   // ── Internals ─────────────────────────────────────────────────────────────
@@ -528,7 +528,7 @@ export class BrokerRemote implements RemoteRouter {
       body,
       null,
     );
-    this.pi.sendEnvelopeToPi(toPc, env);
+    this.pi.sendEnvelopeToPi(toPc, "main", env);
   }
 
   private _labelForPubkey(pcPubkey: string): string | undefined {

@@ -1,7 +1,7 @@
 ---
 id: gate-tests-to-room-room-targeted-delivery
 kind: story
-stage: implementing
+stage: done
 tags: [testing]
 parent: null
 depends_on: []

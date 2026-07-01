@@ -19,12 +19,14 @@ pub struct AgentEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PiEnvelopeFrame {
     pub to_pc: String,
+    pub to_room: String,
     pub envelope: AgentEnvelope,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PiEnvelopeInFrame {
     pub from_pc: String,
+    pub to_room: String,
     pub envelope: AgentEnvelope,
 }
 

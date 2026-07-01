@@ -913,8 +913,14 @@ function emitRustCrossPc(entries, schemaPath) {
     if (type === 'pi_envelope' && !schemaHasProperty(schema, 'to_pc')) {
       throw new Error('pi_envelope schema must declare to_pc');
     }
+    if (type === 'pi_envelope' && !schemaHasProperty(schema, 'to_room')) {
+      throw new Error('pi_envelope schema must declare to_room');
+    }
     if (type === 'pi_envelope_in' && !schemaHasProperty(schema, 'from_pc')) {
       throw new Error('pi_envelope_in schema must declare from_pc');
+    }
+    if (type === 'pi_envelope_in' && !schemaHasProperty(schema, 'to_room')) {
+      throw new Error('pi_envelope_in schema must declare to_room');
     }
     if (!schemaHasProperty(schema, 'envelope')) throw new Error(`${type} schema must declare envelope`);
   }
@@ -934,12 +940,14 @@ function emitRustCrossPc(entries, schemaPath) {
   lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
   lines.push('pub struct PiEnvelopeFrame {');
   lines.push('    pub to_pc: String,');
+  lines.push('    pub to_room: String,');
   lines.push('    pub envelope: AgentEnvelope,');
   lines.push('}');
   lines.push('');
   lines.push('#[derive(Debug, Clone, Serialize, Deserialize)]');
   lines.push('pub struct PiEnvelopeInFrame {');
   lines.push('    pub from_pc: String,');
+  lines.push('    pub to_room: String,');
   lines.push('    pub envelope: AgentEnvelope,');
   lines.push('}');
   lines.push('');

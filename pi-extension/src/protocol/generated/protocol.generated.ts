@@ -573,6 +573,7 @@ export type CrossPcType = (typeof crossPcTypes)[number];
 export interface CrossPcFramePiEnvelope {
   readonly type: "pi_envelope";
   readonly to_pc: string;
+  readonly to_room: string;
   readonly envelope: {
   readonly from: string;
   readonly to: string | Array<string>;
@@ -585,6 +586,7 @@ export interface CrossPcFramePiEnvelope {
 export interface CrossPcFramePiEnvelopeIn {
   readonly type: "pi_envelope_in";
   readonly from_pc: string;
+  readonly to_room: string;
   readonly envelope: {
   readonly from: "_relay";
   readonly to: string;
