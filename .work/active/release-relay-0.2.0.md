@@ -34,4 +34,23 @@ plus reachability-contract-state-machine-step-4 (parent is multi-component → r
 (none)
 
 ## Gate runs
-(populated in Phase 4)
+
+### gate-cruft (2026-07-01) — 2 findings (0 high, 1 medium, 1 low)
+
+- Medium: unused ActorDispatch::Close variant behind #[allow(dead_code)] (connection_actor.rs:28)
+- Low: PresenceTransitions single-impl pass-through trait (registry.rs:64)
+2 items → backlog (non-blocking). Tighter grep-first scoping avoided compaction.
+
+### gate-docs (2026-07-01) — 1 finding (0 high, 0 medium, 1 low)
+
+- Low: relay/CLAUDE.md logging guidance references info_span! but handlers use info!/warn!/error! directly (:30)
+1 item → backlog. Docs gate SUCCEEDED this run (tighter grep-first prompt — no compaction; previously failed twice on app).
+
+(populated by remaining gates as they complete)
+
+### Binding-consistency warnings
+
+binding_guard=warn epic_cohesion=phased. CONFLICTS(3) + INCOMPLETES(5), all
+informational/non-halting — phased delivery where relay-tagged stories ship here
+while multi-component parents (canonical-session, generated-protocol,
+reachability-contract-state-machine) ship in v0.6.0. Same pattern as prior releases.
