@@ -3,9 +3,9 @@ import type { TranscriptEvent } from "./transcript_event.js";
 /**
  * Process-local, append-only transcript event store.
  *
- * The Pi SDK is the durable session owner; this log is the extension's typed
- * in-memory mirror used to answer Remote Pi `session_sync` without keeping the
- * old SDK-message-shaped buffer as projection state.
+ * The Pi SDK is the durable session owner; this log is the extension's typed,
+ * session-scoped replay source used to answer Remote Pi `session_sync` without
+ * letting legacy SDK-message fixtures or mutable UI rows own history semantics.
  */
 export class TranscriptEventLog {
   private readonly events: TranscriptEvent[] = [];

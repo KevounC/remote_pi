@@ -2100,8 +2100,8 @@ export function _routeClientMessageFrom(
       // Source-of-truth rebroadcast (plan/24 W2D fix). Echo the message
       // back to every attached owner (sender included) after the SDK accepts
       // the handoff, so optimistic app bubbles only confirm on real delivery.
-      // The user_message is also recorded in the projection transcript after
-      // SDK acceptance, so a later `session_sync` returns it in history.
+      // The user_message is also recorded in the transcript event log after
+      // SDK acceptance, so a later `session_sync` replays it in history.
       void _deliverUserMessage(msg, sender).catch((err: unknown) => {
         const detail = err instanceof Error ? err.message : String(err);
         _sendDeliveryError(sender, msg.id, detail);
@@ -2139,9 +2139,10 @@ export function _routeClientMessageFrom(
       const actionCtx = _sdkSessionProjection.freshCommandActionCtx();
       if (process.env["REMOTE_PI_DAEMON"] === "1" && !actionCtx?.newSession) {
         // Headless RPC daemon has no ExtensionCommandContext, so ctx.newSession
-        // is unavailable. Ack, clear remote-pi's mirror, then exit with a
-        // private code; the supervisor restarts once without --continue, which
-        // creates a fresh Pi session. Later restarts resume that fresh session.
+        // is unavailable. Ack, rotate remote-pi's session-scoped replay state,
+        // then exit with a private code; the supervisor restarts once without
+        // --continue, which creates a fresh Pi session. Later restarts resume
+        // that fresh session.
         sender.send({ type: "action_ok", session_id: msg.session_id, in_reply_to: msg.id, action: "session_new" });
         _resetSessionForNew(msg.id);
         setTimeout(() => process.exit(EXIT_DAEMON_FRESH_SESSION), 100);
@@ -2164,10 +2165,9 @@ export function _routeClientMessageFrom(
         },
       ).then((created) => {
         // Pi-side reset is durable only here: handleSessionNew swaps the SDK
-        // session, but the app's session_sync log and session clock live in
-        // SdkSessionProjection. Reset them + fan out an empty history so every
-        // owner drops the stale conversation
-        // — not just the sender, who also clears locally on action_ok.
+        // session, but the Remote Pi session clock and transcript event log live
+        // in SdkSessionProjection. Rotate them and fan out an empty history as a
+        // compatibility notification for every owner, not just the sender.
         if (created) _resetSessionForNew(msg.id);
       });
       break;
@@ -2252,19 +2252,16 @@ function _buildSessionHistoryMessage(
 }
 
 /**
- * Resets the Pi-side session view after a SUCCESSFUL `session_new`. The app's
- * New Session clears its local store on `action_ok`, but that alone isn't
- * durable: the projection transcript (which answers `session_sync`) is append-only
- * and sessionStartedAt is stamped once, so a later reconnect/restart would replay
- * the OLD history. We clear the transcript event log, restamp the clock, and
- * broadcast an EMPTY `session_history` — the exact shape `_handleSessionSync`
- * sends, just with `events: []` — so every attached owner drops the stale
- * conversation. The app's `_applyHistory` substitutes its cache wholesale, so
- * no new app-side code is needed.
+ * Resets the Pi-side session view after a SUCCESSFUL `session_new`. The
+ * transcript event log answers `session_sync` by replaying session-scoped facts;
+ * rotating the remote session id and clearing that log is the correctness
+ * boundary, independent of whether any app chooses to replace or preserve local
+ * rows for older sessions. The empty `session_history` broadcast is only a
+ * compatibility notification for already-attached owners.
  *
  * Unlike a per-request session_history reply (which must go to the sender
  * channel only), this is an intentional fan-out: a new session is global state,
- * so every owner must see the reset.
+ * so every owner may reconcile immediately.
  */
 function _resetSessionForNew(inReplyTo: string): void {
   _applyTurnAndPublish({ type: "session_shutdown" });

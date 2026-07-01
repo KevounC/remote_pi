@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-hydration-replay-step-3
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-transcript-event-log-hydration-replay
 depends_on: [epic-bold-transcript-event-log-hydration-replay-step-2]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 3: Make pi-extension `session_history` replay-compatible and independent of app replacement
@@ -77,3 +77,14 @@ function _buildSessionHistoryMessage(
 ## Rollback
 
 Restore `_messageBuffer` / `_mapAgentMessagesToEvents` as the direct `session_history` source and the old replacement-oriented comments/tests. App replay work remains local.
+
+## Implementation
+
+- `session_history` remains built by `SdkSessionProjection.buildSessionHistoryMessage()` from the session-scoped `TranscriptEventLog` via `projectSessionHistory()`, with legacy SDK-message fixtures adapted into transcript events only at the test seam.
+- Replaced replacement-oriented comments around `session_new` with replay-compatible wording: session rotation plus transcript-log reset is the correctness boundary; the empty broadcast is only an attached-owner compatibility notification.
+- Added coverage that identical transcript facts replay stable `session_history.events` across different `session_sync` request ids, and strengthened reconnect coverage to compare pre- and post-reconnect event payloads.
+- Verification:
+  - `corepack pnpm typecheck` passed.
+  - `corepack pnpm build` passed.
+  - `corepack pnpm exec vitest run src/extension.test.ts` reported 162 passed / 4 failed / 0 skipped in this file. The 4 failures match the documented false-alarm discriminator: `after a clean reset, connect works again (flag is per-instance, not sticky)`, `join emits remote-pi:name-assigned with requested + assigned + changed`, `rename:<name> renames live (broker re-register + relay swap), process/session survive`, and `a second same-name agent joins as <name>#2 instead of being refused`.
+  - Targeted replay checks passed: 4 passed / 162 skipped for `successful reconnect preserves session_id, sessionStartedAt, and transcript history`, `event-log seam dedupes by eventId and session_sync scopes to active session`, `session_sync replays stable history events across request ids`, and `session_sync projects the transcript event log fixture across canonical-session boundary`.

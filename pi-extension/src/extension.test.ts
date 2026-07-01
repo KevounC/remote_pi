@@ -4470,6 +4470,16 @@ describe("relay reconnect", () => {
         { role: "assistant", content: [{ type: "text", text: "yo" }], timestamp: sessionTs + 200 },
       ]);
 
+      const preReconnectSends = relayInstances[0]!.send.mock.calls.length;
+      relayInstances[0]!.emit("message", makeInnerLine(APP_PEER_ID, {
+        type: "session_sync", id: "pre-reconnect", session_id: "sdk-session-preserve", limit: 50,
+      }));
+      const preReconnectHistory = relayInstances[0]!.send.mock.calls.slice(preReconnectSends)
+        .map((c) => c[0] as string)
+        .map(decodeSentCt)
+        .find((d) => d.inner.type === "session_history")!;
+      const preReconnectEvents = preReconnectHistory.inner["events"];
+
       relayInstances[0]!.emit("close");
       await vi.advanceTimersByTimeAsync(1_000);
       expect(relayInstances).toHaveLength(2);
@@ -4495,6 +4505,7 @@ describe("relay reconnect", () => {
         in_reply_to: "post-reconnect",
         session_started_at: sessionTs,
       });
+      expect(history?.inner["events"]).toEqual(preReconnectEvents);
       expect(history?.inner["events"]).toEqual(expect.arrayContaining([
         expect.objectContaining({ type: "user_input", text: "hi" }),
         expect.objectContaining({ type: "agent_message", text: "yo" }),
@@ -4656,6 +4667,62 @@ describe("cumulative transcript event log", () => {
     const events = h.inner["events"] as Array<{ id: string; text: string }>;
     expect(events).toEqual([{ ts: ts + 1, type: "user_input", id: "active-1", text: "kept once" }]);
     expect(h.inner["truncated"]).toBe(false);
+  });
+
+  test("session_sync replays stable history events across request ids", async () => {
+    await _pairForTest("peer-stable-history");
+    const sessionId = currentSessionIdFromSends();
+    const ts = 1_700_000_150_000;
+    _setSessionStartedAtForTest(ts);
+    _setTranscriptEventsForTest([
+      {
+        kind: "user_confirmed",
+        eventId: "stable-user",
+        sessionId,
+        ts: ts + 1,
+        clientMessageId: "client-stable-1",
+        text: "stable prompt",
+      },
+      {
+        kind: "assistant_committed",
+        eventId: "stable-assistant",
+        sessionId,
+        ts: ts + 2,
+        messageId: "assistant-stable-1",
+        replyTo: "client-stable-1",
+        text: "stable reply",
+      },
+    ]);
+
+    const firstSends = relayRef.current!.send.mock.calls.length;
+    routeClientMessage(
+      { type: "session_sync", id: "stable-req-a", session_id: sessionId, limit: 50 },
+      { abort: () => undefined },
+    );
+    const first = relayRef.current!.send.mock.calls.slice(firstSends)
+      .map((c) => c[0] as string)
+      .map(decodeSentCt)
+      .find((d) => d.inner.type === "session_history")!;
+
+    const secondSends = relayRef.current!.send.mock.calls.length;
+    routeClientMessage(
+      { type: "session_sync", id: "stable-req-b", session_id: sessionId, limit: 50 },
+      { abort: () => undefined },
+    );
+    const second = relayRef.current!.send.mock.calls.slice(secondSends)
+      .map((c) => c[0] as string)
+      .map(decodeSentCt)
+      .find((d) => d.inner.type === "session_history")!;
+
+    const { in_reply_to: firstReply, ...firstStable } = first.inner as Record<string, unknown>;
+    const { in_reply_to: secondReply, ...secondStable } = second.inner as Record<string, unknown>;
+    expect(firstReply).toBe("stable-req-a");
+    expect(secondReply).toBe("stable-req-b");
+    expect(firstStable).toEqual(secondStable);
+    expect(firstStable["events"]).toEqual([
+      { ts: ts + 1, type: "user_input", id: "client-stable-1", text: "stable prompt" },
+      { ts: ts + 2, type: "agent_message", in_reply_to: "client-stable-1", text: "stable reply" },
+    ]);
   });
 
   test("session_sync projects the transcript event log fixture across canonical-session boundary", async () => {
