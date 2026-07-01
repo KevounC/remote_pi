@@ -1,14 +1,14 @@
 ---
 id: epic-bold-turn-state-machine-late-attach-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-turn-state-machine-late-attach
 depends_on: [epic-bold-turn-state-machine-late-attach-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Prove late-attach convergence across extension and app hydration
@@ -114,3 +114,16 @@ Medium. Tests may expose behavior that belongs to the projection-consumers sibli
 ## Rollback
 
 Revert the added convergence tests and any minimal app projection correction. Do not weaken existing convergence assertions; if they fail, fix the reducer/integration or route the broader work to `epic-bold-turn-state-machine-projection-consumers`.
+
+## Implementation
+
+- Added reducer convergence matrix in `pi-extension/src/session/turn_state.test.ts` covering terminal success before flush, late sync flush, queued drain eligibility after late sync, and shutdown; all assert `working:false`, `activeTurnId:null`, `cancelTargetId:null`, and target collection state.
+- Added extension integration coverage in `pi-extension/src/extension.test.ts` for late attach history flush clearing targets, shutdown before late flush sending no history, and existing late attach happy path now also asserts empty late targets after convergence.
+- Added app hydration coverage in `app/test/transport/connection_manager_working_test.dart` for `working:true` attach hydration, terminal `working:false`, and `session_history` not reviving room working.
+- Added SyncService coverage in `app/test/data/sync/sync_service_test.dart` proving `session_history` replay after terminal false does not reopen `isWorking`, `workingReplyTo`, streaming, room working, or durable session activity.
+- Production code changes: none.
+- Verification:
+  - `corepack pnpm typecheck`: passed.
+  - `corepack pnpm exec vitest run src/session/turn_state.test.ts`: 17 passed.
+  - `corepack pnpm exec vitest run src/extension.test.ts`: 165 passed, 4 failed with known environment false-alarm names: `after a clean reset, connect works again (flag is per-instance, not sticky)`, `join emits remote-pi:name-assigned with requested + assigned + changed`, `rename:<name> renames live (broker re-register + relay swap), process/session survive`, `a second same-name agent joins as <name>#2 instead of being refused`.
+  - `flutter test test/transport/connection_manager_working_test.dart test/data/sync/sync_service_test.dart`: 70 passed.

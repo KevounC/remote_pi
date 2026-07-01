@@ -2447,6 +2447,116 @@ describe("user_input mirroring", () => {
       .filter((f) => f.type === "room_meta_update");
     expect(workingUpdates.some((f) => f.meta?.working === false)).toBe(true);
     expectTurnProjectionConvergedIdle();
+    expect(_getTurnProjectionForTest().lateAttachSyncTargets).toEqual([]);
+  });
+
+  test("late attach session_history flush clears targets", async () => {
+    const peer = "owner-late-sync";
+    _knownPeers.push({
+      name: "Late Sync Phone",
+      remote_epk: peer,
+      paired_at: new Date().toISOString(),
+    });
+    captureHandler("remote-pi");
+    await _connectForTest(makeMockCtx("/tmp/remote-pi-late-sync"));
+    _setMessageBufferForTest([]);
+    _setTranscriptEventsForTest([]);
+
+    const onTurnStart = captureEventHandler("turn_start");
+    const onInput = captureEventHandler("input");
+    const onMsgEnd = captureEventHandler("message_end");
+    const onAgentEnd = captureEventHandler("agent_end");
+    const onTurnEnd = captureEventHandler("turn_end");
+
+    onTurnStart({ type: "turn_start", turnIndex: 0, timestamp: 0 });
+    onInput({ type: "input", text: "current turn", source: "interactive" });
+    const turnId = _getCurrentTurnIdForTest();
+    expect(turnId).toMatch(/^local_/);
+
+    relayRef.current!.emit("message", JSON.stringify({
+      peer,
+      ct: Buffer.from(JSON.stringify({ type: "ping", id: "late-sync-ping" })).toString("base64"),
+    }));
+    await vi.waitFor(() => expect(_hasActivePeerForTest(peer)).toBe(true), { timeout: 2000 });
+    expect(_getTurnProjectionForTest()).toMatchObject({
+      working: true,
+      cancelTargetId: turnId,
+    });
+
+    onMsgEnd({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "final before sync" }],
+        timestamp: 1700000001000,
+      },
+    });
+    const sendsBeforeFinish = relayRef.current!.send.mock.calls.length;
+    onAgentEnd({ type: "agent_end" });
+    await new Promise<void>((r) => setImmediate(r));
+    expect(_getTurnProjectionForTest()).toMatchObject({
+      phase: "done",
+      working: false,
+      activeTurnId: null,
+      cancelTargetId: null,
+      canDrainQueuedMessage: false,
+    });
+
+    onTurnEnd({ type: "turn_end", turnIndex: 0 });
+    await new Promise<void>((r) => setImmediate(r));
+
+    const sent = relayRef.current!.send.mock.calls.slice(sendsBeforeFinish)
+      .map((c) => c[0] as string).map(decodeSentCt);
+    const lateHistory = sent.find((d) => d.peer === peer && d.inner.type === "session_history");
+    expect(lateHistory?.inner).toMatchObject({ type: "session_history", in_reply_to: turnId });
+    expect(lateHistory?.inner["events"]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "agent_message", text: "final before sync" }),
+    ]));
+    expectTurnProjectionConvergedIdle();
+    expect(_getTurnProjectionForTest().lateAttachSyncTargets).toEqual([]);
+  });
+
+  test("session_shutdown before late attach flush sends no history and clears targets", async () => {
+    await _pairForTest("owner-primary-shutdown");
+    const onTurnStart = captureEventHandler("turn_start");
+    const onInput = captureEventHandler("input");
+    const onAgentEnd = captureEventHandler("agent_end");
+    const shutdown = captureEventHandler("session_shutdown");
+
+    onTurnStart({ type: "turn_start", turnIndex: 0, timestamp: 0 });
+    onInput({ type: "input", text: "current turn", source: "interactive" });
+    _knownPeers.push({
+      name: "Late Shutdown Phone",
+      remote_epk: "owner-late-shutdown",
+      paired_at: new Date().toISOString(),
+    });
+    relayRef.current!.emit("message", JSON.stringify({
+      peer: "owner-late-shutdown",
+      ct: Buffer.from(JSON.stringify({ type: "ping", id: "late-shutdown-ping" })).toString("base64"),
+    }));
+    await vi.waitFor(() => expect(_hasActivePeerForTest("owner-late-shutdown")).toBe(true), { timeout: 2000 });
+    onAgentEnd({ type: "agent_end" });
+    await new Promise<void>((r) => setImmediate(r));
+    expect(_getTurnProjectionForTest()).toMatchObject({
+      working: false,
+      cancelTargetId: null,
+      lateAttachSyncTargets: [{ kind: "owner", id: "owner-late-shutdown" }],
+    });
+
+    const sendsBeforeShutdown = relayRef.current!.send.mock.calls.length;
+    await shutdown({ type: "session_shutdown", reason: "quit" });
+
+    const sentAfterShutdown = relayRef.current!.send.mock.calls.slice(sendsBeforeShutdown)
+      .map((c) => c[0] as string).map(decodeSentCt);
+    expect(sentAfterShutdown.some((d) => d.peer === "owner-late-shutdown" && d.inner.type === "session_history")).toBe(false);
+    expect(_getTurnProjectionForTest()).toMatchObject({
+      working: false,
+      activeTurnId: null,
+      cancelTargetId: null,
+      awaitingSyncTurnId: null,
+      lateAttachSyncTargets: [],
+    });
+    _setDisposedForTest(false);
   });
 });
 

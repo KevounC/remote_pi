@@ -278,6 +278,63 @@ describe("turn state reducer", () => {
     });
   });
 
+  test("late attach terminal convergence matrix clears targets before queued drain", () => {
+    const lateAttachTerminalCases: Array<[string, TurnEvent[], { targets: unknown[]; canDrain: boolean }]> = [
+      [
+        "agent_done_then_turn_end",
+        [
+          { type: "turn_start", fallbackTurnId: "u1" },
+          { type: "peer_attached", target: { kind: "owner", id: "owner-1" } },
+          { type: "agent_done" },
+          { type: "turn_end" },
+        ],
+        { targets: [{ kind: "owner", id: "owner-1" }], canDrain: false },
+      ],
+      [
+        "turn_end_before_flush_then_flush",
+        [
+          { type: "turn_start", fallbackTurnId: "u1" },
+          { type: "peer_attached", target: { kind: "owner", id: "owner-1" } },
+          { type: "agent_done" },
+          { type: "turn_end" },
+          { type: "flush_late_attach_sync" },
+        ],
+        { targets: [], canDrain: false },
+      ],
+      [
+        "session_shutdown_before_flush",
+        [
+          { type: "turn_start", fallbackTurnId: "u1" },
+          { type: "peer_attached", target: { kind: "owner", id: "owner-1" } },
+          { type: "agent_done" },
+          { type: "session_shutdown" },
+        ],
+        { targets: [], canDrain: false },
+      ],
+      [
+        "queued_message_after_late_sync",
+        [
+          { type: "queued_message_set", id: "q1", text: "next" },
+          { type: "turn_start", fallbackTurnId: "u1" },
+          { type: "peer_attached", target: { kind: "owner", id: "owner-1" } },
+          { type: "agent_done" },
+          { type: "turn_end" },
+          { type: "flush_late_attach_sync" },
+        ],
+        { targets: [], canDrain: true },
+      ],
+    ];
+
+    for (const [name, events, expected] of lateAttachTerminalCases) {
+      const projection = projectTurn(reduce(events));
+      expect(projection.working, name).toBe(false);
+      expect(projection.activeTurnId, name).toBeNull();
+      expect(projection.cancelTargetId, name).toBeNull();
+      expect(projection.lateAttachSyncTargets, name).toEqual(expected.targets);
+      expect(projection.canDrainQueuedMessage, name).toBe(expected.canDrain);
+    }
+  });
+
   test("queued message drain becomes legal after every drain-preserving terminal state reaches idle", () => {
     const terminalCases: Array<[string, TurnEvent[]]> = [
       ["success", [{ type: "agent_done" }, { type: "turn_end" }, { type: "flush_late_attach_sync" }]],

@@ -64,6 +64,8 @@ class _ControllableChannel implements IChannel, IControlLink {
 
   void pushControl(ControlInbound m) => _controlCtrl.add(m);
 
+  void pushServer(ServerMessage m) => _serverCtrl.add(m);
+
   // Avoid analyzer "unused" on the import.
   // ignore: unused_element
   Uint8List _placeholder() => Uint8List(0);
@@ -274,6 +276,60 @@ void main() {
         expect(
           cm.roomsFor('epk_test').singleWhere((r) => r.roomId == 'r1').working,
           isFalse,
+        );
+
+        cm.dispose();
+      },
+    );
+
+    test(
+      'late attach hydrates working true then terminal false without history reviving room working',
+      () async {
+        final ch = _ControllableChannel();
+        final cm = await _connected(ch);
+
+        ch.pushControl(
+          const RoomAnnounced(
+            peer: 'epk_test',
+            roomId: 'r1',
+            startedAt: 1,
+            working: true,
+          ),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        expect(cm.isRoomWorking('epk_test', 'r1'), isTrue);
+
+        ch.pushControl(
+          const RoomMetaUpdated(
+            peer: 'epk_test',
+            roomId: 'r1',
+            working: false,
+            hasModel: false,
+            hasThinking: false,
+          ),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        expect(cm.isRoomWorking('epk_test', 'r1'), isFalse);
+        expect(
+          cm.roomTurnProjection('epk_test', 'r1').status,
+          AppTurnStatus.idle,
+        );
+
+        ch.pushServer(
+          const SessionHistory(
+            inReplyTo: 'turn-1',
+            sessionStartedAt: 1,
+            events: [AgentMessageEvt(ts: 2, inReplyTo: 'turn-1', text: 'done')],
+            eos: true,
+            truncated: false,
+          ),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+
+        expect(cm.isRoomWorking('epk_test', 'r1'), isFalse);
+        expect(
+          cm.roomTurnProjection('epk_test', 'r1').status,
+          AppTurnStatus.idle,
         );
 
         cm.dispose();

@@ -775,6 +775,52 @@ void main() {
   });
 
   test(
+    'late session_history after terminal false does not reopen working or cancel target',
+    () async {
+      final s = await setup();
+
+      s.ch.push(UserInput(id: 'late-u1', text: 'from late attach'));
+      await _settle();
+      expect(s.sync.isWorking, isTrue);
+      expect(s.sync.workingReplyTo, 'late-u1');
+      expect(s.conn.isRoomWorking(s.epk, 'main'), isTrue);
+
+      s.ch.push(AgentChunk(inReplyTo: 'late-u1', delta: 'final text'));
+      await _settle();
+      s.ch.push(AgentDone(inReplyTo: 'late-u1'));
+      await _settle();
+      expect(s.sync.isWorking, isFalse);
+      expect(s.sync.workingReplyTo, isNull);
+      expect(s.sync.streaming, isNull);
+      expect(s.conn.isRoomWorking(s.epk, 'main'), isFalse);
+
+      s.ch.pushRaw(
+        SessionHistory(
+          sessionId: s.sessionId,
+          inReplyTo: 'late-u1',
+          sessionStartedAt: 1,
+          events: const [
+            UserInputEvt(ts: 1, id: 'late-u1', text: 'from late attach'),
+            AgentMessageEvt(ts: 2, inReplyTo: 'late-u1', text: 'final text'),
+          ],
+          eos: true,
+          truncated: false,
+        ),
+      );
+      await _settle();
+
+      expect(s.sync.isWorking, isFalse);
+      expect(s.sync.workingReplyTo, isNull);
+      expect(s.sync.streaming, isNull);
+      expect(s.conn.isRoomWorking(s.epk, 'main'), isFalse);
+      expect(index(s.epk)?.status, SessionActivity.idle);
+
+      s.conn.dispose();
+      s.sync.dispose();
+    },
+  );
+
+  test(
     'disconnect while online keeps pending backstops and avoids stuck bubbles',
     () async {
       const short = Duration.zero;
