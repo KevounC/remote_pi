@@ -49,6 +49,20 @@ repo-level v0.6.0) — phased delivery, informational under epic_cohesion: phase
 
 (populated by remaining gates as they complete)
 
+### gate-security (2026-07-01) — 4 findings (0 critical, 1 high, 2 medium, 1 low)
+
+- **High (blocking)**: relay auth signs attacker-controlled nonce with long-term owner Ed25519 key — cross-protocol signing oracle (ws_transport.dart:184)
+- Medium: transcript Hive box names can collide after _safe sanitization (boxes.dart:98)
+- Medium: durable transcript boxes unencrypted (boxes.dart:77)
+- Low: outbound message previews logged (sync_service.dart:260)
+1 high bound (implementing, blocking); 3 med/low → backlog.
+
+### gate-patterns (2026-07-01) — 4 pattern candidates discovered
+
+4 reusable shapes (3+ occurrences each): immutable-Hive-record-DTO-triad, incremental-Hive-projection-streams, transcript-pipeline-replay→projection→materialized-rows, reachability-as-explicit-state-machine. Pattern-skill authoring deferred (separate artifact under .agents/skills/patterns/). Recorded for traceability.
+
+### gate-docs (2026-07-01) — re-scanning (first scanner hit compaction, returned no output)
+
 ### Binding-consistency warnings
 
 binding_guard=warn epic_cohesion=phased. CONFLICTS(6) + INCOMPLETES(4), all
