@@ -1958,9 +1958,13 @@ describe("multi-channel broadcast (W2D)", () => {
     const peer = "owner-session-start-fresh";
     await _pairForTest(peer);
     const staleSendUserMessage = vi.fn(() => { throw new Error("This extension ctx is stale after session replacement or reload."); });
+    const staleSetModel = vi.fn(async () => { throw new Error("stale _pi setModel must not run"); });
+    const staleSetThinkingLevel = vi.fn(() => { throw new Error("stale _pi setThinkingLevel must not run"); });
     _setPiForTest({
       sendUserMessage: staleSendUserMessage,
       sendMessage: vi.fn(() => { throw new Error("This extension ctx is stale after session replacement or reload."); }),
+      setModel: staleSetModel,
+      setThinkingLevel: staleSetThinkingLevel,
     });
 
     const onSessionStart = captureEventHandler("session_start");
@@ -1975,15 +1979,21 @@ describe("multi-channel broadcast (W2D)", () => {
         input: ["text", "image"],
       };
       const freshSendUserMessage = vi.fn(async () => undefined);
+      const freshSetModel = vi.fn(async () => true);
+      const freshSetThinkingLevel = vi.fn();
       onSessionStart({ type: "session_start", reason }, {
         ...makeMockCtx(`/tmp/remote-pi-session-start-${reason}`),
         sessionManager: { getSessionId: () => `fresh-${reason}-session` },
         sendUserMessage: freshSendUserMessage,
         sendMessage: vi.fn(async () => undefined),
+        setModel: freshSetModel,
+        setThinkingLevel: freshSetThinkingLevel,
         modelRegistry: {
           refresh: vi.fn(),
           getAvailable: vi.fn(() => [model]),
-          find: vi.fn(),
+          find: vi.fn((provider: string, modelId: string) =>
+            provider === model.provider && modelId === model.id ? model : undefined,
+          ),
         },
         getModel: vi.fn(() => model),
       });
@@ -2002,10 +2012,29 @@ describe("multi-channel broadcast (W2D)", () => {
         id: `list-after-${reason}`,
         session_id: sessionId,
       });
+      emitClientMessage(peer, {
+        type: "model_set",
+        id: `model-set-after-${reason}`,
+        session_id: sessionId,
+        provider: model.provider,
+        model_id: model.id,
+      });
+      emitClientMessage(peer, {
+        type: "thinking_set",
+        id: `thinking-set-after-${reason}`,
+        session_id: sessionId,
+        level: "high",
+      });
       await new Promise<void>((r) => setImmediate(r));
 
       expect(staleSendUserMessage).not.toHaveBeenCalled();
       expect(freshSendUserMessage).toHaveBeenCalledWith(`hello after ${reason}`);
+      expect(staleSetModel).not.toHaveBeenCalled();
+      expect(staleSetThinkingLevel).not.toHaveBeenCalled();
+      expect(freshSetModel).toHaveBeenCalledTimes(1);
+      expect(freshSetModel).toHaveBeenCalledWith(model);
+      expect(freshSetThinkingLevel).toHaveBeenCalledTimes(1);
+      expect(freshSetThinkingLevel).toHaveBeenCalledWith("high");
       const sent = sentToPeerSince(sendsBefore, peer);
       expect(sent.find((d) => d.inner["id"] === `prompt-after-${reason}`)?.inner).toMatchObject({
         type: "user_message",
@@ -2016,6 +2045,8 @@ describe("multi-channel broadcast (W2D)", () => {
         current: expect.objectContaining({ id: `model-${reason}`, vision: true }),
         models: [expect.objectContaining({ id: `model-${reason}`, vision: true })],
       });
+      expect(sent.some((d) => d.inner.type === "action_ok" && d.inner["action"] === "model_set" && d.inner["in_reply_to"] === `model-set-after-${reason}`)).toBe(true);
+      expect(sent.some((d) => d.inner.type === "action_ok" && d.inner["action"] === "thinking_set" && d.inner["in_reply_to"] === `thinking-set-after-${reason}`)).toBe(true);
       onTurnEnd({ type: "turn_end" });
     }
   });

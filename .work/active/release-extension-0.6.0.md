@@ -99,11 +99,56 @@ Excluded deliberately; documented here so the gather is auditable.
   - 3 medium → backlog (non-blocking): relay-owner-channel-bridge,
     standalone-cli-unused-command-surface, index-legacy-test-aliases.
 
-- **gate-refactor** (2026-07-01) — 8 findings (4 high, 4 medium, 0 low) from 3 libraries: protocol-contract (4 findings), lifecycle (4 findings), boundaries (0 findings). High findings routed to blocking active stories; medium findings routed to backlog per `gate_finding_routing`. Ran inline because this sub-agent had no nested scanner dispatch tool; scan stayed grep-first and bundle-scoped.
-  - High/blocking: `gate-refactor-protocol-relay-client-control-dtos`, `gate-refactor-protocol-pi-forward-crosspc-dtos`, `gate-refactor-protocol-room-meta-literal`, `gate-refactor-lifecycle-relay-auth-timeout-listener`.
-  - Medium/backlog: `gate-refactor-protocol-session-scope-reenumeration`, `gate-refactor-lifecycle-session-start-fire-and-forget`, `gate-refactor-lifecycle-queued-delivery-fire-and-forget`, `gate-refactor-lifecycle-control-frame-fire-and-forget`.
-
-(populated in Phase 4 — remaining gates pending)
+- **gate-refactor** (2026-07-01) — 8 findings (4 high, 4 medium) from 3 scan libraries
+  (protocol-contract 4, lifecycle 4, boundaries 0). 1 high **resolved in-scope**;
+  3 high + 4 medium **deferred to backlog as pre-existing** (not bundle-introduced):
+  - `gate-refactor-protocol-pi-forward-crosspc-dtos` (high → **resolved**): the `to_room`
+    commit (`13701ee`, this bundle) hand-edited the `PiEnvelopeFrame`/`PiEnvelopeInFrame`
+    mirror instead of consuming the generated `CrossPcFramePiEnvelope*` types.
+    Replaced the handwritten interfaces with the generated types; typecheck +
+    76 transport/broker tests green.
+  - `gate-refactor-protocol-relay-client-control-dtos` (high → backlog): handwritten
+    `HelloMsg`/`AuthMsg`/etc. pre-date `extension-0.5.4` (MVP commit `0956a74`);
+    this bundle's `relay_client.ts` diff = reachability constants only.
+  - `gate-refactor-protocol-room-meta-literal` (high → backlog): the `room_meta_update`
+    literal pre-existed in `index.ts` (already present at `0.5.4`); the split *moved*
+    it into `relay_transport.ts` without introducing the handwritten discriminator.
+  - `gate-refactor-lifecycle-relay-auth-timeout-listener` (high → backlog): the
+    auth-timeout path at `relay_client.ts:253` was last touched MVP-era; bundle
+    didn't touch it (reachability-constants-only diff).
+  - 4 medium → backlog (non-blocking): session-scope-reenumeration,
+    session-start/queued-delivery/control-frame fire-and-forget.
+- **gate-security** (2026-07-01) — 13 findings (2 high, 11 medium/low). All routed
+  to backlog. The 2 high findings are **pre-existing crypto posture, not bundle
+  regressions** — disposition rationale:
+  - `gate-security-extension-relay-auth-signing-oracle` (high → backlog): bare-nonce
+    signing at `relay_client.ts:238` last touched at MVP commit `0956a74`, not this
+    bundle (this release's `relay_client.ts` diff = reachability constants only).
+    The app half of this exact finding already shipped fixed in app-v1.2.0
+    (`remote-pi-relay-auth-v1\n` prefix); the extension half is the residual
+    pair-mate — a cross-component change needing a paired relay+extension deploy.
+  - `gate-security-relay-owner-messages-unsigned` (high → backlog): base64-only `ct`
+    at `peer_channel.ts:67` introduced at MVP, a deliberate documented rollback;
+    this bundle's `peer_channel.ts` diff *adds* lifecycle guards + typed
+    `decodeClient` validation (improvements), not the no-MAC posture.
+  Gating them here would block a structural-refactor release for unrelated
+  long-standing crypto-design debt the bundle didn't touch.
+- **gate-tests** (2026-07-01) — 6 findings (1 critical blocking, 5 medium). The
+  critical finding **resolved in-scope**:
+  - `gate-tests-session-start-model-thinking-actions` (critical → **resolved**):
+    missing coverage for `model_set`/`thinking_set` after `session_start`
+    replacement reasons `resume`/`fork`/`reload` (acceptance criteria of the
+    bound `sdk-session-projection-module`). Extended the existing replacement
+    test to assert the fresh `session_start` action API is used and stale `_pi`
+    setters are not called across all four reasons. 169 extension tests green.
+  - 5 medium → backlog (non-blocking): app-preference-persistence,
+    control-command-serialization, daemon-create-flow, localboxes-restart-
+    preservation, relay-heartbeat-first-tick.
+- **gate-patterns** (2026-07-01) — 3 pattern candidates documented as pattern
+  skills under `.agents/skills/patterns/` + `.agents/rules/patterns.md` digest:
+  command-surface-adapter-classes, subscription-unsubscribe-contract,
+  typed-wire-decoders. No release-blocking findings (pattern gate is non-blocking
+  by design).
 
 ## Wire-change deployment note
 

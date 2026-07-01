@@ -1,7 +1,7 @@
 ---
 id: gate-tests-session-start-model-thinking-actions
 kind: story
-stage: implementing
+stage: done
 tags: [testing, pi-extension]
 parent: null
 depends_on: []

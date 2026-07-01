@@ -1,7 +1,7 @@
 ---
 id: gate-refactor-protocol-pi-forward-crosspc-dtos
 kind: story
-stage: implementing
+stage: done
 tags: []
 parent: null
 depends_on: []

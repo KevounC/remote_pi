@@ -1,37 +1,31 @@
 import { EventEmitter } from "node:events";
 import type { RelayClient } from "./relay_client.js";
 import type { Envelope } from "../session/envelope.js";
+import type {
+  CrossPcFramePiEnvelope,
+  CrossPcFramePiEnvelopeIn,
+} from "../protocol/generated/protocol.generated.js";
 
 /**
  * Plan/25 Wave A wire types — must stay bit-compatible with the relay's
  * `handlers/pi_forward.rs`.
  *
  * Outbound (Pi → relay):
- *   { type: "pi_envelope", to_pc: <pi-b-pubkey-base64>, envelope: {...} }
+ *   { type: "pi_envelope", to_pc: <pi-b-pubkey-base64>, to_room: <room>, envelope: {...} }
  *
  * Inbound (relay → Pi):
- *   { type: "pi_envelope_in", from_pc: <pi-a-pubkey-base64>, envelope: {...} }
+ *   { type: "pi_envelope_in", from_pc: <pi-a-pubkey-base64>, to_room: <room>, envelope: {...} }
  *
  * Transport errors arrive as a regular envelope nested inside the inbound
  * frame, with `envelope.from = "_relay"` and
  * `envelope.body = { type: "transport_error", reason }`. They are NOT a
  * separate frame type — `pi_forward_client` simply emits them through the
  * same `envelope` event and lets `broker_remote` recognize them.
+ *
+ * The cross-PC frame DTOs are the generated `CrossPcFrame*` types
+ * (`protocol.generated.ts`) — the single source of truth for the wire shape.
+ * No handwritten mirror is maintained here.
  */
-
-interface PiEnvelopeFrame {
-  type: "pi_envelope";
-  to_pc: string;
-  to_room: string;
-  envelope: Envelope;
-}
-
-interface PiEnvelopeInFrame {
-  type: "pi_envelope_in";
-  from_pc: string;
-  to_room: string;
-  envelope: Envelope;
-}
 
 /** Outbound API + inbound listener for Pi↔Pi envelope forwarding via relay. */
 export interface PiForwardClientEvents {
@@ -65,7 +59,12 @@ export class PiForwardClient extends EventEmitter {
    */
   sendEnvelopeToPi(toPc: string, toRoom: string, env: Envelope): void {
     if (this.detached) return;
-    const frame: PiEnvelopeFrame = { type: "pi_envelope", to_pc: toPc, to_room: toRoom, envelope: env };
+    const frame: CrossPcFramePiEnvelope = {
+      type: "pi_envelope",
+      to_pc: toPc,
+      to_room: toRoom,
+      envelope: env,
+    };
     try {
       this.relay.send(JSON.stringify(frame));
     } catch {
@@ -92,7 +91,7 @@ export class PiForwardClient extends EventEmitter {
       return;
     }
     if (!parsed || typeof parsed !== "object") return;
-    const o = parsed as Partial<PiEnvelopeInFrame>;
+    const o = parsed as Partial<CrossPcFramePiEnvelopeIn>;
     if (o.type !== "pi_envelope_in") return;
     if (typeof o.from_pc !== "string" || !o.envelope || typeof o.envelope !== "object") return;
 
