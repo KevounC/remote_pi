@@ -64,6 +64,33 @@ plus reachability-contract-state-machine-step-4 (parent is multi-component → r
 
 (populated by refactor/tests as they complete)
 
+### gate-refactor (2026-07-01) — 4 findings (0 high, 4 medium, 0 low) from 3 libraries
+
+- Medium: mesh membership blob parsed through serde_json::Value (pi_forward.rs:106) — same site scan-boundaries flagged
+- Medium: protocol parser reads process env directly (outer.rs:34)
+- Medium: control handler repeats generated frame type strings (control.rs:68)
+- Medium: relay outbound control frames undocumented hand-maintained island (registry_event_publisher.rs:49)
+4 items → backlog (non-blocking). boundaries=2, lifecycle=0, protocol-contract=2.
+
+### gate-tests (2026-07-01) — 6 gaps (5 critical, 0 high, 1 medium) from 206 ACs (200 covered)
+
+5 CRITICAL blocking, all clustered on to_room in cross-PC pi-envelope forwarding:
+- to_room missing/empty not tested as bad_envelope (pi_forward.rs:167)
+- valid to_pc/to_room frames uncoverable: PiEnvelopeFrame omits to_room (cross_pc.rs:20)
+- cross-PC forwarding covered as peer-wide fanout, not room-targeted (pi_forward.rs:186)
+- pi_envelope_in delivery doesn't test to_room metadata (pi_forward.rs:181)
+- unknown destination room not covered as correlated offline (pi_forward.rs:186)
+1 medium (relay heartbeat first-tick partial) → backlog.
+
+**NOTE**: the 5 critical gaps trace to an unimplemented feature, not just missing tests.
+The story relay-opaque-targeting-step-1 was approved claiming to_room parsing + bad_envelope,
+but handle_pi_envelope only checks to_pc.is_empty() and PiEnvelopeFrame has no to_room field.
+Tests assert to_room is ABSENT. Resolving requires implementing to_room routing + the tests.
+
+## Blocking findings (5) — must resolve before ship
+
+5 critical tests-gate gaps (to_room routing). Per gate_finding_routing (critical→implementing, blocking).
+
 ### Binding-consistency warnings
 
 binding_guard=warn epic_cohesion=phased. CONFLICTS(3) + INCOMPLETES(5), all
