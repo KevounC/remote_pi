@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-hydration-replay-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-transcript-event-log-hydration-replay
 depends_on: [epic-bold-transcript-event-log-hydration-replay-step-2]
@@ -88,3 +88,21 @@ Restore `_messageBuffer` / `_mapAgentMessagesToEvents` as the direct `session_hi
   - `corepack pnpm build` passed.
   - `corepack pnpm exec vitest run src/extension.test.ts` reported 162 passed / 4 failed / 0 skipped in this file. The 4 failures match the documented false-alarm discriminator: `after a clean reset, connect works again (flag is per-instance, not sticky)`, `join emits remote-pi:name-assigned with requested + assigned + changed`, `rename:<name> renames live (broker re-register + relay swap), process/session survive`, and `a second same-name agent joins as <name>#2 instead of being refused`.
   - Targeted replay checks passed: 4 passed / 162 skipped for `successful reconnect preserves session_id, sessionStartedAt, and transcript history`, `event-log seam dedupes by eventId and session_sync scopes to active session`, `session_sync replays stable history events across request ids`, and `session_sync projects the transcript event log fixture across canonical-session boundary`.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran (clean state): `corepack pnpm typecheck`
+clean; **full pi-ext suite 671 passed | 3 skipped | 0 failed (44 files)** — fully green
+(up from 670 — the agent's new stable-history-event + reconnect-payload tests). The 4
+failures the agent reported are genuinely the false-alarm signature — confirmed by clean
+orchestrator re-run (0 failures). The agent CORRECTLY classified them.
+
+Replay-compatibility verified (2× consistent): `session_history` built by
+`SdkSessionProjection.buildSessionHistoryMessage()` from session-scoped
+`TranscriptEventLog` via `projectSessionHistory()` (not mutable projection rows or
+app-replacement assumptions). Identical transcript facts replay stable
+`session_history.events` across different `session_sync` request ids. Session rotation
++ transcript-log reset is the correctness boundary (empty broadcast is only an
+attached-owner compatibility notification, not a destructive delete). 20
+session_history/replay tests pass. Commit `c0751a2` scoped to pi-ext only
+(extension.test.ts +67 + index.ts); collision guard held.
