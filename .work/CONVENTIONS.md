@@ -106,12 +106,13 @@ not whichever component release is running.
 - `release_mapping: tag-based` — git tags mark releases; push is external
   (operator runs from their machine). `release-deploy` creates the tag locally;
   the operator pushes.
-- `gates_for_release: [security, tests, cruft, docs, patterns]` — bold-refactor
-  work is shipped and the substrate is gate-capable (work-view 0.15.3 installed).
-  The `refactor` gate is intentionally NOT in this list: it stays opt-in until a
-  Remote-Pi-native scan-rule library exists under `gate_refactor_scan_library_roots`
-  (default: `.agents/skills` then `.claude/skills`, glob `scan-*/SKILL.md`). Adding
-  `refactor` with zero libraries is a no-op gate; add it only once a library lands.
+- `gates_for_release: [security, tests, cruft, docs, patterns, refactor]` — bold-refactor
+  work is shipped and the substrate is gate-capable (work-view 0.15.3 installed). The
+  `refactor` gate is now active: three Remote-Pi-native scan-rule libraries are installed
+  under `.agents/skills/scan-{boundaries,lifecycle,protocol-contract}/` (all untagged,
+  `findings-route: none` — findings route through story/feature design, not
+  refactor-design, because the fixes are not black-box-preserving). The libraries are
+  grounded in `.agents/rules/code-design.md` and were cross-model-reviewed before commit.
 - `terminal-tier retention: retain-bodies` — bound item bodies stay on disk.
   Active done items move to `.work/releases/<version>/`; archived items stay in
   `.work/archive/`. A release summary doc is produced at
