@@ -18,15 +18,16 @@ pipeline, plus recovered from a mid-session scope over-reach.
   sdk_session_projection); generated TS protocol codegen replaces handwritten
   wire unions; reachability-contract projection; transcript-event-log +
   turn-state-machine projections.
-- **6 gates**: docs(2m) · cruft(1h-resolved,3m) · security(2h pre-existing→backlog,11m) · refactor(1h-resolved,3h+4m pre-existing→backlog) · tests(1 crit-resolved,5m) · patterns(3 documented).
+- **6 gates**: docs(2m) · cruft(1h-resolved,3m) · security(2h pre-existing→backlog,11m) · refactor(26 total: 1h-resolved, 3h pre-existing→backlog, 22m/l) · tests(1 crit-resolved,5m) · patterns(3 documented). NOTE: the refactor gate's own summary said 8 but it wrote 26 to disk (it only counted the subset elevated to active stories; 18 more went straight to backlog uncounted) — release record corrected.
 - **3 in-scope findings resolved**: orphaned `legacy_deps.ts` seam deleted;
   cross-PC frame DTOs consume generated `CrossPcFramePiEnvelope*` types;
   stale-context `session_start` test coverage extended (model_set/thinking_set
   after new/resume/fork/reload).
-- **5 high + 24 medium/low findings deferred to backlog** — all pre-existing,
+- **5 high + ~46 medium/low findings deferred to backlog** — all pre-existing,
   not bundle-introduced (provenance grounded to MVP-era commits / reachability-
   only diffs). Disposition rationale recorded in release summary.
 - **Suite green**: 718 passed / 3 skipped.
+- **Tag**: `extension-0.6.0` → `e5cc188` (final, after drift fixes).
 
 ### Push: `git push origin main extension-0.6.0` (operator action)
 
