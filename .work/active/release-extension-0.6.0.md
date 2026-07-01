@@ -99,6 +99,10 @@ Excluded deliberately; documented here so the gather is auditable.
   - 3 medium → backlog (non-blocking): relay-owner-channel-bridge,
     standalone-cli-unused-command-surface, index-legacy-test-aliases.
 
+- **gate-refactor** (2026-07-01) — 8 findings (4 high, 4 medium, 0 low) from 3 libraries: protocol-contract (4 findings), lifecycle (4 findings), boundaries (0 findings). High findings routed to blocking active stories; medium findings routed to backlog per `gate_finding_routing`. Ran inline because this sub-agent had no nested scanner dispatch tool; scan stayed grep-first and bundle-scoped.
+  - High/blocking: `gate-refactor-protocol-relay-client-control-dtos`, `gate-refactor-protocol-pi-forward-crosspc-dtos`, `gate-refactor-protocol-room-meta-literal`, `gate-refactor-lifecycle-relay-auth-timeout-listener`.
+  - Medium/backlog: `gate-refactor-protocol-session-scope-reenumeration`, `gate-refactor-lifecycle-session-start-fire-and-forget`, `gate-refactor-lifecycle-queued-delivery-fire-and-forget`, `gate-refactor-lifecycle-control-frame-fire-and-forget`.
+
 (populated in Phase 4 — remaining gates pending)
 
 ## Wire-change deployment note
