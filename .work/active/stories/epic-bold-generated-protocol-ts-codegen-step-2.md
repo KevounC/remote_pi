@@ -1,14 +1,14 @@
 ---
 id: epic-bold-generated-protocol-ts-codegen-step-2
 kind: story
-stage: implementing
+stage: review
 tags: [refactor]
 parent: epic-bold-generated-protocol-ts-codegen
 depends_on: [epic-bold-generated-protocol-ts-codegen-step-1]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # TS codegen step 2 — generated unions and shared value types
@@ -78,13 +78,28 @@ export type ServerMessage =
 
 ## Acceptance Criteria
 
-- [ ] Generated TS unions cover every variant currently in `types.ts`.
-- [ ] Generated optional fields match the compatibility wire.
-- [ ] `tsc --noEmit` compiles generated output under the pi-extension TS config.
-- [ ] No production import is switched yet.
+- [x] Generated TS unions cover every variant currently in `types.ts`.
+- [x] Generated optional fields match the compatibility wire.
+- [x] `tsc --noEmit` compiles generated output under the pi-extension TS config.
+- [x] No production import is switched yet.
 
 ## Risk
 Medium — generated type names and exported aliases must match the current public import surface closely enough to support the Step 4 facade swap.
 
 ## Rollback
 Remove generated TS output and tests; the hand-authored `types.ts` remains live.
+
+## Implementation
+
+Implemented generated TypeScript unions and shared app/Pi value types in the generator, then regenerated `pi-extension/src/protocol/generated/protocol.generated.ts` from the schema. Runtime imports remain unchanged; `pi-extension/src/protocol/types.ts` is still the live handwritten facade for production code.
+
+- Generator changes: `tools/protocol-codegen/src/index.ts` now emits schema-derived shared value types (`WireImage`, `Usage`, `WireModel`, `ThinkingLevel`, `StreamingBehavior`, `ByeReason`, `PairErrorCode`, `KnownErrorCode`, open `ErrorCode`, and `SessionHistoryEvent`) and uses those names in `ClientMessage` / `ServerMessage` variants instead of inlining every nested shape.
+- Union emission: app/Pi variants now emit stable message interface names (`PairOk`, `ModelsList`, `ErrorMessage`, etc.) and unions matching the current compatibility variant set. Duplicate app/server `UserMessage` is emitted once and reused in both unions.
+- Optionality: compatibility-profile generation keeps `session_id` available but optional, including `PairOk`, so this step does not enforce canonical-session fields.
+- Generator tests: `node --test tools/protocol-codegen/src/index.test.ts` — 4 passed / 0 failed. The added test asserts real Remote Pi union/value-type output and variant coverage against the current handwritten protocol surface.
+- Determinism proof: generated twice to two temp dirs and `diff -r` was empty.
+- Regen-diff proof: generated to a temp dir and `diff -u` against `pi-extension/src/protocol/generated/protocol.generated.ts` was empty; `--check true` also passed.
+- Pi-extension typecheck: `corepack pnpm typecheck` from `pi-extension/` with repo-local caches passed.
+- Pi-extension vitest: orchestrator command fell back to `pi-extension` and ran 674 tests: 605 passed / 66 failed / 3 skipped. Failures are the pre-existing sandbox UDS/cwd-lock environment class (`listen EPERM`, leader-election/cwd-lock failures), not generated-protocol failures.
+
+No production import was switched in this step.

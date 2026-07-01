@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 export interface RemotePiManifestFamily {
   id: string;
@@ -46,10 +46,16 @@ export interface RemotePiIrFamily {
   variants: RemotePiIrVariant[];
 }
 
+export interface RemotePiIrSharedType {
+  name: string;
+  declaration: string;
+}
+
 export interface RemotePiIr {
   schemaVersion: number;
   source: string;
   profile: string;
+  sharedTypes: RemotePiIrSharedType[];
   families: RemotePiIrFamily[];
 }
 
@@ -252,7 +258,30 @@ function unionNameForFamily(family: string): string {
 }
 
 function interfaceNameForVariant(unionName: string, type: string): string {
+  if (unionName === "ClientMessage" || unionName === "ServerMessage") {
+    return type === "error" ? "ErrorMessage" : pascalCase(type);
+  }
   return `${unionName}${pascalCase(type)}`;
+}
+
+const SHARED_REF_TYPE_NAMES = new Map<string, string>([
+  ["app-pi-common.schema.json#/$defs/wireImage", "WireImage"],
+  ["app-pi-common.schema.json#/$defs/usage", "Usage"],
+  ["app-pi-common.schema.json#/$defs/pairErrorCode", "PairErrorCode"],
+  ["app-pi-common.schema.json#/$defs/knownErrorCode", "KnownErrorCode"],
+  ["app-pi-common.schema.json#/$defs/errorCode", "ErrorCode"],
+  ["app-pi-common.schema.json#/$defs/actionName", "ActionName"],
+  ["app-pi-common.schema.json#/$defs/thinkingLevel", "ThinkingLevel"],
+  ["app-pi-common.schema.json#/$defs/streamingBehavior", "StreamingBehavior"],
+  ["app-pi-common.schema.json#/$defs/wireModel", "WireModel"],
+  ["app-pi-server.schema.json#/$defs/sessionHistoryEvent", "SessionHistoryEvent"],
+]);
+
+function sharedTypeNameForRef(ref: string, contextPath: string): string | undefined {
+  const [refPath = "", rawFragment = ""] = ref.split("#");
+  const fragment = rawFragment.length > 0 ? `#${rawFragment}` : "#";
+  const fileName = refPath.length > 0 ? basename(refPath) : basename(contextPath);
+  return SHARED_REF_TYPE_NAMES.get(`${fileName}${fragment}`);
 }
 
 function constOrEnumValues(schema: JsonObject): unknown[] | undefined {
@@ -261,7 +290,31 @@ function constOrEnumValues(schema: JsonObject): unknown[] | undefined {
   return undefined;
 }
 
-async function tsTypeForSchema(schemaInput: unknown, contextPath: string, protocolRoot: string, cache: DocumentCache, stack: string[]): Promise<string> {
+function requiredNamesForSchema(schema: JsonObject, profile: string): Set<string> {
+  const required = new Set(Array.isArray(schema.required) ? schema.required.map(String) : []);
+  if (profile === "compat") {
+    // Canonical session identifiers are compatibility-profile metadata in this
+    // migration arc. Keep them available on the generated types, but do not
+    // force app/Pi compatibility payloads to carry them until the stricter
+    // canonical-session profile is enabled.
+    required.delete("session_id");
+  }
+  return required;
+}
+
+async function tsTypeForSchema(
+  schemaInput: unknown,
+  contextPath: string,
+  protocolRoot: string,
+  cache: DocumentCache,
+  stack: string[],
+  profile = "compat",
+): Promise<string> {
+  if (isObject(schemaInput) && typeof schemaInput.$ref === "string") {
+    const sharedName = sharedTypeNameForRef(schemaInput.$ref, contextPath);
+    if (sharedName) return sharedName;
+  }
+
   const { schema, path } = await dereferenceSchema(schemaInput, contextPath, protocolRoot, cache);
   if (schema === true) return "unknown";
   if (schema === false) return "never";
@@ -272,17 +325,17 @@ async function tsTypeForSchema(schemaInput: unknown, contextPath: string, protoc
 
   if (Array.isArray(object.oneOf) || Array.isArray(object.anyOf)) {
     const options = (Array.isArray(object.oneOf) ? object.oneOf : object.anyOf) as unknown[];
-    const parts = await Promise.all(options.map((option, index) => tsTypeForSchema(option, path, protocolRoot, cache, [...stack, String(index)])));
+    const parts = await Promise.all(options.map((option, index) => tsTypeForSchema(option, path, protocolRoot, cache, [...stack, String(index)], profile)));
     return [...new Set(parts)].join(" | ");
   }
 
   if (Array.isArray(object.allOf)) {
-    const parts = await Promise.all(object.allOf.map((option, index) => tsTypeForSchema(option, path, protocolRoot, cache, [...stack, String(index)])));
+    const parts = await Promise.all(object.allOf.map((option, index) => tsTypeForSchema(option, path, protocolRoot, cache, [...stack, String(index)], profile)));
     return parts.join(" & ");
   }
 
   if (Array.isArray(object.type)) {
-    const parts = await Promise.all(object.type.map((type) => tsTypeForSchema({ ...object, type }, path, protocolRoot, cache, stack)));
+    const parts = await Promise.all(object.type.map((type) => tsTypeForSchema({ ...object, type }, path, protocolRoot, cache, stack, profile)));
     return [...new Set(parts)].join(" | ");
   }
 
@@ -297,17 +350,17 @@ async function tsTypeForSchema(schemaInput: unknown, contextPath: string, protoc
     case "null":
       return "null";
     case "array": {
-      const itemType = await tsTypeForSchema(object.items ?? true, path, protocolRoot, cache, [...stack, "items"]);
+      const itemType = await tsTypeForSchema(object.items ?? true, path, protocolRoot, cache, [...stack, "items"], profile);
       return `Array<${itemType}>`;
     }
     case "object":
     case undefined: {
       if (!isObject(object.properties)) return "Record<string, unknown>";
-      const required = new Set(Array.isArray(object.required) ? object.required.map(String) : []);
+      const required = requiredNamesForSchema(object, profile);
       const entries = await Promise.all(
         Object.entries(object.properties).map(async ([name, propertySchema]) => {
           const optional = required.has(name) ? "" : "?";
-          const type = await tsTypeForSchema(propertySchema, path, protocolRoot, cache, [...stack, name]);
+          const type = await tsTypeForSchema(propertySchema, path, protocolRoot, cache, [...stack, name], profile);
           return `  readonly ${propertyName(name)}${optional}: ${type};`;
         }),
       );
@@ -319,20 +372,46 @@ async function tsTypeForSchema(schemaInput: unknown, contextPath: string, protoc
   }
 }
 
-async function fieldsForVariant(schemaInput: unknown, contextPath: string, protocolRoot: string, cache: DocumentCache): Promise<RemotePiIrField[]> {
+async function fieldsForVariant(schemaInput: unknown, contextPath: string, protocolRoot: string, cache: DocumentCache, profile: string): Promise<RemotePiIrField[]> {
   const { schema, path } = await dereferenceSchema(schemaInput, contextPath, protocolRoot, cache);
   const object = asObject(schema, "variant schema");
   const properties = asObject(object.properties, "variant.properties");
-  const required = new Set(Array.isArray(object.required) ? object.required.map(String) : []);
+  const required = requiredNamesForSchema(object, profile);
+  const variantType = discriminatorValues(object)[0]?.type;
   const fields: RemotePiIrField[] = [];
   for (const [name, propertySchema] of Object.entries(properties)) {
+    const inferredType = await tsTypeForSchema(propertySchema, path, protocolRoot, cache, [name], profile);
     fields.push({
       name,
       required: required.has(name),
-      tsType: await tsTypeForSchema(propertySchema, path, protocolRoot, cache, [name]),
+      tsType: variantType === "bye" && name === "reason" ? "ByeReason" : inferredType,
     });
   }
   return fields;
+}
+
+function emitInterfaceDeclaration(name: string, fields: RemotePiIrField[]): string {
+  const lines = [`export interface ${name} {`];
+  for (const field of fields) {
+    const optional = field.required ? "" : "?";
+    lines.push(`  readonly ${propertyName(field.name)}${optional}: ${field.tsType};`);
+  }
+  lines.push("}");
+  return lines.join("\n");
+}
+
+async function declarationForObjectType(name: string, schemaInput: unknown, contextPath: string, protocolRoot: string, cache: DocumentCache, profile: string): Promise<RemotePiIrSharedType> {
+  return {
+    name,
+    declaration: emitInterfaceDeclaration(name, await fieldsForVariant(schemaInput, contextPath, protocolRoot, cache, profile)),
+  };
+}
+
+async function declarationForAliasType(name: string, schemaInput: unknown, contextPath: string, protocolRoot: string, cache: DocumentCache, profile: string): Promise<RemotePiIrSharedType> {
+  return {
+    name,
+    declaration: `export type ${name} = ${await tsTypeForSchema(schemaInput, contextPath, protocolRoot, cache, [name], profile)};`,
+  };
 }
 
 function discriminatorValues(schema: JsonObject): Array<{ discriminator: string; type: string }> {
@@ -347,7 +426,7 @@ function discriminatorValues(schema: JsonObject): Array<{ discriminator: string;
   return [];
 }
 
-async function variantsForFamily(family: RemotePiManifestFamily, familySchemaPath: string, protocolRoot: string, cache: DocumentCache): Promise<RemotePiIrVariant[]> {
+async function variantsForFamily(family: RemotePiManifestFamily, familySchemaPath: string, protocolRoot: string, cache: DocumentCache, profile: string): Promise<RemotePiIrVariant[]> {
   const root = await readDocument(familySchemaPath, cache);
   const oneOf = Array.isArray(root.oneOf) ? root.oneOf : undefined;
   if (!oneOf || oneOf.length === 0) throw placeholderDiagnostic(family);
@@ -376,7 +455,7 @@ async function variantsForFamily(family: RemotePiManifestFamily, familySchemaPat
         discriminator: discriminator.discriminator,
         interfaceName: interfaceNameForVariant(unionName, discriminator.type),
         schemaRef: `${family.schema}#oneOf/${index}`,
-        fields: await fieldsForVariant(schema, path, protocolRoot, cache),
+        fields: await fieldsForVariant(schema, path, protocolRoot, cache, profile),
       });
     }
   }
@@ -385,13 +464,95 @@ async function variantsForFamily(family: RemotePiManifestFamily, familySchemaPat
   return variants;
 }
 
+function optionalObject(value: unknown): JsonObject | undefined {
+  return isObject(value) ? value : undefined;
+}
+
+async function appPiCommonSharedTypes(protocolRoot: string, cache: DocumentCache, profile: string): Promise<RemotePiIrSharedType[]> {
+  const commonPath = join(protocolRoot, "schema", "defs", "app-pi-common.schema.json");
+  let defs: JsonObject;
+  try {
+    defs = asObject((await readDocument(commonPath, cache)).$defs, "app-pi-common.$defs");
+  } catch {
+    return [];
+  }
+
+  const shared: RemotePiIrSharedType[] = [];
+  shared.push(await declarationForAliasType("StreamingBehavior", defs.streamingBehavior, commonPath, protocolRoot, cache, profile));
+  shared.push(await declarationForObjectType("WireImage", defs.wireImage, commonPath, protocolRoot, cache, profile));
+  shared.push(await declarationForObjectType("Usage", defs.usage, commonPath, protocolRoot, cache, profile));
+  shared.push(await declarationForAliasType("PairErrorCode", defs.pairErrorCode, commonPath, protocolRoot, cache, profile));
+  shared.push(await declarationForAliasType("KnownErrorCode", defs.knownErrorCode, commonPath, protocolRoot, cache, profile));
+  shared.push({ name: "ErrorCode", declaration: "export type ErrorCode = KnownErrorCode | (string & {});" });
+  shared.push(await declarationForAliasType("ActionName", defs.actionName, commonPath, protocolRoot, cache, profile));
+  shared.push(await declarationForAliasType("ThinkingLevel", defs.thinkingLevel, commonPath, protocolRoot, cache, profile));
+  shared.push(await declarationForObjectType("WireModel", defs.wireModel, commonPath, protocolRoot, cache, profile));
+  return shared;
+}
+
+async function appPiServerSharedTypes(protocolRoot: string, cache: DocumentCache, profile: string): Promise<RemotePiIrSharedType[]> {
+  const serverPath = join(protocolRoot, "schema", "app-pi-server.schema.json");
+  let defs: JsonObject;
+  try {
+    defs = asObject((await readDocument(serverPath, cache)).$defs, "app-pi-server.$defs");
+  } catch {
+    return [];
+  }
+
+  const shared: RemotePiIrSharedType[] = [];
+  const bye = optionalObject(defs.bye);
+  const byeProperties = optionalObject(bye?.properties);
+  if (byeProperties?.reason) {
+    shared.push(await declarationForAliasType("ByeReason", byeProperties.reason, serverPath, protocolRoot, cache, profile));
+  }
+
+  const sessionHistoryEvent = optionalObject(defs.sessionHistoryEvent);
+  const oneOf = Array.isArray(sessionHistoryEvent?.oneOf) ? sessionHistoryEvent.oneOf : [];
+  const historyVariants: string[] = [];
+  for (const option of oneOf) {
+    const optionObject = optionalObject(option);
+    const ref = typeof optionObject?.$ref === "string" ? optionObject.$ref : undefined;
+    if (!ref) continue;
+    const resolved = await resolveSchemaRef(ref, serverPath, protocolRoot, cache);
+    const { schema, path } = await dereferenceSchema(resolved.schema, resolved.path, protocolRoot, cache);
+    if (!isObject(schema)) continue;
+    const discriminator = discriminatorValues(schema)[0];
+    if (!discriminator) continue;
+    const name = `History${pascalCase(discriminator.type)}`;
+    historyVariants.push(name);
+    shared.push({
+      name,
+      declaration: emitInterfaceDeclaration(name, await fieldsForVariant(schema, path, protocolRoot, cache, profile)),
+    });
+  }
+  if (historyVariants.length > 0) {
+    shared.push({
+      name: "SessionHistoryEvent",
+      declaration: `export type SessionHistoryEvent =\n${historyVariants.map((name) => `  | ${name}`).join("\n")};`,
+    });
+  }
+
+  return shared;
+}
+
+async function sharedTypesForProtocol(protocolRoot: string, cache: DocumentCache, profile: string): Promise<RemotePiIrSharedType[]> {
+  const shared = [...(await appPiCommonSharedTypes(protocolRoot, cache, profile)), ...(await appPiServerSharedTypes(protocolRoot, cache, profile))];
+  const seen = new Set<string>();
+  return shared.filter((entry) => {
+    if (seen.has(entry.name)) return false;
+    seen.add(entry.name);
+    return true;
+  });
+}
+
 export async function buildRemotePiIr(manifest: RemotePiManifest, options: BuildRemotePiIrOptions = {}): Promise<RemotePiIr> {
   const protocolRoot = resolve(options.protocolRoot ?? manifest.protocolRoot ?? (options.manifestPath ? protocolRootForManifestPath(options.manifestPath) : process.cwd()));
+  const profile = options.profile ?? "compat";
   const cache: DocumentCache = { documents: new Map() };
   const families: RemotePiIrFamily[] = [];
   for (const family of manifest.families) {
     const schemaPath = isAbsolute(family.schema) ? family.schema : join(protocolRoot, family.schema);
-    const variants = await variantsForFamily(family, schemaPath, protocolRoot, cache);
+    const variants = await variantsForFamily(family, schemaPath, protocolRoot, cache, profile);
     families.push({
       id: family.id,
       transport: family.transport,
@@ -403,7 +564,8 @@ export async function buildRemotePiIr(manifest: RemotePiManifest, options: Build
   return {
     schemaVersion: manifest.schemaVersion ?? 1,
     source: manifest.source ?? "json-schema-2020-12",
-    profile: options.profile ?? "compat",
+    profile,
+    sharedTypes: await sharedTypesForProtocol(protocolRoot, cache, profile),
     families,
   };
 }
@@ -417,13 +579,7 @@ function familyTypeName(familyId: string): string {
 }
 
 function emitInterface(variant: RemotePiIrVariant): string {
-  const lines = [`export interface ${variant.interfaceName} {`];
-  for (const field of variant.fields) {
-    const optional = field.required ? "" : "?";
-    lines.push(`  readonly ${propertyName(field.name)}${optional}: ${field.tsType};`);
-  }
-  lines.push("}");
-  return lines.join("\n");
+  return emitInterfaceDeclaration(variant.interfaceName, variant.fields);
 }
 
 export function renderTypeScriptProtocol(ir: RemotePiIr): string {
@@ -434,6 +590,10 @@ export function renderTypeScriptProtocol(ir: RemotePiIr): string {
   sections.push("");
   sections.push("export type JsonValue = null | boolean | number | string | JsonValue[] | { readonly [key: string]: JsonValue };");
   sections.push("");
+  for (const sharedType of ir.sharedTypes) {
+    sections.push(sharedType.declaration);
+    sections.push("");
+  }
   sections.push("export const protocolManifest = {");
   sections.push(`  schemaVersion: ${ir.schemaVersion},`);
   sections.push(`  source: ${literal(ir.source)},`);
@@ -446,6 +606,7 @@ export function renderTypeScriptProtocol(ir: RemotePiIr): string {
   sections.push("} as const;");
   sections.push("");
 
+  const emittedInterfaces = new Map<string, string>();
   for (const family of ir.families) {
     const constName = familyConstName(family.id);
     const typeName = familyTypeName(family.id);
@@ -455,8 +616,15 @@ export function renderTypeScriptProtocol(ir: RemotePiIr): string {
     sections.push(`export type ${typeName} = (typeof ${constName})[number];`);
     sections.push("");
     for (const variant of family.variants) {
-      sections.push(emitInterface(variant));
-      sections.push("");
+      const declaration = emitInterface(variant);
+      const previous = emittedInterfaces.get(variant.interfaceName);
+      if (previous === undefined) {
+        emittedInterfaces.set(variant.interfaceName, declaration);
+        sections.push(declaration);
+        sections.push("");
+      } else if (previous !== declaration) {
+        throw new ProtocolCodegenError(`Generated TypeScript interface name collision for ${variant.interfaceName}`);
+      }
     }
     sections.push(`export type ${family.unionName} =`);
     for (const [index, variant] of family.variants.entries()) {

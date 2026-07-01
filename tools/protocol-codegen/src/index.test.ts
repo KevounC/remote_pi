@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -94,22 +95,54 @@ export const appPiClientTypes = [
 ] as const;
 export type AppPiClientType = (typeof appPiClientTypes)[number];
 
-export interface ClientMessagePong {
+export interface Pong {
   readonly type: "pong";
   readonly in_reply_to: string;
 }
 
-export interface ClientMessageError {
+export interface ErrorMessage {
   readonly type: "error";
   readonly message: string;
   readonly code?: "invalid_message" | "internal_error";
 }
 
 export type ClientMessage =
-  | ClientMessagePong
-  | ClientMessageError;
+  | Pong
+  | ErrorMessage;
 `,
   );
+});
+
+test("real Remote Pi schema emits generated app/Pi unions and shared value types", async () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const manifest = await loadRemotePiManifest(join(repoRoot, "protocol", "schema", "manifest.json"));
+  const ir = await buildRemotePiIr(manifest, { profile: "compat" });
+  const output = renderTypeScriptProtocol(ir);
+
+  assert.match(output, /export interface WireImage \{\n  readonly data: string;\n  readonly mime: string;\n\}/);
+  assert.match(output, /export interface Usage \{\n  readonly input_tokens: number;\n  readonly output_tokens: number;\n\}/);
+  assert.match(output, /export interface WireModel \{[\s\S]*readonly vision\?: boolean;[\s\S]*\}/);
+  assert.match(output, /export type ThinkingLevel = "off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh";/);
+  assert.match(output, /export type StreamingBehavior = "steer";/);
+  assert.match(output, /export type ByeReason = "peer_stop" \| "session_replaced" \| "shutdown";/);
+  assert.match(output, /export type PairErrorCode = "token_expired" \| "token_consumed" \| "token_unknown" \| "internal_error";/);
+  assert.match(output, /export type KnownErrorCode = "tool_approval_required"[\s\S]*"session_mismatch";/);
+  assert.match(output, /export type ErrorCode = KnownErrorCode \| \(string & \{\}\);/);
+  assert.match(output, /export type SessionHistoryEvent =\n  \| HistoryUserInput\n  \| HistoryToolRequest\n  \| HistoryToolResult\n  \| HistoryAgentMessage\n  \| HistoryCompaction;/);
+
+  assert.match(output, /export interface PairOk \{[\s\S]*readonly session_id\?: string;[\s\S]*readonly room_id: string;[\s\S]*\}/);
+  assert.match(output, /readonly images\?: Array<WireImage>;/);
+  assert.match(output, /readonly usage\?: Usage;/);
+  assert.match(output, /readonly events: Array<SessionHistoryEvent>;/);
+  assert.match(output, /readonly level: ThinkingLevel;/);
+  assert.match(output, /readonly reason: ByeReason;/);
+  assert.match(output, /readonly code: PairErrorCode;/);
+  assert.match(output, /readonly code: ErrorCode;/);
+  assert.match(output, /readonly models: Array<WireModel>;/);
+
+  assert.match(output, /export type ClientMessage =\n  \| PairRequest\n  \| UserMessage\n  \| QueuedMessageSet\n  \| QueuedMessageClear\n  \| ApproveTool\n  \| Cancel\n  \| Ping\n  \| SessionSync\n  \| SessionNew\n  \| SessionCompact\n  \| ModelSet\n  \| ThinkingSet\n  \| ListModels;/);
+  assert.match(output, /export type ServerMessage =\n  \| PairOk\n  \| PairError\n  \| UserInput\n  \| UserMessage\n  \| QueuedMessageState\n  \| AgentChunk\n  \| AgentDone\n  \| AgentMessage\n  \| Compaction\n  \| ToolRequest\n  \| ToolResult\n  \| ErrorMessage\n  \| Cancelled\n  \| Pong\n  \| Bye\n  \| SessionHistory\n  \| ActionOk\n  \| ActionError\n  \| ModelsList;/);
+  assert.doesNotMatch(output, /ServerMessagePairOk|ClientMessageUserMessage/);
 });
 
 test("placeholder schema families fail with a clear diagnostic", async () => {

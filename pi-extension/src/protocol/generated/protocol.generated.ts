@@ -4,6 +4,85 @@
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { readonly [key: string]: JsonValue };
 
+export type StreamingBehavior = "steer";
+
+export interface WireImage {
+  readonly data: string;
+  readonly mime: string;
+}
+
+export interface Usage {
+  readonly input_tokens: number;
+  readonly output_tokens: number;
+}
+
+export type PairErrorCode = "token_expired" | "token_consumed" | "token_unknown" | "internal_error";
+
+export type KnownErrorCode = "tool_approval_required" | "invalid_message" | "unsupported_type" | "too_large" | "rate_limited" | "timeout" | "internal_error" | "session_mismatch";
+
+export type ErrorCode = KnownErrorCode | (string & {});
+
+export type ActionName = "session_new" | "session_compact" | "model_set" | "thinking_set";
+
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export interface WireModel {
+  readonly id: string;
+  readonly name: string;
+  readonly provider: string;
+  readonly reasoning: boolean;
+  readonly context_window: number;
+  readonly vision?: boolean;
+}
+
+export type ByeReason = "peer_stop" | "session_replaced" | "shutdown";
+
+export interface HistoryUserInput {
+  readonly ts: number;
+  readonly type: "user_input";
+  readonly id: string;
+  readonly text: string;
+  readonly images?: Array<WireImage>;
+}
+
+export interface HistoryToolRequest {
+  readonly ts: number;
+  readonly type: "tool_request";
+  readonly tool_call_id: string;
+  readonly tool: string;
+  readonly args: unknown;
+}
+
+export interface HistoryToolResult {
+  readonly ts: number;
+  readonly type: "tool_result";
+  readonly tool_call_id: string;
+  readonly result?: unknown;
+  readonly error?: string;
+}
+
+export interface HistoryAgentMessage {
+  readonly ts: number;
+  readonly type: "agent_message";
+  readonly in_reply_to: string;
+  readonly text: string;
+  readonly usage?: Usage;
+}
+
+export interface HistoryCompaction {
+  readonly ts: number;
+  readonly type: "compaction";
+  readonly summary: string;
+  readonly tokens_before: number;
+}
+
+export type SessionHistoryEvent =
+  | HistoryUserInput
+  | HistoryToolRequest
+  | HistoryToolResult
+  | HistoryAgentMessage
+  | HistoryCompaction;
+
 export const protocolManifest = {
   schemaVersion: 1,
   source: "json-schema-2020-12",
@@ -34,39 +113,36 @@ export const appPiClientTypes = [
 ] as const;
 export type AppPiClientType = (typeof appPiClientTypes)[number];
 
-export interface ClientMessagePairRequest {
+export interface PairRequest {
   readonly type: "pair_request";
   readonly id: string;
   readonly token: string;
   readonly device_name: string;
 }
 
-export interface ClientMessageUserMessage {
+export interface UserMessage {
   readonly type: "user_message";
   readonly id: string;
   readonly session_id?: string;
   readonly text: string;
-  readonly images?: Array<{
-  readonly data: string;
-  readonly mime: string;
-}>;
-  readonly streaming_behavior?: "steer";
+  readonly images?: Array<WireImage>;
+  readonly streaming_behavior?: StreamingBehavior;
 }
 
-export interface ClientMessageQueuedMessageSet {
+export interface QueuedMessageSet {
   readonly type: "queued_message_set";
   readonly id: string;
   readonly session_id?: string;
   readonly text: string;
 }
 
-export interface ClientMessageQueuedMessageClear {
+export interface QueuedMessageClear {
   readonly type: "queued_message_clear";
   readonly id: string;
   readonly session_id?: string;
 }
 
-export interface ClientMessageApproveTool {
+export interface ApproveTool {
   readonly type: "approve_tool";
   readonly id: string;
   readonly session_id?: string;
@@ -74,38 +150,38 @@ export interface ClientMessageApproveTool {
   readonly decision: "allow" | "deny";
 }
 
-export interface ClientMessageCancel {
+export interface Cancel {
   readonly type: "cancel";
   readonly id: string;
   readonly session_id?: string;
   readonly target_id: string;
 }
 
-export interface ClientMessagePing {
+export interface Ping {
   readonly type: "ping";
   readonly id: string;
 }
 
-export interface ClientMessageSessionSync {
+export interface SessionSync {
   readonly type: "session_sync";
   readonly id: string;
   readonly session_id?: string;
   readonly limit?: number;
 }
 
-export interface ClientMessageSessionNew {
+export interface SessionNew {
   readonly type: "session_new";
   readonly id: string;
   readonly session_id?: string;
 }
 
-export interface ClientMessageSessionCompact {
+export interface SessionCompact {
   readonly type: "session_compact";
   readonly id: string;
   readonly session_id?: string;
 }
 
-export interface ClientMessageModelSet {
+export interface ModelSet {
   readonly type: "model_set";
   readonly id: string;
   readonly session_id?: string;
@@ -113,33 +189,33 @@ export interface ClientMessageModelSet {
   readonly model_id: string;
 }
 
-export interface ClientMessageThinkingSet {
+export interface ThinkingSet {
   readonly type: "thinking_set";
   readonly id: string;
   readonly session_id?: string;
-  readonly level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  readonly level: ThinkingLevel;
 }
 
-export interface ClientMessageListModels {
+export interface ListModels {
   readonly type: "list_models";
   readonly id: string;
   readonly session_id?: string;
 }
 
 export type ClientMessage =
-  | ClientMessagePairRequest
-  | ClientMessageUserMessage
-  | ClientMessageQueuedMessageSet
-  | ClientMessageQueuedMessageClear
-  | ClientMessageApproveTool
-  | ClientMessageCancel
-  | ClientMessagePing
-  | ClientMessageSessionSync
-  | ClientMessageSessionNew
-  | ClientMessageSessionCompact
-  | ClientMessageModelSet
-  | ClientMessageThinkingSet
-  | ClientMessageListModels;
+  | PairRequest
+  | UserMessage
+  | QueuedMessageSet
+  | QueuedMessageClear
+  | ApproveTool
+  | Cancel
+  | Ping
+  | SessionSync
+  | SessionNew
+  | SessionCompact
+  | ModelSet
+  | ThinkingSet
+  | ListModels;
 
 export const appPiServerTypes = [
   "pair_ok",
@@ -164,12 +240,12 @@ export const appPiServerTypes = [
 ] as const;
 export type AppPiServerType = (typeof appPiServerTypes)[number];
 
-export interface ServerMessagePairOk {
+export interface PairOk {
   readonly type: "pair_ok";
   readonly in_reply_to: string;
   readonly session_name: string;
   readonly session_started_at: number;
-  readonly session_id: string;
+  readonly session_id?: string;
   readonly room_id: string;
   readonly harness?: {
   readonly name: string;
@@ -178,73 +254,52 @@ export interface ServerMessagePairOk {
   readonly hostname?: string;
 }
 
-export interface ServerMessagePairError {
+export interface PairError {
   readonly type: "pair_error";
   readonly in_reply_to: string;
-  readonly code: "token_expired" | "token_consumed" | "token_unknown" | "internal_error";
+  readonly code: PairErrorCode;
   readonly message: string;
 }
 
-export interface ServerMessageUserInput {
+export interface UserInput {
   readonly type: "user_input";
   readonly id: string;
   readonly session_id?: string;
   readonly text: string;
-  readonly images?: Array<{
-  readonly data: string;
-  readonly mime: string;
-}>;
-  readonly streaming_behavior?: "steer";
+  readonly images?: Array<WireImage>;
+  readonly streaming_behavior?: StreamingBehavior;
 }
 
-export interface ServerMessageUserMessage {
-  readonly type: "user_message";
-  readonly id: string;
-  readonly session_id?: string;
-  readonly text: string;
-  readonly images?: Array<{
-  readonly data: string;
-  readonly mime: string;
-}>;
-  readonly streaming_behavior?: "steer";
-}
-
-export interface ServerMessageQueuedMessageState {
+export interface QueuedMessageState {
   readonly type: "queued_message_state";
   readonly session_id?: string;
   readonly id?: string;
   readonly text?: string;
 }
 
-export interface ServerMessageAgentChunk {
+export interface AgentChunk {
   readonly type: "agent_chunk";
   readonly session_id?: string;
   readonly in_reply_to: string;
   readonly delta: string;
 }
 
-export interface ServerMessageAgentDone {
+export interface AgentDone {
   readonly type: "agent_done";
   readonly session_id?: string;
   readonly in_reply_to: string;
-  readonly usage?: {
-  readonly input_tokens: number;
-  readonly output_tokens: number;
-};
+  readonly usage?: Usage;
 }
 
-export interface ServerMessageAgentMessage {
+export interface AgentMessage {
   readonly type: "agent_message";
   readonly session_id?: string;
   readonly in_reply_to: string;
   readonly text: string;
-  readonly usage?: {
-  readonly input_tokens: number;
-  readonly output_tokens: number;
-};
+  readonly usage?: Usage;
 }
 
-export interface ServerMessageCompaction {
+export interface Compaction {
   readonly type: "compaction";
   readonly session_id?: string;
   readonly summary: string;
@@ -252,7 +307,7 @@ export interface ServerMessageCompaction {
   readonly ts?: number;
 }
 
-export interface ServerMessageToolRequest {
+export interface ToolRequest {
   readonly type: "tool_request";
   readonly session_id?: string;
   readonly tool_call_id: string;
@@ -260,7 +315,7 @@ export interface ServerMessageToolRequest {
   readonly args: unknown;
 }
 
-export interface ServerMessageToolResult {
+export interface ToolResult {
   readonly type: "tool_result";
   readonly session_id?: string;
   readonly tool_call_id: string;
@@ -268,130 +323,81 @@ export interface ServerMessageToolResult {
   readonly error?: string;
 }
 
-export interface ServerMessageError {
+export interface ErrorMessage {
   readonly type: "error";
   readonly session_id?: string;
   readonly in_reply_to?: string;
-  readonly code: string;
+  readonly code: ErrorCode;
   readonly message: string;
 }
 
-export interface ServerMessageCancelled {
+export interface Cancelled {
   readonly type: "cancelled";
   readonly session_id?: string;
   readonly in_reply_to: string;
   readonly target_id: string;
 }
 
-export interface ServerMessagePong {
+export interface Pong {
   readonly type: "pong";
   readonly in_reply_to: string;
 }
 
-export interface ServerMessageBye {
+export interface Bye {
   readonly type: "bye";
-  readonly reason: "peer_stop" | "session_replaced" | "shutdown";
+  readonly reason: ByeReason;
 }
 
-export interface ServerMessageSessionHistory {
+export interface SessionHistory {
   readonly type: "session_history";
   readonly session_id?: string;
   readonly in_reply_to: string;
   readonly session_started_at: number;
-  readonly events: Array<{
-  readonly ts: number;
-  readonly type: "user_input";
-  readonly id: string;
-  readonly text: string;
-  readonly images?: Array<{
-  readonly data: string;
-  readonly mime: string;
-}>;
-} | {
-  readonly ts: number;
-  readonly type: "tool_request";
-  readonly tool_call_id: string;
-  readonly tool: string;
-  readonly args: unknown;
-} | {
-  readonly ts: number;
-  readonly type: "tool_result";
-  readonly tool_call_id: string;
-  readonly result?: unknown;
-  readonly error?: string;
-} | {
-  readonly ts: number;
-  readonly type: "agent_message";
-  readonly in_reply_to: string;
-  readonly text: string;
-  readonly usage?: {
-  readonly input_tokens: number;
-  readonly output_tokens: number;
-};
-} | {
-  readonly ts: number;
-  readonly type: "compaction";
-  readonly summary: string;
-  readonly tokens_before: number;
-}>;
+  readonly events: Array<SessionHistoryEvent>;
   readonly eos: boolean;
   readonly truncated: boolean;
 }
 
-export interface ServerMessageActionOk {
+export interface ActionOk {
   readonly type: "action_ok";
   readonly in_reply_to: string;
-  readonly action: "session_new" | "session_compact" | "model_set" | "thinking_set";
+  readonly action: ActionName;
 }
 
-export interface ServerMessageActionError {
+export interface ActionError {
   readonly type: "action_error";
   readonly in_reply_to: string;
-  readonly action: "session_new" | "session_compact" | "model_set" | "thinking_set";
+  readonly action: ActionName;
   readonly error: string;
 }
 
-export interface ServerMessageModelsList {
+export interface ModelsList {
   readonly type: "models_list";
   readonly in_reply_to: string;
-  readonly models: Array<{
-  readonly id: string;
-  readonly name: string;
-  readonly provider: string;
-  readonly reasoning: boolean;
-  readonly context_window: number;
-  readonly vision?: boolean;
-}>;
-  readonly current?: {
-  readonly id: string;
-  readonly name: string;
-  readonly provider: string;
-  readonly reasoning: boolean;
-  readonly context_window: number;
-  readonly vision?: boolean;
-};
+  readonly models: Array<WireModel>;
+  readonly current?: WireModel;
 }
 
 export type ServerMessage =
-  | ServerMessagePairOk
-  | ServerMessagePairError
-  | ServerMessageUserInput
-  | ServerMessageUserMessage
-  | ServerMessageQueuedMessageState
-  | ServerMessageAgentChunk
-  | ServerMessageAgentDone
-  | ServerMessageAgentMessage
-  | ServerMessageCompaction
-  | ServerMessageToolRequest
-  | ServerMessageToolResult
-  | ServerMessageError
-  | ServerMessageCancelled
-  | ServerMessagePong
-  | ServerMessageBye
-  | ServerMessageSessionHistory
-  | ServerMessageActionOk
-  | ServerMessageActionError
-  | ServerMessageModelsList;
+  | PairOk
+  | PairError
+  | UserInput
+  | UserMessage
+  | QueuedMessageState
+  | AgentChunk
+  | AgentDone
+  | AgentMessage
+  | Compaction
+  | ToolRequest
+  | ToolResult
+  | ErrorMessage
+  | Cancelled
+  | Pong
+  | Bye
+  | SessionHistory
+  | ActionOk
+  | ActionError
+  | ModelsList;
 
 export const relayControlTypes = [
   "hello",
