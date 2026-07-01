@@ -78,9 +78,15 @@ file:line (the post-review grounding corrections paid off); two findings spot-ve
 
 6 reusable shapes (3+ occurrences each): pure-workspace-command-transform, centralized-protocol-adapter-boundary, settings-category-registry-dispatch, projection-boundary-for-session-UI, single-reducer-workspace-mutation, settings-data-state-tri-state-render. Pattern-skill authoring deferred (gate-patterns is the final gate; pattern skills are a separate artifact under .agents/skills/patterns/, lower priority for this dogfood). Recorded here for traceability.
 
-### gate-cruft (2026-07-01) — re-scanning (first scanner hit compaction)
+### gate-cruft (2026-07-01) — 2 findings (0 high, 1 medium, 1 low)
 
-(refactor gate run recorded above; total gate-produced items so far: 22)
+- Medium: temporary debug trace scaffold (_trace writing ck_trace.log) in production UI flow (workspace_settings_dialog.dart:9) — also found 2 files outside the original bundle list (transitively changed)
+- Low: empty catch-swallow in formatter reload path (file_viewer.dart:368)
+2 items written to .work/active/stories/gate-cruft-*.md.
+
+### gate-cruft (2026-07-01) — re-scanning (first scanner hit compaction) — RESOLVED above
+
+(refactor gate run recorded above; total gate-produced items so far: 22) → final total: 24
 
 ### Binding-consistency warnings
 
