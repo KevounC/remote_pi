@@ -9,6 +9,32 @@ For the canonical protocol specification, see [PROTOCOL.md](PROTOCOL.md).
 
 ---
 
+## [app-v1.2.0] — 2026-07-01
+
+Mobile app minor over `app-v1.1.1`. Ships the mobile half of the bold-refactor
+arc (canonical-session attribution/hydration, reachability app adapter + state
+machine, transcript event log store/replay/projection) plus the second
+gate-enabled release pass. **Must deploy paired with `relay-0.2.0`** — the
+relay auth signature is now domain-separated (wire change).
+
+### Fixed
+- **Security**: relay auth no longer signs the bare relay-provided nonce with the
+  long-term owner Ed25519 key (cross-protocol signing oracle). The app now signs
+  `remote-pi-relay-auth-v1\n` ++ nonce; the relay verifies the same.
+- **Lifecycle**: `ConnectionManager.dispose` now tears down the active connection
+  (cancels the in-flight connect token + closes the WebSocket channel) instead of
+  leaking it past disposal.
+
+### Added
+- Canonical `RemoteSessionRef` identity + attribution/hydration for sessions.
+- Reachability as an explicit state machine + app adapter (replaces scattered
+  booleans).
+- Transcript event log: append-only store, hydration/replay, projection-derive.
+
+### Internal (release-gate dogfood)
+- 6 gates run; 24 findings produced. 2 high blocking (signing oracle + dispose leak)
+  resolved before ship; 22 medium/low tracked in backlog.
+
 ## [cockpit-v1.6.0] — 2026-07-01
 
 Desktop cockpit minor over `cockpit-v1.5.1`. Ships the cockpit half of the
