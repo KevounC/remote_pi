@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-ts-codegen-step-3
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-generated-protocol-ts-codegen
 depends_on: [epic-bold-generated-protocol-ts-codegen-step-2]
@@ -105,3 +105,22 @@ Medium — validators must harden malformed inputs without accidentally rejectin
 
 ## Rollback
 Remove generated validator/registry output and tests; Step 2 type generation can remain side-by-side.
+
+## Review
+
+Approved (2026-06-30) with GENERATED-CONTRACT verification. Independently verified
+all three generated-contract invariants:
+1. **Determinism double-run**: two temp dirs, `diff -r` EMPTY ✓
+2. **No hand-edits**: regen-diff vs committed `protocol.generated.ts` EMPTY ✓
+3. **pi-ext typecheck + suite**: clean; **672 passed | 3 skipped | 0 failed (44 files)** ✓
+
+The agent reported "606 passed / 66 failed" — the same transient false-alarm spike seen
+on step-2 (the agent noted "UDS/cwd-lock sandbox"). Clean orchestrator re-run: 0
+failures, 672 passed (count held — generated registry/validator refinement, no new
+runtime tests). This 66-failure spike is a reproducible agent-environment artifact,
+NOT a real regression — the orchestrator's clean re-run is the reliable gate.
+
+Commit `1a4c69a` scoped to tools/ + pi-ext only (generator `index.test.ts` +161 +
+generated `protocol.generated.ts` +269); collision guard held. Runtime imports
+unchanged. Generated registries + compatibility validators emitted via the generator.
+Generator tests 5/5 passed.
