@@ -1,7 +1,7 @@
 ---
 id: release-relay-0.2.0
 kind: release
-stage: quality-gate
+stage: released
 tags: []
 parent: null
 depends_on: []
@@ -97,3 +97,42 @@ binding_guard=warn epic_cohesion=phased. CONFLICTS(3) + INCOMPLETES(5), all
 informational/non-halting — phased delivery where relay-tagged stories ship here
 while multi-component parents (canonical-session, generated-protocol,
 reachability-contract-state-machine) ship in v0.6.0. Same pattern as prior releases.
+
+## Shipped items
+
+Bodies live on disk (retain-bodies) and in git history.
+
+| id | title | kind | archived_atop | git ref |
+|----|-------|------|---------------|---------|
+| epic-bold-relay-typed-actor | The relay connection is a typed-frame actor, not a JSON switch | epic | — | 5cbf5b1 |
+| epic-bold-canonical-session-relay-opaque-targeting | Canonical session — relay opaque session targeting | feature | — | 5cbf5b1 |
+| epic-bold-generated-protocol-rust-codegen | Generated protocol — Rust serde codegen target | feature | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-control-handlers | Relay typed actor — typed control handlers | feature | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-frame-dispatch | Relay typed actor — typed-frame dispatch (riskiest — design first) | feature | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-registry-split | Relay typed actor — PeerRegistry split | feature | — | 5cbf5b1 |
+| epic-bold-canonical-session-relay-opaque-targeting-step-1 | Step 1: Add explicit cross-PC room target parsing | story | — | 5cbf5b1 |
+| epic-bold-canonical-session-relay-opaque-targeting-step-2 | Step 2: Replace peer-wide fanout with room-targeted registry forwarding | story | — | 5cbf5b1 |
+| epic-bold-canonical-session-relay-opaque-targeting-step-3 | Step 3: Preserve transport-error semantics and inbound target metadata | story | — | 5cbf5b1 |
+| epic-bold-canonical-session-relay-opaque-targeting-step-4 | Step 4: Lock the opaque relay boundary with regression tests and comments | story | — | 5cbf5b1 |
+| epic-bold-generated-protocol-rust-codegen-step-1 | Step 1: Add the Rust generator backend over the shared protocol IR | story | — | 5cbf5b1 |
+| epic-bold-generated-protocol-rust-codegen-step-2 | Step 2: Generate `OuterEnvelope` and preserve the opaque payload parser | story | — | 5cbf5b1 |
+| epic-bold-generated-protocol-rust-codegen-step-3 | Step 3: Generate auth and relay control-frame serde types | story | — | 5cbf5b1 |
+| epic-bold-generated-protocol-rust-codegen-step-4 | Step 4: Generate `RoomMeta` / `RoomMetaPatch` and swap room state consumers | story | — | 5cbf5b1 |
+| epic-bold-generated-protocol-rust-codegen-step-5 | Step 5: Generate cross-PC and mesh wire types, then add parity checks | story | — | 5cbf5b1 |
+| epic-bold-reachability-contract-state-machine-step-4 | Step 4: Add the Rust Reachability projection module for relay heartbeat policy | story | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-control-handlers-step-1 | Step 1: Add the typed control-handler dispatch shell | story | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-control-handlers-step-2 | Step 2: Type the auth challenge and hello room bootstrap handler | story | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-control-handlers-step-3 | Step 3: Factor the duplicated presence/rooms subscription graph | story | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-control-handlers-step-4 | Step 4: Move presence and rooms control frames into typed actor handlers | story | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-control-handlers-step-5 | Step 5: Move room metadata updates into a typed actor handler | story | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-control-handlers-step-6 | Step 6: Consume generated mesh-membership DTOs at the HTTP handler boundary | story | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-frame-dispatch-step-1 | Step 1: Introduce the typed relay frame decode boundary | story | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-frame-dispatch-step-2 | Step 2: Extract the authenticated connection actor shell | story | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-frame-dispatch-step-3 | Step 3: Route app↔Pi outer envelopes through the typed actor | story | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-frame-dispatch-step-4 | Step 4: Route cross-PC `pi_envelope` through typed dispatch | story | — | 5cbf5b1 |
+| epic-bold-relay-typed-actor-frame-dispatch-step-5 | Step 5: Replace the raw control-frame switch with exhaustive typed dispatch | story | — | 5cbf5b1 |
+| gate-tests-pi-envelope-in-to-room | Successful pi_envelope_in delivery does not test required to_room metadata | story | — | 5cbf5b1 |
+| gate-tests-to-room-missing-bad-envelope | Missing/empty to_room is not tested as bad_envelope | story | — | 5cbf5b1 |
+| gate-tests-to-room-room-targeted-delivery | Cross-PC forwarding is still covered as peer-wide fanout, not room-targeted delivery | story | — | 5cbf5b1 |
+| gate-tests-to-room-valid-frame-authorization | Valid to_pc/to_room frames cannot be covered because generated cross-PC DTOs omit to_room | story | — | 5cbf5b1 |
+| gate-tests-unknown-destination-room-offline | Unknown destination room is not covered as correlated offline | story | — | 5cbf5b1 |
