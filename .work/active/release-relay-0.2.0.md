@@ -48,6 +48,16 @@ plus reachability-contract-state-machine-step-4 (parent is multi-component → r
 
 (populated by remaining gates as they complete)
 
+### gate-security (2026-07-01) — 4 findings (0 critical, 0 high, 3 medium, 1 low)
+
+- Medium: auth challenge step has no timeout — pre-auth sockets held indefinitely (peer.rs:83)
+- Medium: data-plane outbound queues unbounded — memory growth via slow recipient (connections.rs:15)
+- Medium: subscription target map retains empty entries — memory growth via churn (subscriptions.rs:54)
+- Low: frame decoder parses JSON before size checks — avoidable allocation on oversized frames (frame.rs:38)
+4 items → backlog (non-blocking). The signing-oracle fix from app-v1.2.0 is NOT re-flagged (resolved).
+
+(populated by refactor/tests/patterns as they complete)
+
 ### Binding-consistency warnings
 
 binding_guard=warn epic_cohesion=phased. CONFLICTS(3) + INCOMPLETES(5), all
