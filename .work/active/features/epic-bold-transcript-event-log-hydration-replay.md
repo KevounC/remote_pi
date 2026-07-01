@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-hydration-replay
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, app, pi-extension, cockpit]
 parent: epic-bold-transcript-event-log
 depends_on: [epic-bold-transcript-event-log-store]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Transcript event log — hydration as replay, not replace
@@ -381,3 +381,11 @@ pi-extension still say the app substitutes its cache wholesale.
 ## Atomic / rollback notes
 
 No step is intentionally irreversible. Step 2 is the risky app switchover: keep it isolated so rollback can restore the existing diffed `_applyHistory` replacement path while leaving the event adapter/store unused. Step 3 preserves the current `session_history` wire shape and is rollback-local to the extension. Step 4 is Cockpit-local. The replay contract intentionally avoids destructive migration; old projection boxes and existing session-sync behavior remain rollback safety nets until a later cleanup removes them.
+
+## Review — advanced to done (2026-06-30)
+
+All 5 child steps `done` (app deterministic replay adapter → app append/dedupe replay
+→ pi-ext session_history replay-compatibility → cockpit transcript hydration seam →
+cross-surface regression fixtures). Transcript hydration is now replay-not-replace
+across app/pi-ext/cockpit, keyed by canonical session, with shared contract fixtures
+proving non-destructive/idempotent/session-isolated replay. Epic complete.
