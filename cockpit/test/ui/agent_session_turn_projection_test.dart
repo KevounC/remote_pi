@@ -250,7 +250,61 @@ void main() {
   });
 
   test(
-    'history reload clears prior open projected text and tool rows',
+    'duplicate get_messages hydration is idempotent for active projection',
+    () async {
+      final messages = Completer<List<CockpitTranscriptEvent>>();
+      final (session, gateway) = await _bootSession(messages: messages);
+
+      final replayed = <CockpitTranscriptEvent>[
+        CockpitUserMessageConfirmed(
+          eventId: 'history:u1',
+          sessionId: '/sessions/replay.jsonl',
+          ts: _ts,
+          clientMessageId: 'u1',
+          text: 'hello once',
+        ),
+        CockpitToolRequested(
+          eventId: 'history:tool-start',
+          sessionId: '/sessions/replay.jsonl',
+          ts: _ts,
+          toolCallId: 'tool-1',
+          tool: 'read_file',
+          args: const <String, Object?>{'path': 'README.md'},
+        ),
+        CockpitToolFinished(
+          eventId: 'history:tool-end',
+          sessionId: '/sessions/replay.jsonl',
+          ts: _ts,
+          toolCallId: 'tool-1',
+          result: 'ok',
+        ),
+      ];
+      messages.complete(replayed);
+
+      await session.loadHistory('/sessions/replay.jsonl');
+      await session.loadHistory('/sessions/replay.jsonl');
+
+      expect(gateway.getMessagesSessionIds, <String>[
+        '/sessions/replay.jsonl',
+        '/sessions/replay.jsonl',
+      ]);
+      expect(
+        _transcriptEntries(session).whereType<ProjectedUserMessage>(),
+        hasLength(1),
+      );
+      final tools = _transcriptEntries(
+        session,
+      ).whereType<ProjectedToolMessage>();
+      expect(tools, hasLength(1));
+      expect(tools.single.status, ToolProjectionStatus.completed);
+      expect(tools.single.resultText, 'ok');
+
+      await session.dispose();
+    },
+  );
+
+  test(
+    'session reload filters prior open projected text and tool rows',
     () async {
       final messages = Completer<List<CockpitTranscriptEvent>>();
       final (session, gateway) = await _bootSession(messages: messages);

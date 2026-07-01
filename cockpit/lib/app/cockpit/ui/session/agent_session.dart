@@ -134,8 +134,7 @@ class AgentSession extends PaneItem {
   CockpitTranscriptProjection _transcriptProjection =
       _emptyTranscriptProjection;
   final List<Object> _entries = <Object>[];
-  final List<CockpitTranscriptEvent> _transcriptEvents =
-      <CockpitTranscriptEvent>[];
+  final CockpitTranscriptEventLog _transcriptLog = CockpitTranscriptEventLog();
   var _transcriptEventSeq = 0;
 
   List<PiModel> _models = const <PiModel>[];
@@ -247,7 +246,7 @@ class AgentSession extends PaneItem {
     _pendingSend = false;
     _entries.clear();
     _awaitingUserEcho.clear();
-    _transcriptEvents.clear();
+    _transcriptLog.clear();
     _transcriptProjection = _emptyTranscriptProjection;
     notifyListeners();
 
@@ -327,7 +326,7 @@ class AgentSession extends PaneItem {
         _pendingSend = false;
         _reduceTurn(AgentTurnTransition.idle);
         _entries.clear();
-        _transcriptEvents.clear();
+        _transcriptLog.clear();
         _transcriptProjection = _emptyTranscriptProjection;
         _ctx = null;
         sessionPath = null;
@@ -422,9 +421,7 @@ class AgentSession extends PaneItem {
         _entries.clear();
         this.sessionPath = sessionPath;
         _awaitingUserEcho.clear();
-        _transcriptEvents
-          ..clear()
-          ..addAll(events);
+        _transcriptLog.appendAll(events);
         _replaceProjectedTranscript();
         _status = AgentStatus.idle;
         _pendingSend = false;
@@ -734,12 +731,12 @@ class AgentSession extends PaneItem {
   String _nextTranscriptEventId() => '$id:${_transcriptEventSeq++}';
 
   void _appendTranscriptEvent(CockpitTranscriptEvent event) {
-    _transcriptEvents.add(event);
+    _transcriptLog.append(event);
     _replaceProjectedTranscript();
   }
 
   void _closeTranscriptTurn() {
-    if (_transcriptEvents.isEmpty) return;
+    if (_transcriptLog.isEmpty) return;
     if (_transcriptProjection.turn.status == CockpitTranscriptTurnStatus.idle) {
       return;
     }
@@ -758,7 +755,9 @@ class AgentSession extends PaneItem {
       _isProjectedTranscriptEntry,
     );
     _entries.removeWhere(_isProjectedTranscriptEntry);
-    _transcriptProjection = deriveCockpitTranscript(_transcriptEvents);
+    _transcriptProjection = deriveCockpitTranscript(
+      _transcriptLog.forSession(_transcriptSessionId),
+    );
     final newEntries = _transcriptProjection.entries;
     final insertionIndex = firstProjectedIndex < 0
         ? _entries.length

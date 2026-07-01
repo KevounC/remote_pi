@@ -112,6 +112,39 @@ void main() {
       expect(tool.args['path'], 'README.md');
       expect(() => tool.args['path'] = 'changed.md', throwsUnsupportedError);
     });
+
+    test('event log dedupes hydration and filters by session', () {
+      final log = CockpitTranscriptEventLog();
+      final oldEvent = CockpitUserMessageConfirmed(
+        eventId: 'old:u1',
+        sessionId: 'old-session',
+        ts: DateTime.utc(2026),
+        clientMessageId: 'old-u1',
+        text: 'old',
+      );
+      final activeEvent = CockpitUserMessageConfirmed(
+        eventId: 'active:u1',
+        sessionId: 'active-session',
+        ts: DateTime.utc(2026),
+        clientMessageId: 'active-u1',
+        text: 'active',
+      );
+
+      log
+        ..append(oldEvent)
+        ..appendAll(<CockpitTranscriptEvent>[activeEvent, activeEvent]);
+
+      expect(log.forSession('old-session'), <CockpitTranscriptEvent>[oldEvent]);
+      expect(log.forSession('active-session'), <CockpitTranscriptEvent>[
+        activeEvent,
+      ]);
+      expect(
+        deriveCockpitTranscript(
+          log.forSession('active-session'),
+        ).entries.single,
+        isA<ProjectedUserMessage>().having((m) => m.text, 'text', 'active'),
+      );
+    });
   });
 
   group('RpcDataMapper state', () {

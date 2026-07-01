@@ -162,6 +162,38 @@ final class CockpitCompactionRecorded extends CockpitTranscriptEvent {
   final int? tokensBefore;
 }
 
+/// Append-only local transcript event log with event-id dedupe.
+///
+/// `get_messages` snapshots and live RPC events both enter this seam. The UI
+/// projection chooses a session slice at read time, so switching session/path
+/// hides old events without making `_entries` the transcript source of truth.
+final class CockpitTranscriptEventLog {
+  final List<CockpitTranscriptEvent> _events = <CockpitTranscriptEvent>[];
+  final Set<String> _seenEventIds = <String>{};
+
+  bool get isEmpty => _events.isEmpty;
+
+  void append(CockpitTranscriptEvent event) {
+    if (!_seenEventIds.add(event.eventId)) return;
+    _events.add(event);
+  }
+
+  void appendAll(Iterable<CockpitTranscriptEvent> events) {
+    for (final event in events) {
+      append(event);
+    }
+  }
+
+  List<CockpitTranscriptEvent> forSession(String sessionId) => _events
+      .where((event) => event.sessionId == sessionId)
+      .toList(growable: false);
+
+  void clear() {
+    _events.clear();
+    _seenEventIds.clear();
+  }
+}
+
 enum CockpitTranscriptTurnStatus { idle, working, streaming, error }
 
 final class CockpitTranscriptTurnView {

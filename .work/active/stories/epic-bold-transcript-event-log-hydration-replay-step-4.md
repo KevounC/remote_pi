@@ -1,14 +1,14 @@
 ---
 id: epic-bold-transcript-event-log-hydration-replay-step-4
 kind: story
-stage: implementing
+stage: review
 tags: [refactor, bold, cockpit]
 parent: epic-bold-transcript-event-log-hydration-replay
 depends_on: [epic-bold-transcript-event-log-hydration-replay-step-3]
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-06-30
 ---
 
 # Step 4: Convert Cockpit `get_messages` hydration to event replay projection
@@ -57,11 +57,23 @@ _entries
 
 ## Acceptance Criteria
 
-- [ ] Cockpit `get_messages` and live `_onEvent` append to the same local transcript event log or reducer seam.
-- [ ] Duplicate `get_messages` hydration is idempotent and does not duplicate entries.
-- [ ] Tool call/result hydration produces one projected tool entry without mutating a persisted domain object after publish.
-- [ ] Session/path switch filters old events out of the active projection.
-- [ ] Targeted Cockpit mapper/projection tests pass, or `flutter test` blockers are recorded.
+- [x] Cockpit `get_messages` and live `_onEvent` append to the same local transcript event log or reducer seam.
+- [x] Duplicate `get_messages` hydration is idempotent and does not duplicate entries.
+- [x] Tool call/result hydration produces one projected tool entry without mutating a persisted domain object after publish.
+- [x] Session/path switch filters old events out of the active projection.
+- [x] Targeted Cockpit mapper/projection tests pass, or `flutter test` blockers are recorded.
+
+## Implementation
+
+- Added a Cockpit transcript event log seam that accepts both live RPC transcript events and `get_messages` hydration events, deduping by event id before projection.
+- `AgentSession` now keeps transcript truth in the local event log and rebuilds the UI `_entries` list from `deriveCockpitTranscript(_transcriptLog.forSession(activeSessionIdOrLocalPath))`; `_entries` remains only derived display state.
+- Duplicate `get_messages` hydration is idempotent for the active projection, including tool call/result rows, because replayed event ids are appended only once.
+- Session/path switches now filter projection input by `sessionId`, so older local/live events remain in the log but are excluded from the active session projection.
+- Tool hydration continues to produce immutable projected `ProjectedToolMessage` values; completion replaces the projected value rather than mutating a published domain object.
+- Verification from `cockpit/` with `PUB_CACHE=~/projects/remote_pi/.pub-cache` and `~/projects/remote_pi/.tools/flutter/bin/flutter`:
+  - `flutter pub get --offline` passed.
+  - `flutter analyze` passed: No issues found.
+  - `flutter test` passed: 230 tests passed.
 
 ## Rollback
 
