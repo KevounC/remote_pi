@@ -1,3 +1,4 @@
+import { decodeClient } from "../protocol/codec.js";
 import type { ClientMessage, ServerMessage } from "../protocol/types.js";
 import type { RelayClient } from "./relay_client.js";
 
@@ -112,22 +113,14 @@ export class PlainPeerChannel implements PeerChannel {
       return;
     }
 
-    let msg: unknown;
+    let msg: ClientMessage;
     try {
-      msg = JSON.parse(plaintext);
+      msg = decodeClient(plaintext);
     } catch {
       return;
     }
 
-    if (
-      !msg ||
-      typeof msg !== "object" ||
-      typeof (msg as Record<string, unknown>).type !== "string"
-    ) {
-      return;
-    }
-
     if (this.detached) return;
-    this.onMessage(msg as ClientMessage);
+    this.onMessage(msg);
   }
 }

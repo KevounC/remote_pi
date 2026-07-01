@@ -238,32 +238,38 @@
       "required": ["type", "in_reply_to", "action"],
       "properties": {
         "type": { "const": "action_ok" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
         "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
         "action": { "$ref": "./defs/app-pi-common.schema.json#/$defs/actionName" }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
     },
     "actionError": {
       "type": "object",
       "required": ["type", "in_reply_to", "action", "error"],
       "properties": {
         "type": { "const": "action_error" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
         "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
         "action": { "$ref": "./defs/app-pi-common.schema.json#/$defs/actionName" },
         "error": { "type": "string" }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
     },
     "modelsList": {
       "type": "object",
       "required": ["type", "in_reply_to", "models"],
       "properties": {
         "type": { "const": "models_list" },
+        "session_id": { "$ref": "./defs/app-pi-common.schema.json#/$defs/sessionId" },
         "in_reply_to": { "$ref": "./defs/app-pi-common.schema.json#/$defs/messageId" },
         "models": { "type": "array", "items": { "$ref": "./defs/app-pi-common.schema.json#/$defs/wireModel" } },
         "current": { "$ref": "./defs/app-pi-common.schema.json#/$defs/wireModel" }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-remote-pi": { "profileRequired": { "canonical-session": ["session_id"] } }
     },
     "sessionHistoryEvent": {
       "oneOf": [

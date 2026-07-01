@@ -364,12 +364,14 @@ export interface SessionHistory {
 
 export interface ActionOk {
   readonly type: "action_ok";
+  readonly session_id?: string;
   readonly in_reply_to: string;
   readonly action: ActionName;
 }
 
 export interface ActionError {
   readonly type: "action_error";
+  readonly session_id?: string;
   readonly in_reply_to: string;
   readonly action: ActionName;
   readonly error: string;
@@ -377,6 +379,7 @@ export interface ActionError {
 
 export interface ModelsList {
   readonly type: "models_list";
+  readonly session_id?: string;
   readonly in_reply_to: string;
   readonly models: Array<WireModel>;
   readonly current?: WireModel;
@@ -854,15 +857,15 @@ function isSessionHistory(value: unknown): value is SessionHistory {
 }
 
 function isActionOk(value: unknown): value is ActionOk {
-  return isObjectLike(value, ["type", "in_reply_to", "action"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "action_ok") && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "action") && (record["action"] === "session_new" || record["action"] === "session_compact" || record["action"] === "model_set" || record["action"] === "thinking_set"))));
+  return isObjectLike(value, ["type", "session_id", "in_reply_to", "action"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "action_ok") && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "action") && (record["action"] === "session_new" || record["action"] === "session_compact" || record["action"] === "model_set" || record["action"] === "thinking_set"))));
 }
 
 function isActionError(value: unknown): value is ActionError {
-  return isObjectLike(value, ["type", "in_reply_to", "action", "error"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "action_error") && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "action") && (record["action"] === "session_new" || record["action"] === "session_compact" || record["action"] === "model_set" || record["action"] === "thinking_set")) && (Object.hasOwn(record, "error") && typeof record["error"] === "string")));
+  return isObjectLike(value, ["type", "session_id", "in_reply_to", "action", "error"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "action_error") && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "action") && (record["action"] === "session_new" || record["action"] === "session_compact" || record["action"] === "model_set" || record["action"] === "thinking_set")) && (Object.hasOwn(record, "error") && typeof record["error"] === "string")));
 }
 
 function isModelsList(value: unknown): value is ModelsList {
-  return isObjectLike(value, ["type", "in_reply_to", "models", "current"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "models_list") && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "models") && (Array.isArray(record["models"]) && record["models"].every((item) => isObjectLike(item, ["id", "name", "provider", "reasoning", "context_window", "vision"], (record) => ((Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (Object.hasOwn(record, "name") && isStringWithMinLength(record["name"], 1)) && (Object.hasOwn(record, "provider") && isStringWithMinLength(record["provider"], 1)) && (Object.hasOwn(record, "reasoning") && typeof record["reasoning"] === "boolean") && (Object.hasOwn(record, "context_window") && isIntegerAtLeast(record["context_window"], 0)) && (record["vision"] === undefined || typeof record["vision"] === "boolean")))))) && (record["current"] === undefined || isObjectLike(record["current"], ["id", "name", "provider", "reasoning", "context_window", "vision"], (record) => ((Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (Object.hasOwn(record, "name") && isStringWithMinLength(record["name"], 1)) && (Object.hasOwn(record, "provider") && isStringWithMinLength(record["provider"], 1)) && (Object.hasOwn(record, "reasoning") && typeof record["reasoning"] === "boolean") && (Object.hasOwn(record, "context_window") && isIntegerAtLeast(record["context_window"], 0)) && (record["vision"] === undefined || typeof record["vision"] === "boolean"))))));
+  return isObjectLike(value, ["type", "session_id", "in_reply_to", "models", "current"], (record) => ((Object.hasOwn(record, "type") && record["type"] === "models_list") && (record["session_id"] === undefined || isStringWithMinLength(record["session_id"], 1)) && (Object.hasOwn(record, "in_reply_to") && isStringWithMinLength(record["in_reply_to"], 1)) && (Object.hasOwn(record, "models") && (Array.isArray(record["models"]) && record["models"].every((item) => isObjectLike(item, ["id", "name", "provider", "reasoning", "context_window", "vision"], (record) => ((Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (Object.hasOwn(record, "name") && isStringWithMinLength(record["name"], 1)) && (Object.hasOwn(record, "provider") && isStringWithMinLength(record["provider"], 1)) && (Object.hasOwn(record, "reasoning") && typeof record["reasoning"] === "boolean") && (Object.hasOwn(record, "context_window") && isIntegerAtLeast(record["context_window"], 0)) && (record["vision"] === undefined || typeof record["vision"] === "boolean")))))) && (record["current"] === undefined || isObjectLike(record["current"], ["id", "name", "provider", "reasoning", "context_window", "vision"], (record) => ((Object.hasOwn(record, "id") && isStringWithMinLength(record["id"], 1)) && (Object.hasOwn(record, "name") && isStringWithMinLength(record["name"], 1)) && (Object.hasOwn(record, "provider") && isStringWithMinLength(record["provider"], 1)) && (Object.hasOwn(record, "reasoning") && typeof record["reasoning"] === "boolean") && (Object.hasOwn(record, "context_window") && isIntegerAtLeast(record["context_window"], 0)) && (record["vision"] === undefined || typeof record["vision"] === "boolean"))))));
 }
 
 const SESSION_HISTORY_EVENT_VALIDATORS: { readonly [K in SessionHistoryEventType]: ProtocolValidator<Extract<SessionHistoryEvent, { readonly type: K }>> } = {

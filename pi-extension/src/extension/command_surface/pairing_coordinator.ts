@@ -13,6 +13,7 @@ import {
 } from "../../pairing/storage.js";
 import { MeshClient } from "../../mesh/client.js";
 import { SelfRevoke, type SiblingInfo } from "../../mesh/self_revoke.js";
+import { decodeClient } from "../../protocol/codec.js";
 import type { ClientMessage, PairErrorCode, ServerMessage, ThinkingLevel } from "../../protocol/types.js";
 import { roomIdFor } from "../../rooms.js";
 import { localConfigExists } from "../../session/local_config.js";
@@ -110,21 +111,16 @@ function decodeOuterEnvelope(line: string): OuterEnvelope | null {
 }
 
 function decodeClientMessage(ct: string): ClientMessage | null {
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(Buffer.from(ct, "base64").toString("utf8")) as unknown;
+    return decodeClient(Buffer.from(ct, "base64").toString("utf8"));
   } catch {
     return null;
   }
-  if (!parsed || typeof parsed !== "object") return null;
-  const record = parsed as Record<string, unknown>;
-  if (typeof record.type !== "string") return null;
-  return record as ClientMessage;
 }
 
 function isPairRequest(message: ClientMessage): message is PairRequest {
   if (message.type !== "pair_request") return false;
-  const record = message as Record<string, unknown>;
+  const record = message as unknown as Record<string, unknown>;
   return (
     typeof record.id === "string" &&
     typeof record.token === "string" &&

@@ -587,6 +587,34 @@ describe("detached cross-PC bridge components", () => {
     expect(onMessage).not.toHaveBeenCalled();
   });
 
+  test("PlainPeerChannel validates app-origin messages before routing", () => {
+    let inbound: ((line: string) => void) | undefined;
+    const relay = {
+      send: vi.fn(),
+      on: vi.fn((_event: string, handler: (line: string) => void) => {
+        inbound = handler;
+        return relay;
+      }),
+      off: vi.fn(() => relay),
+    };
+    const onMessage = vi.fn();
+    new PlainPeerChannel(relay as never, "app-peer", undefined, onMessage);
+
+    const malformedKnownClient = Buffer.from(JSON.stringify({
+      type: "model_set",
+      id: "bad-model",
+      provider: 1,
+      model_id: "gpt",
+    })).toString("base64");
+    inbound?.(JSON.stringify({ peer: "app-peer", ct: malformedKnownClient }));
+    expect(onMessage).not.toHaveBeenCalled();
+
+    const validClient = { type: "ping" as const, id: "ping-1" };
+    const validCt = Buffer.from(JSON.stringify(validClient)).toString("base64");
+    inbound?.(JSON.stringify({ peer: "app-peer", ct: validCt }));
+    expect(onMessage).toHaveBeenCalledWith(validClient);
+  });
+
   test("PiForwardClient ignores sends and already-queued inbound relay frames after detach", () => {
     let queuedInbound: ((line: string) => void) | undefined;
     const relay = {

@@ -64,28 +64,26 @@ export function transcriptEventsToSessionHistory(
       case "user_confirmed": {
         if (seenUserIds.has(event.clientMessageId)) break;
         seenUserIds.add(event.clientMessageId);
-        const projected: SessionHistoryEvent = {
+        out.push({
           ts: event.ts,
           type: "user_input",
           id: event.clientMessageId,
           text: event.text,
-        };
-        if (event.images && event.images.length > 0) projected.images = event.images;
-        out.push(projected);
+          ...(event.images && event.images.length > 0 ? { images: event.images } : {}),
+        });
         break;
       }
       case "assistant_committed": {
         if (seenAssistantMessages.has(event.messageId)) break;
         seenAssistantMessages.add(event.messageId);
-        const projected: SessionHistoryEvent = {
+        const usage = toWireUsage(event.usage);
+        out.push({
           ts: event.ts,
           type: "agent_message",
           in_reply_to: event.replyTo,
           text: event.text,
-        };
-        const usage = toWireUsage(event.usage);
-        if (usage) projected.usage = usage;
-        out.push(projected);
+          ...(usage ? { usage } : {}),
+        });
         break;
       }
       case "tool_requested": {

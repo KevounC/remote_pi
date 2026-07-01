@@ -128,24 +128,30 @@ export function wireFromModel(model: Model<any>): WireModel {
 
 // ── ack helpers ────────────────────────────────────────────────────────────
 
-function ok(sender: ActionReplySender, msg: { id: string; session_id: string }, action: ActionName): void {
-  sender.send({ type: "action_ok", session_id: msg.session_id, in_reply_to: msg.id, action });
+type ActionRequestMessage = { id: string; session_id?: string };
+
+function sessionReply<T extends object>(msg: ActionRequestMessage, reply: T): T & { session_id?: string } {
+  return msg.session_id ? { ...reply, session_id: msg.session_id } : reply;
+}
+
+function ok(sender: ActionReplySender, msg: ActionRequestMessage, action: ActionName): void {
+  sender.send(sessionReply(msg, { type: "action_ok", in_reply_to: msg.id, action }));
 }
 
 function fail(
   sender: ActionReplySender,
-  msg: { id: string; session_id: string },
+  msg: ActionRequestMessage,
   action: ActionName,
   err: unknown,
 ): void {
   const error = err instanceof Error ? err.message : String(err);
-  sender.send({ type: "action_error", session_id: msg.session_id, in_reply_to: msg.id, action, error });
+  sender.send(sessionReply(msg, { type: "action_error", in_reply_to: msg.id, action, error }));
 }
 
 /** Run a synchronous action with uniform success/failure replies. */
 function runSync(
   sender: ActionReplySender,
-  msg: { id: string; session_id: string },
+  msg: ActionRequestMessage,
   action: ActionName,
   body: () => void,
 ): void {
@@ -160,7 +166,7 @@ function runSync(
 /** Run an async action with uniform success/failure replies. */
 async function runAsync(
   sender: ActionReplySender,
-  msg: { id: string; session_id: string },
+  msg: ActionRequestMessage,
   action: ActionName,
   body: () => Promise<void>,
 ): Promise<boolean> {
@@ -284,20 +290,18 @@ export function handleListModels(
     liveReg.refresh();
     const models = liveReg.getAvailable().map(wireFromModel);
     const current = ctx?.getModel?.();
-    sender.send({
+    sender.send(sessionReply(msg, {
       type: "models_list",
-      session_id: msg.session_id,
       in_reply_to: msg.id,
       models,
       current: current ? wireFromModel(current) : undefined,
-    });
+    }));
   } catch (e) {
-    sender.send({
+    sender.send(sessionReply(msg, {
       type: "error",
-      session_id: msg.session_id,
       in_reply_to: msg.id,
       code: "internal_error",
       message: e instanceof Error ? e.message : String(e),
-    });
+    }));
   }
 }

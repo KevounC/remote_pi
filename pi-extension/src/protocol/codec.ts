@@ -1,4 +1,9 @@
-import { isServerMessageType, isSessionScopedServerType } from "./session_scope.js";
+import {
+  CLIENT_MESSAGE_TYPES,
+  SERVER_MESSAGE_TYPES,
+  isClientMessage,
+  isServerMessage,
+} from "./generated/protocol.generated.js";
 import type { ClientMessage, ServerMessage } from "./types.js";
 
 export class DecodeError extends Error {
@@ -16,28 +21,44 @@ export function encodeClient(msg: ClientMessage): string {
 }
 
 export function decodeServer(line: string): ServerMessage {
-  let obj: unknown;
+  const obj = parseJsonLine(line);
+  const type = readType(obj);
+  if (!SERVER_MESSAGE_TYPES.includes(type as ServerMessage["type"])) {
+    throw new DecodeError("unsupported_type", `unknown type: ${type}`);
+  }
+  if (!isServerMessage(obj)) {
+    throw new DecodeError("invalid_message", `invalid server message: ${type}`);
+  }
+  return obj;
+}
+
+export function decodeClient(line: string): ClientMessage {
+  const obj = parseJsonLine(line);
+  const type = readType(obj);
+  if (!CLIENT_MESSAGE_TYPES.includes(type as ClientMessage["type"])) {
+    throw new DecodeError("unsupported_type", `unknown type: ${type}`);
+  }
+  if (!isClientMessage(obj)) {
+    throw new DecodeError("invalid_message", `invalid client message: ${type}`);
+  }
+  return obj;
+}
+
+function parseJsonLine(line: string): unknown {
   try {
-    obj = JSON.parse(line.trim());
+    return JSON.parse(line.trim());
   } catch (e) {
     throw new DecodeError("invalid_message", `not JSON: ${(e as Error).message}`);
   }
-  if (
-    !obj ||
-    typeof obj !== "object" ||
-    typeof (obj as Record<string, unknown>).type !== "string"
-  ) {
+}
+
+function readType(obj: unknown): string {
+  if (!obj || typeof obj !== "object") {
     throw new DecodeError("invalid_message", "missing 'type'");
   }
-  const t = (obj as Record<string, unknown>).type as string;
-  if (!isServerMessageType(t)) {
-    throw new DecodeError("unsupported_type", `unknown type: ${t}`);
+  const type = (obj as Record<string, unknown>).type;
+  if (typeof type !== "string") {
+    throw new DecodeError("invalid_message", "missing 'type'");
   }
-  if (isSessionScopedServerType(t)) {
-    const sessionId = (obj as Record<string, unknown>).session_id;
-    if (typeof sessionId !== "string" || sessionId.length === 0) {
-      throw new DecodeError("invalid_message", `missing 'session_id' for ${t}`);
-    }
-  }
-  return obj as ServerMessage;
+  return type;
 }

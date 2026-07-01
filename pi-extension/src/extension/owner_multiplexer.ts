@@ -1,3 +1,4 @@
+import { decodeClient } from "../protocol/codec.js";
 import type { ByeReason, ClientMessage, PairErrorCode, ServerMessage } from "../protocol/types.js";
 import type { PeerChannel } from "../transport/peer_channel.js";
 import type { RelayClient } from "../transport/relay_client.js";
@@ -120,25 +121,16 @@ export function decodeOuterEnvelope(line: string): OwnerOuterEnvelope | null {
 }
 
 export function decodeClientMessage(ct: string): ClientMessage | null {
-  let parsed: unknown;
   try {
-    const plaintext = Buffer.from(ct, "base64").toString("utf8");
-    parsed = JSON.parse(plaintext) as unknown;
+    return decodeClient(Buffer.from(ct, "base64").toString("utf8"));
   } catch {
     return null;
   }
-
-  // Preserve the legacy live boundary: unknown future client variants are
-  // tolerated as long as they are object messages carrying a string `type`, and
-  // downstream routing decides whether to handle or ignore them. The important
-  // change is that raw JSON stays `unknown` until this boundary narrows it.
-  if (!isRecord(parsed) || typeof parsed.type !== "string") return null;
-  return parsed as ClientMessage;
 }
 
 function isPairRequestMessage(message: ClientMessage): message is Extract<ClientMessage, { type: "pair_request" }> {
   if (message.type !== "pair_request") return false;
-  const record = message as Record<string, unknown>;
+  const record = message as unknown as Record<string, unknown>;
   return (
     typeof record.id === "string" &&
     typeof record.token === "string" &&

@@ -1,33 +1,40 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { DecodeError, decodeServer, encodeClient } from "./codec.js";
+import { DecodeError, decodeClient, decodeServer, encodeClient } from "./codec.js";
 import {
-  SESSION_SCOPED_SERVER_TYPES,
-  NON_SESSION_SCOPED_SERVER_TYPES,
-} from "./session_scope.js";
+  CLIENT_MESSAGE_TYPES,
+  SERVER_MESSAGE_TYPES,
+} from "./generated/protocol.generated.js";
 
 const fixtureDir = fileURLToPath(
   new URL("../../../.orchestration/contracts/fixtures", import.meta.url),
 );
 
-// Single source of truth: a fixture is a decodeable SERVER fixture iff its
-// carried `type` is a registered server type (session-scoped or not). Derived
-// from the session_scope registry so adding a server type can't silently drift
-// this set — the canonical-session work added action_ok/action_error/compaction/
-// models_list/queued_message_state as server types and this hand-maintained
-// list fell behind. The only filename alias is `agent_stream.jsonl`, which
-// carries agent_chunk/agent_done under a historical name.
-const SERVER_TYPES = new Set<string>([
-  ...SESSION_SCOPED_SERVER_TYPES,
-  ...NON_SESSION_SCOPED_SERVER_TYPES,
-]);
+const SERVER_TYPES = new Set<string>(SERVER_MESSAGE_TYPES);
+const CLIENT_TYPES = new Set<string>(CLIENT_MESSAGE_TYPES);
 const FILE_TYPE_ALIASES: Record<string, string> = {
   "agent_stream.jsonl": "agent_chunk",
 };
+function fixtureType(file: string): string {
+  return FILE_TYPE_ALIASES[file] ?? file.replace(/\.jsonl$/, "");
+}
 function isServerFixture(file: string): boolean {
-  const t = FILE_TYPE_ALIASES[file] ?? file.replace(/\.jsonl$/, "");
-  return SERVER_TYPES.has(t);
+  return SERVER_TYPES.has(fixtureType(file));
+}
+function isClientFixture(file: string): boolean {
+  return CLIENT_TYPES.has(fixtureType(file));
+}
+
+function captureDecodeError(fn: () => unknown): DecodeError {
+  let caught: unknown;
+  try {
+    fn();
+  } catch (e) {
+    caught = e;
+  }
+  expect(caught).toBeInstanceOf(DecodeError);
+  return caught as DecodeError;
 }
 
 describe("fixtures", () => {
@@ -38,7 +45,7 @@ describe("fixtures", () => {
   });
 
   for (const file of files) {
-    test(file, () => {
+    test(`${file} server decode classification`, () => {
       const lines = readFileSync(`${fixtureDir}/${file}`, "utf8")
         .split("\n")
         .filter(Boolean);
@@ -46,69 +53,107 @@ describe("fixtures", () => {
       for (const line of lines) {
         if (isServerFixture(file)) {
           const msg = decodeServer(line);
-          expect(msg).toHaveProperty("type");
+          expect(SERVER_TYPES.has(msg.type)).toBe(true);
         } else {
-          // client-only fixture — must throw unsupported_type, not invalid_message
-          let caught: unknown;
-          try {
-            decodeServer(line);
-          } catch (e) {
-            caught = e;
-          }
-          expect(caught).toBeInstanceOf(DecodeError);
-          expect((caught as DecodeError).code).toBe("unsupported_type");
+          const caught = captureDecodeError(() => decodeServer(line));
+          expect(caught.code).toBe("unsupported_type");
+        }
+      }
+    });
+
+    test(`${file} client decode classification`, () => {
+      const lines = readFileSync(`${fixtureDir}/${file}`, "utf8")
+        .split("\n")
+        .filter(Boolean);
+
+      for (const line of lines) {
+        if (isClientFixture(file)) {
+          const msg = decodeClient(line);
+          expect(CLIENT_TYPES.has(msg.type)).toBe(true);
+        } else {
+          const caught = captureDecodeError(() => decodeClient(line));
+          expect(caught.code).toBe("unsupported_type");
         }
       }
     });
   }
 });
 
+describe("decodeServer validator-backed compatibility", () => {
+  test("accepts drifted schema-valid server variants", () => {
+    const messages = [
+      { type: "user_message", id: "msg-1", session_id: "session-1", text: "hello" },
+      { type: "compaction", session_id: "session-1", summary: "short", tokens_before: 42 },
+      { type: "action_ok", session_id: "session-1", in_reply_to: "action-1", action: "session_compact" },
+      { type: "action_error", session_id: "session-1", in_reply_to: "action-2", action: "model_set", error: "no model" },
+      {
+        type: "models_list",
+        session_id: "session-1",
+        in_reply_to: "models-1",
+        models: [{ id: "gpt-test", name: "GPT Test", provider: "openai", reasoning: true, context_window: 128000, vision: true }],
+        current: { id: "gpt-test", name: "GPT Test", provider: "openai", reasoning: true, context_window: 128000, vision: true },
+      },
+    ];
+
+    for (const message of messages) {
+      expect(decodeServer(JSON.stringify(message))).toEqual(message);
+    }
+  });
+
+  test("does not require compatibility-profile session_id", () => {
+    expect(decodeServer(JSON.stringify({ type: "action_ok", in_reply_to: "action-1", action: "session_compact" }))).toEqual({
+      type: "action_ok",
+      in_reply_to: "action-1",
+      action: "session_compact",
+    });
+  });
+});
+
+describe("decodeClient validator-backed compatibility", () => {
+  test("accepts current app-origin messages", () => {
+    const messages = [
+      { type: "pair_request", id: "pair-1", token: "token", device_name: "phone" },
+      { type: "user_message", id: "msg-1", session_id: "session-1", text: "hello", streaming_behavior: "steer" },
+      { type: "session_sync", id: "sync-1", session_id: "session-1", limit: 25 },
+      { type: "model_set", id: "model-1", session_id: "session-1", provider: "openai", model_id: "gpt" },
+      { type: "thinking_set", id: "thinking-1", session_id: "session-1", level: "high" },
+      { type: "list_models", id: "models-1", session_id: "session-1" },
+    ];
+
+    for (const message of messages) {
+      expect(decodeClient(JSON.stringify(message))).toEqual(message);
+    }
+  });
+
+  test("rejects malformed known app-origin messages", () => {
+    const caught = captureDecodeError(() => decodeClient('{"type":"model_set","id":"bad","provider":1,"model_id":"gpt"}'));
+    expect(caught.code).toBe("invalid_message");
+    expect(caught.message).toMatch(/invalid client message: model_set/);
+  });
+});
+
 describe("rejects junk", () => {
   test("invalid JSON → DecodeError invalid_message", () => {
-    let err: unknown;
-    try {
-      decodeServer("not json {{{");
-    } catch (e) {
-      err = e;
-    }
-    expect(err).toBeInstanceOf(DecodeError);
-    expect((err as DecodeError).code).toBe("invalid_message");
+    const err = captureDecodeError(() => decodeServer("not json {{{"));
+    expect(err.code).toBe("invalid_message");
   });
 
   test("missing type field → DecodeError invalid_message", () => {
-    let err: unknown;
-    try {
-      decodeServer('{"foo":1}');
-    } catch (e) {
-      err = e;
-    }
-    expect(err).toBeInstanceOf(DecodeError);
-    expect((err as DecodeError).code).toBe("invalid_message");
-    expect((err as DecodeError).message).toMatch(/missing 'type'/);
+    const err = captureDecodeError(() => decodeServer('{"foo":1}'));
+    expect(err.code).toBe("invalid_message");
+    expect(err.message).toMatch(/missing 'type'/);
   });
 
   test("unknown type → DecodeError unsupported_type", () => {
-    let err: unknown;
-    try {
-      decodeServer('{"type":"made_up"}');
-    } catch (e) {
-      err = e;
-    }
-    expect(err).toBeInstanceOf(DecodeError);
-    expect((err as DecodeError).code).toBe("unsupported_type");
-    expect((err as DecodeError).message).toMatch(/unknown type/);
+    const err = captureDecodeError(() => decodeServer('{"type":"made_up"}'));
+    expect(err.code).toBe("unsupported_type");
+    expect(err.message).toMatch(/unknown type/);
   });
 
-  test("session-scoped server messages require session_id", () => {
-    let err: unknown;
-    try {
-      decodeServer('{"type":"agent_chunk","in_reply_to":"r1","delta":"hi"}');
-    } catch (e) {
-      err = e;
-    }
-    expect(err).toBeInstanceOf(DecodeError);
-    expect((err as DecodeError).code).toBe("invalid_message");
-    expect((err as DecodeError).message).toMatch(/session_id/);
+  test("malformed known server messages → DecodeError invalid_message", () => {
+    const err = captureDecodeError(() => decodeServer('{"type":"agent_chunk","in_reply_to":"r1"}'));
+    expect(err.code).toBe("invalid_message");
+    expect(err.message).toMatch(/invalid server message: agent_chunk/);
   });
 });
 
