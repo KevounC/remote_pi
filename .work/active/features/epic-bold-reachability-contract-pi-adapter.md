@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract
 depends_on: [epic-bold-reachability-contract-state-machine]
-release_binding: null
+release_binding: extension-0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-01
 ---
 
 # Reachability — pi-extension relay + mesh adapter

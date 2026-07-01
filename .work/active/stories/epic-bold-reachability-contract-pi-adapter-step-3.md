@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract-pi-adapter
 depends_on: [epic-bold-reachability-contract-pi-adapter-step-2]
-release_binding: null
+release_binding: extension-0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-30
+updated: 2026-07-01
 ---
 
 # Step 3: Consume shared backoff policy in MeshNode relay reconnect

@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension]
 parent: null
 depends_on: [epic-bold-generated-protocol, epic-bold-canonical-session, epic-bold-turn-state-machine]
-release_binding: null
+release_binding: extension-0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-01
 ---
 
 # pi-extension/src/index.ts is four modules pretending to be one file

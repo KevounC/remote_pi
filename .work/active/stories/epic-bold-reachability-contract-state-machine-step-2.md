@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract-state-machine
 depends_on: [epic-bold-reachability-contract-state-machine-step-1]
-release_binding: null
+release_binding: extension-0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-01
 ---
 
 # Step 2: Add the TypeScript Reachability projection module

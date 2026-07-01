@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract-pi-adapter
 depends_on: [epic-bold-reachability-contract-state-machine]
-release_binding: null
+release_binding: extension-0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-01
 ---
 
 # Step 1: Add pi-extension reachability contract projection module

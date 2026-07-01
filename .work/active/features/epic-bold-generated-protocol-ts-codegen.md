@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-generated-protocol
 depends_on: [epic-bold-generated-protocol-schema-source]
-release_binding: null
+release_binding: extension-0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-30
+updated: 2026-07-01
 ---
 
 # Generated protocol — TypeScript codegen target

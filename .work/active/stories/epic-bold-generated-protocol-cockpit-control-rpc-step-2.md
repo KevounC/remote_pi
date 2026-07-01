@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-generated-protocol-cockpit-control-rpc
 depends_on: [epic-bold-generated-protocol-cockpit-control-rpc-step-1]
-release_binding: null
+release_binding: extension-0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-30
+updated: 2026-07-01
 ---
 
 # Step 2: Parse schema control envelopes in pi-extension input path and route to dispatcher

@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-split-pi-extension-index
 depends_on: [epic-bold-split-pi-extension-index-composition-root]
-release_binding: null
+release_binding: extension-0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-30
+updated: 2026-07-01
 ---
 
 # Split pi-extension index — CLI / daemon / pairing module

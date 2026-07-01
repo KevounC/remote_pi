@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-transcript-event-log-hydration-replay
 depends_on: [epic-bold-transcript-event-log-hydration-replay-step-2]
-release_binding: null
+release_binding: extension-0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-30
+updated: 2026-07-01
 ---
 
 # Step 3: Make pi-extension `session_history` replay-compatible and independent of app replacement
