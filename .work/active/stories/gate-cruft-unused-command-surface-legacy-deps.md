@@ -1,7 +1,7 @@
 ---
 id: gate-cruft-unused-command-surface-legacy-deps
 kind: story
-stage: implementing
+stage: done
 tags: [cleanup]
 parent: null
 depends_on: []

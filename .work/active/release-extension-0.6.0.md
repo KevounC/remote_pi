@@ -83,7 +83,23 @@ Excluded deliberately; documented here so the gather is auditable.
 
 ## Gate runs
 
-(populated in Phase 4)
+- **gate-docs** (2026-07-01) — 2 findings (2 medium). Grep-first prompt held (1
+  compaction, recovered). Both routed to backlog (non-blocking):
+  - `gate-docs-composition-root-session-hooks` (medium) — pi-extension-typescript
+    SKILL.md lifecycle docs reference the old monolithic `index.ts` session hooks;
+    now split across `src/extension/composition_root.ts`.
+  - `gate-docs-peer-join-broadcast-location` (medium) — SKILL.md describes
+    `peer_joined`/`peer_left` broadcast location pre-split.
+- **gate-cruft** (2026-07-01) — 4 findings (1 high blocking, 3 medium). Tightly
+  scoped to split-module files; no compaction. The high finding **resolved**:
+  - `gate-cruft-unused-command-surface-legacy-deps` (high → resolved): orphaned
+    incremental-split seam `src/extension/command_surface/legacy_deps.ts` —
+    deleted; the live `LegacyCommandSurfaceDeps` interface lives in
+    `legacy_ports.ts`. Typecheck + extension tests green.
+  - 3 medium → backlog (non-blocking): relay-owner-channel-bridge,
+    standalone-cli-unused-command-surface, index-legacy-test-aliases.
+
+(populated in Phase 4 — remaining gates pending)
 
 ## Wire-change deployment note
 
