@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-projection-consumers
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-turn-state-machine
 depends_on: [epic-bold-turn-state-machine-algebraic-state]

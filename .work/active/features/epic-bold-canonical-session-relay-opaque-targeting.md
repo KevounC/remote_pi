@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-relay-opaque-targeting
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, relay]
 parent: epic-bold-canonical-session
 depends_on: [epic-bold-canonical-session-identity-model]

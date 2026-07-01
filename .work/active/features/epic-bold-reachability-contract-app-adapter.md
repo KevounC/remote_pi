@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-app-adapter
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, app]
 parent: epic-bold-reachability-contract
 depends_on: [epic-bold-reachability-contract-state-machine]

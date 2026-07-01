@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-dart-codegen
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, app, pi-extension]
 parent: epic-bold-generated-protocol
 depends_on: []

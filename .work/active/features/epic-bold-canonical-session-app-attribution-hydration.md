@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-app-attribution-hydration
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, app, security]
 parent: epic-bold-canonical-session
 depends_on: [epic-bold-canonical-session-wire-discriminator]

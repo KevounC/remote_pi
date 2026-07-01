@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-algebraic-state
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-turn-state-machine
 depends_on: []

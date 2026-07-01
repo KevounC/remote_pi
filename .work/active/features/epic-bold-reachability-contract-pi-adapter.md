@@ -1,7 +1,7 @@
 ---
 id: epic-bold-reachability-contract-pi-adapter
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension]
 parent: epic-bold-reachability-contract
 depends_on: [epic-bold-reachability-contract-state-machine]

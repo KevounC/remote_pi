@@ -1,7 +1,7 @@
 ---
 id: epic-bold-turn-state-machine-late-attach
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension, app]
 parent: epic-bold-turn-state-machine
 depends_on: [epic-bold-turn-state-machine-algebraic-state]

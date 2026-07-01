@@ -1,7 +1,7 @@
 ---
 id: epic-bold-cockpit-workspace-projection-settings-split
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, cockpit]
 parent: epic-bold-cockpit-workspace-projection
 depends_on: [epic-bold-cockpit-workspace-projection-workspace-document]

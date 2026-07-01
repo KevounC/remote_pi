@@ -1,7 +1,7 @@
 ---
 id: epic-bold-canonical-session-identity-model
 kind: feature
-stage: implementing
+stage: done
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: epic-bold-canonical-session
 depends_on: []
