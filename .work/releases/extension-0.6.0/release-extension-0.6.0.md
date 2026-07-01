@@ -99,9 +99,12 @@ Excluded deliberately; documented here so the gather is auditable.
   - 3 medium → backlog (non-blocking): relay-owner-channel-bridge,
     standalone-cli-unused-command-surface, index-legacy-test-aliases.
 
-- **gate-refactor** (2026-07-01) — 8 findings (4 high, 4 medium) from 3 scan libraries
-  (protocol-contract 4, lifecycle 4, boundaries 0). 1 high **resolved in-scope**;
-  3 high + 4 medium **deferred to backlog as pre-existing** (not bundle-introduced):
+- **gate-refactor** (2026-07-01) — 26 findings across 4 scan-rule libraries
+  (lifecycle 15, protocol-contract 6, boundaries 4, domains-imports-infra 1).
+  The gate's own summary counted 8 (the subset elevated to active stories); the
+  other 18 were written straight to backlog. 1 high **resolved in-scope**; the
+  rest deferred to backlog (3 high pre-existing not bundle-introduced + 22
+  medium/low). Disposition of the elevated highs:
   - `gate-refactor-protocol-pi-forward-crosspc-dtos` (high → **resolved**): the `to_room`
     commit (`13701ee`, this bundle) hand-edited the `PiEnvelopeFrame`/`PiEnvelopeInFrame`
     mirror instead of consuming the generated `CrossPcFramePiEnvelope*` types.
@@ -116,8 +119,8 @@ Excluded deliberately; documented here so the gather is auditable.
   - `gate-refactor-lifecycle-relay-auth-timeout-listener` (high → backlog): the
     auth-timeout path at `relay_client.ts:253` was last touched MVP-era; bundle
     didn't touch it (reachability-constants-only diff).
-  - 4 medium → backlog (non-blocking): session-scope-reenumeration,
-    session-start/queued-delivery/control-frame fire-and-forget.
+  - 22 medium/low (lifecycle fire-and-forget / unguarded-async, boundaries
+    ad-hoc-map parses, protocol re-enumeration) → backlog (non-blocking).
 - **gate-security** (2026-07-01) — 13 findings (2 high, 11 medium/low). All routed
   to backlog. The 2 high findings are **pre-existing crypto posture, not bundle
   regressions** — disposition rationale:
@@ -218,6 +221,6 @@ path>` recovers any body; under retain-bodies they also remain in
 - **Date shipped**: 2026-07-01
 - **Mapping**: tag-based (`extension-0.6.0`; push is external — operator runs from their machine)
 - **Total items shipped**: 22 (18 done work items + 4 gate findings resolved/tracked)
-- **Gate finding totals**: docs 2 (2m) · cruft 4 (1h-resolved, 3m) · security 13 (2h pre-existing→backlog, 11m) · refactor 8 (1h-resolved, 3h+4m pre-existing→backlog) · tests 6 (1 crit-resolved, 5m) · patterns 3 documented
+- **Gate finding totals**: docs 2 (2m) · cruft 4 (1h-resolved, 3m) · security 13 (2h pre-existing→backlog, 11m) · refactor 26 (1h-resolved, 3h pre-existing→backlog, 22m/l) · tests 6 (1 crit-resolved, 5m) · patterns 3 documented
 - **Pre-existing findings deferred to backlog**: 5 high (2 security, 3 refactor) + 24 medium/low — all non-bundle-introduced (provenance grounded to MVP-era commits / reachability-only diffs)
 - **External publishing**: `git push origin main extension-0.6.0` (tag points at the ship commit)
