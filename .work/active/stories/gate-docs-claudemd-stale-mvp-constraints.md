@@ -1,7 +1,7 @@
 ---
 id: gate-docs-claudemd-stale-mvp-constraints
 kind: story
-stage: implementing
+stage: done
 tags: [documentation]
 parent: null
 depends_on: []

@@ -6,9 +6,12 @@ Descreve o protocolo RPC que o `PiRpcProcess` (`lib/data/rpc/`) fala com o
 e conferido contra a doc oficial do SDK em
 `@earendil-works/pi-coding-agent/docs/rpc.md`.
 
-> O Cockpit spawna **pi puro** (decisão B do plano 37): `pi --mode rpc
-> --no-session --no-extensions` — sem a extensão remote-pi, logo **sem
-> relay/mesh/crypto**. Local-only.
+> O Cockpit spawna `pi --mode rpc` **com extensions carregadas** (decisão B
+> revisada): `noSession`/`noExtensions` defaultam a `false` (ver
+> `lib/app/core/env.dart` → `spawnArgs`). As extensions ficam ativas para expor
+> os slash commands (`get_commands`) e o controle remote-pi (relay/mesh/crypto)
+> via overlay de controle. Quando `noSession: true` o pi não persiste a
+> sessão; `noExtensions: true` desliga as extensions (raramente usado).
 
 ## Transporte
 
@@ -171,8 +174,9 @@ Tipos emitidos mas **ignorados** no MVP (viram `RpcUnknown`): outros
 `message_start`, `message_end`, `tool_execution_update`, e os deltas
 `text_start`, `thinking_start`/`thinking_end`,
 `toolcall_start`/`toolcall_delta`/`toolcall_end`, `done`/`error`. Também:
-`queue_update`, `compaction_*`, `auto_retry_*`, `extension_error`. Mapear
-conforme as waves precisarem.
+`queue_update`, `compaction_*`, `extension_error`. Mapear
+conforme as waves precisarem. (`auto_retry_*` **não** está mais aqui — é
+parseado como `RpcAutoRetry`, ver linha acima.)
 
 ### Exemplos de linha reais (capturados)
 

@@ -8,19 +8,24 @@ agente é um `pi --mode rpc` que o app spawna e dirige **localmente** — sem re
 sem pareamento, sem crypto. É a contraparte local do `app/` (que é o gateway
 remoto). Plano de referência: [`../plan/37-desktop-cockpit.md`](../plan/37-desktop-cockpit.md).
 
-## Escopo atual (MVP — provar o conceito)
+## Escopo atual (pós-refactor: workspace projection + controle remoto)
 
-Fase de validação: provar que o Flutter desktop aguenta o `--mode rpc` — spawn de
-child process, streaming de stdout, `send` por stdin, kill limpo. **Layout básico
-primeiro; panes (multiplexação) ainda NÃO** — decisão adiada (ver plano 37). Nada
-de relay/mesh/crypto nesta fase.
+A fase MVP foi superada pela refatoração *bold-refactor* (cockpit-workspace-projection,
+generated-protocol, transcript-event-log). O cockpit agora é um **documento de
+workspace + projeções**: o workspace é um `WorkspaceDocument` puro (`LeafPane`/
+`SplitPane`, múltiplas tabs/sessões), e cada agente é uma `AgentSessionProjection`
+derivada do estado do `pi --mode rpc` — a UI consome projeções imutáveis, não
+campos mutáveis diretos. Mutações do workspace passam por *command transforms* puros
+(`WorkspaceDocumentCommands` → `WorkspaceCommandResult`) com um único reducer
+(`CockpitViewModel._applyWorkspaceCommand`). Controle remoto (relay/mesh/crypto)
+está ativo via overlay de controle RPC — as extensions do pi ficam carregadas.
 
-Decisões fechadas (plano 37, 2026-06-05):
+Decisões fechadas (plano 37, 2026-06-05; revisadas no bold-refactor):
 
 | # | Decisão |
 |---|---|
 | **A** | Código mora aqui em `cockpit/` (não dentro de `app/`). Reuso futuro com `app/` via `packages/pi_core` — **ainda não extraído** |
-| **B** | Spawna `pi --mode rpc` **puro**, sem a extensão remote-pi. Local-only, sem relay |
+| **B** | Spawna `pi --mode rpc` **com extensions** (remote-pi carregado p/ command discovery + controle). `noSession`/`noExtensions` defaultam a `false` (ver `lib/app/core/env.dart`) |
 | **C** | Spawn **próprio** — não reusa o supervisor do plano 26 (que é fire-and-forget sem streaming) |
 
 ## Stack

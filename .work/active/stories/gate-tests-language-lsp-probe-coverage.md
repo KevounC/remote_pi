@@ -1,7 +1,7 @@
 ---
 id: gate-tests-language-lsp-probe-coverage
 kind: story
-stage: implementing
+stage: done
 tags: [testing]
 parent: null
 depends_on: []

@@ -1,11 +1,11 @@
 ---
 id: gate-cruft-temp-debug-trace-scaffold
 kind: story
-stage: drafting
+stage: done
 tags: [cleanup]
 parent: null
 depends_on: []
-release_binding: null
+release_binding: cockpit-v1.6.0
 gate_origin: cruft
 created: 2026-07-01
 updated: 2026-07-01

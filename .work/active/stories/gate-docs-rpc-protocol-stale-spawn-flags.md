@@ -1,7 +1,7 @@
 ---
 id: gate-docs-rpc-protocol-stale-spawn-flags
 kind: story
-stage: implementing
+stage: done
 tags: [documentation]
 parent: null
 depends_on: []
