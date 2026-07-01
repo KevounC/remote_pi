@@ -9,6 +9,34 @@ For the canonical protocol specification, see [PROTOCOL.md](PROTOCOL.md).
 
 ---
 
+## [relay-0.2.0] — 2026-07-01
+
+Relay minor over `relay-0.1.0` (first relay release). Ships the relay half of the
+bold-refactor arc (typed-frame actor, registry split, generated protocol, opaque
+targeting) plus two security/correctness fixes surfaced by the gate-enabled release
+pass. **Must deploy paired with `app-v1.2.0` and the `extension-0.6.0` sender**
+(auth domain-separation + `to_room` wire changes).
+
+### Fixed
+- **Security**: relay auth now verifies domain-separated signatures
+  (`remote-pi-relay-auth-v1\n` ++ nonce), closing the cross-protocol signing oracle
+  on the owner Ed25519 key (pairs with app-v1.2.0).
+- **Correctness**: cross-PC `pi_envelope` now carries `to_room` and the relay routes
+  only to the addressed room of the destination peer (room-targeted delivery), not
+  peer-wide fanout. Missing/empty `to_room` → `transport_error: bad_envelope`;
+  unknown destination room → `transport_error: offline` correlated to the original
+  id; `pi_envelope_in` echoes `to_room`. (The story `relay-opaque-targeting-step-1`
+  was approved claiming this but the feature was never implemented — the gate caught it.)
+
+### Added
+- Typed-frame actor dispatch (`RelayInboundFrame` → typed handlers).
+- Connection-actor state, registry split, generated protocol frames.
+- Opaque cross-PC forwarding (relay never inspects `envelope.body`).
+
+### Internal (release-gate dogfood)
+- 6 gates run; 35 findings produced. 5 critical blocking (`to_room` routing) +
+  2 high (prior releases) resolved before ship; 28 medium/low tracked in backlog.
+
 ## [app-v1.2.0] — 2026-07-01
 
 Mobile app minor over `app-v1.1.1`. Ships the mobile half of the bold-refactor
