@@ -1,7 +1,7 @@
 ---
 id: epic-bold-transcript-event-log-hydration-replay-step-4
 kind: story
-stage: review
+stage: done
 tags: [refactor, bold, cockpit]
 parent: epic-bold-transcript-event-log-hydration-replay
 depends_on: [epic-bold-transcript-event-log-hydration-replay-step-3]
@@ -78,3 +78,19 @@ _entries
 ## Rollback
 
 Restore direct `TranscriptMessage` mapping and `_entries` population. App/pi-extension replay semantics remain unaffected.
+
+## Review
+
+Approved (2026-06-30). Independently re-ran: **cockpit tests 230 passed (up from 228
+— the agent's new transcript-projection tests)**; `flutter analyze` clean. Commit
+`0ddc86b` scoped to cockpit only (transcript_event + agent_session + rpc_data_mapper
++ test); collision guard held.
+
+Hydration seam verified: `CockpitTranscriptEventLog` accepts both live RPC transcript
+events AND `get_messages` hydration events, deduping by event id before projection.
+`AgentSession` keeps transcript truth in the local event log; `_entries` is derived
+display state rebuilt from `deriveCockpitTranscript(_transcriptLog.forSession(...))`.
+Duplicate `get_messages` hydration idempotent (replayed event ids appended once,
+including tool call/result rows). Session/path switch filters projection by `sessionId`
+(older events stay in log, excluded from active projection). Tool hydration produces
+immutable `ProjectedToolMessage` (completion replaces, doesn't mutate published object).
