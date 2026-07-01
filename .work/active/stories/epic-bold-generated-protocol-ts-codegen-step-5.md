@@ -1,7 +1,7 @@
 ---
 id: epic-bold-generated-protocol-ts-codegen-step-5
 kind: story
-stage: review
+stage: done
 tags: [refactor]
 parent: epic-bold-generated-protocol-ts-codegen
 depends_on: [epic-bold-generated-protocol-ts-codegen-step-4]
@@ -87,3 +87,19 @@ Medium — package scripts and generated-output checks can be brittle if paths d
 
 ## Rollback
 Remove the package scripts and parity tests; generated runtime code from earlier steps remains controlled by normal typecheck/test until restored.
+
+## Review
+
+Approved (2026-06-30). Independently verified: **parity check passes in clean state
+(exit 0) AND fails when generated is stale** ("Generated TypeScript protocol is stale"
++ exit 1 — confirmed via tamper-then-restore probe). **Full pi-ext suite 715 passed |
+3 skipped | 0 failed (44 files)** — fully green (up from 713 — the agent's 2 parity
+tests). typecheck clean. Generated-contract: deterministic, no hand-edits (no
+generated source changed this step).
+
+Commit `7ffe82c` scoped to pi-ext only (package.json scripts + codec.test.ts parity
+tests + generator `--check` mode). Package scripts work from both root
+(`corepack pnpm --dir pi-extension check:protocol`) and subproject
+(`corepack pnpm check:protocol`). `codec.test.ts` derives client/server type sets
+from the manifest through the shared TS codegen IR (no handwritten variant allowlist).
+**generated-protocol-ts-codegen arc complete (5/5).**
