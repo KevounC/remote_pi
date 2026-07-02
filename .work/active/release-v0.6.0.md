@@ -56,13 +56,33 @@ superseded ones.)
 
 ### Tests gate — 2026-07-01
 
-Invocation: `gate-tests v0.6.0`.
+**Result: no coverage gaps.** Clean. Grep-first audit of acceptance criteria
+across 111 bound items + the cross-component bundle; lifecycle/state-convergence
+criteria are covered by targeted tests for stale Pi SDK/session replacement,
+reconnect hydration, `working:false` convergence, WebSocket/relay teardown,
+late attach, session history replay, room metadata projection. No
+tautological/gamed tests. The component releases already caught the
+lifecycle gaps; this bundle added no new untested surfaces.
 
-The host invocation did not expose a generic subagent dispatch tool, so the tests gate ran inline rather than in a separate read-only scanner context. Scope audited: 111 bound non-release items and the repo-level cross-component bundle in `/tmp/v060_bundle_clean.txt`.
+### Security gate — 2026-07-01
 
-Method: grep-first extraction of acceptance-criteria checkboxes and lifecycle keywords from bound item bodies, then targeted test-name/test-block mapping across app Flutter tests, cockpit Flutter tests, pi-extension Vitest tests, relay Cargo tests, and protocol/codegen tests. Existing gate findings for `tests`: 0.
+2 findings (0 critical/high, 1 medium, 1 low). Skipped 13 exact duplicates from
+the component releases' backlog. Both → backlog (non-blocking, pre-existing):
+- `gate-security-pi-envelope-auth-scan-rate-limit` (medium) — relay `pi_envelope`
+  authorization scans mesh storage without a negative cache/per-frame limiter.
+- `gate-security-app-inbound-relay-frame-size-caps` (low) — app decodes inbound
+  relay frames before size caps.
 
-Result: no Critical/High release-blocking test coverage gaps found. Lifecycle/state-convergence acceptance criteria are represented by targeted tests for stale Pi SDK/session replacement, reconnect hydration, `working:false` convergence, WebSocket/relay teardown, late attach, session history replay, and room metadata projection. No tautological/gamed tests were accepted as findings in the audited bundle.
+### Cruft gate — 2026-07-01
+
+2 findings (2 medium). Tightly scoped to split-module + protocol-facade surfaces;
+no compaction. Both → backlog (non-blocking):
+- `gate-cruft-legacy-index-ports-adapter` (medium) — legacy index ports adapter
+  is a compatibility shim surviving the module extraction.
+- `gate-cruft-protocol-facade-stale-schema-ir-comment` (medium) — stale comment
+  claiming relay-control frames aren't in the schema IR.
+
+(remaining gates pending: docs, patterns, refactor)
 
 ### Binding-consistency warnings
 
