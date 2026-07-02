@@ -1,7 +1,7 @@
 ---
 id: gate-docs-protocol-source-stale-handwritten-claims
 kind: story
-stage: implementing
+stage: done
 tags: [documentation]
 parent: null
 depends_on: []

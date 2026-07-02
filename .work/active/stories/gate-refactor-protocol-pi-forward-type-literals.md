@@ -1,7 +1,7 @@
 ---
 id: gate-refactor-protocol-pi-forward-type-literals
 kind: story
-stage: implementing
+stage: done
 tags: []
 parent: null
 depends_on: []

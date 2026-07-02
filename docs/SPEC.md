@@ -48,38 +48,39 @@ Ed25519 in the app; Hive for local cache in Flutter; `flutter_modular` +
 
 ## External interfaces
 
-### Wire protocol (the single source of truth — currently handwritten in four places)
+### Wire protocol (the single source of truth — generated from one schema)
 
-The wire is the contract that every surface speaks. Today it is defined as
-handwritten mirrors:
+The wire is the contract that every surface speaks. It is defined once in a
+canonical JSON Schema and projected into each language by the generated-
+protocol codegen:
 
-- **TS** — `pi-extension/src/protocol/types.ts` (`ClientMessage` /
-  `ServerMessage` unions), `protocol/codec.ts` (`encodeClient` / `decodeServer`
-  + a `SERVER_TYPES` registry that has drifted — omits `user_message`,
-  `compaction`, `action_ok`, `action_error`, `models_list`).
-- **Dart** — `app/lib/protocol/protocol.dart` (~1313 lines, the largest hand
-  mirror), `protocol/codec.dart`, `protocol/uuid7.dart`.
-- **Rust** — `relay/src/protocol/outer.rs` + `rooms.rs` (serde structs for the
-  relay outer envelope and room metadata).
-- **Cockpit↔pi control RPC** — a fourth, private NUL-prefix string RPC
-  (`\x00remote-pi-ctrl:...`) over Pi custom events, mirrored in
-  `cockpit/lib/app/cockpit/data/rpc/pi_rpc_process.dart` and
-  `pi-extension/src/index.ts`.
+- **TS** — `pi-extension/src/protocol/generated/protocol.generated.ts`
+  (unions, validators, `decodeClient`/`decodeServer`, type-set registries
+  `clientTypes`/`serverTypes`/`sessionScopedClientTypes`/
+  `sessionScopedServerTypes`/`relayControlTypes`/`crossPcTypes`).
+  `types.ts` is now a narrow re-export of these; `codec.ts` dispatches over
+  the generated helpers.
+- **Dart** — `app/lib/protocol/generated/protocol.g.dart` (sealed classes +
+  `fromJson`). `protocol.dart` imports/exports it; a documented temporary
+  hand-maintained island `control_frames.dart` covers control frames not yet
+  in the schema IR.
+- **Rust** — `relay/src/protocol/generated/` (serde structs for the relay
+  outer envelope, cross-PC frames, and room metadata).
+- **Cockpit↔pi control RPC** — folded into the generated schema
+  (`cockpit-control-rpc`), retiring the former private NUL-prefix string RPC.
 
-This four-way hand mirror is the root cause of "annoying to bugfix" and the
-target of the `epic-bold-generated-protocol` refactor: define the wire once in
-a canonical schema, generate TS unions + validators, Dart sealed classes +
-`fromJson`, and Rust serde structs. Until that lands, treat
-`pi-extension/src/protocol/types.ts` as the de-facto source of truth and
-mirror changes by hand to Dart and Rust.
+Treat the schema (`protocol/schema/`) as the source of truth; the generated
+artifacts are the cross-language contract test. A small hand-maintained
+island remains for control frames not yet migrated to the schema IR.
 
 ### Transports
 
 1. **App ↔ pi-extension** — WebSocket over TLS (relay-mediated) carrying
    newline-delimited JSON `ClientMessage` / `ServerMessage`. Chat-bearing
    `ServerMessage`s (`user_message`, `agent_chunk`, `agent_done`,
-   `session_history`) carry **no session discriminator** today — see
-   "Open questions" and `docs/ARCHITECTURE.md` → "Session and room model."
+   `session_history`, tool surfaces) carry a canonical `session_id`
+   (endpoint-owned, opaque to the relay); the app's `session_gate.dart`
+   rejects missing/foreign session IDs before mutation.
 2. **Cross-PC pi-to-pi** — relay `pi_envelope` / `pi_envelope_in` frames
    wrapping the generic agent envelope `{from, to, id, re, body}`. The relay
    forwards opaquely; it does not parse envelope bodies (though the body is

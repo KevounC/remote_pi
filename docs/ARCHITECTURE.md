@@ -50,8 +50,11 @@ touches the Pi SDK.
 - `daemon/` — `supervisor`, `supervisord` CLI, `cron_registry` / `cron_log`,
   `rpc_child`, `install`, `registry`, `id`, `client`. First-class
   long-running mode (see Open questions §3 in SPEC).
-- `protocol/` — `types` (the de-facto wire source of truth today),
-  `codec` (`encodeClient` / `decodeServer` + drifted `SERVER_TYPES` registry).
+- `protocol/` — `types` (now a narrow re-export of the generated protocol
+  from `./generated/protocol.generated.ts`), `codec` (`encodeClient` /
+  `decodeServer` over generated helpers + `DecodeError` variants), `session_scope`
+  (the `SESSION_SCOPED_*` registries), `generated/` (the canonical schema-derived
+  TS unions, validators, and type sets).
 - `actions/` — `registry`, `handlers` (typed app actions → Pi SDK calls).
 - `rooms.ts`, `config.ts`, `ui/footer.ts`, `mcp/mesh_server.ts`.
 
@@ -62,7 +65,9 @@ objects, use-cases) has no UI or infra imports; `data/` holds adapters
 (transport, sync, mesh, local Hive, repositories); `ui/` is feature pages
 with ViewModels + states.
 
-- `protocol/` — `protocol.dart` (~1313-line hand mirror of the TS unions),
+- `protocol/` — `protocol.dart` (imports/exports the generated protocol from
+  `generated/protocol.g.dart`; a documented temporary hand-maintained island
+  `control_frames.dart` covers control frames not yet in the schema IR),
   `codec.dart`, `uuid7.dart`.
 - `data/transport/` — `ws_transport`, `connection_manager` (the cleanest
   reachability state machine — lifted to a shared contract by
@@ -136,9 +141,12 @@ with immutable caching for versioned artifacts, 5-min revalidate for
 
 ## Wire protocol shape
 
-The wire is the single source of truth. Today it is a four-place handwritten
-mirror (see SPEC → "Wire protocol"). The `epic-bold-generated-protocol`
-refactor unifies it under one schema with generated TS/Dart/Rust.
+The wire is the single source of truth, defined once in a canonical JSON
+Schema and projected into TS, Dart, and Rust by the generated-protocol
+codegen (`pi-extension/src/protocol/generated/`, `app/lib/protocol/generated/`,
+`relay/src/protocol/generated/`). Handwritten mirrors have been retired in
+favor of generated types, validators, and registries; a small documented
+hand-maintained island remains for control frames not yet in the schema IR.
 
 ### The app↔pi chat wire
 
@@ -177,17 +185,23 @@ prefix.
 
 ## Session and room model
 
-**Current truth (pre-bold-refactor).** The protocol carries no `session_id`
-on chat-bearing messages. A pairing maps to a relay `room`; the relay demuxes
-incoming frames by room and fans out `pi_envelope`s to live rooms. This fails
-open in two places: cross-PC `pi_envelope` fans out to every live room
-(`relay/src/peers/registry.rs` `forward_to_peer`), and the app accepts legacy
-no-room frames unconditionally. The app's `sync_service._applyHistory`
-REPLACES the active session's message box, so a foreign `session_history`
-overwrites the viewed session — the cross-session contamination class.
+**Current truth.** The protocol carries a canonical `session_id` on every
+session-scoped chat-bearing message (`user_input`, `agent_chunk`,
+`agent_done`, `tool_result`, `session_history`, and related control traffic).
+The pi-extension stamps the opaque `session_id` (resolved by
+`RemoteSessionIssuer`) onto every session-scoped server push via
+`_withCurrentSession(...)`; the app's `session_gate.dart` rejects scoped
+messages missing/foreign session IDs (`missing_session_id`,
+`session_mismatch`, `active_session_unknown`). The relay never parses or
+routes by `session_id` — it is endpoint-owned opaque data. This is the
+restored designed invariant (see DECISIONS → Session identity).
 
-This is a designed-then-dropped regression: the absorbed project's protocol
-spec *designed* `session_id` on every push message, but it was dropped during
+Cross-PC delivery is now room-targeted: `pi_envelope` carries a required
+`to_room` and the relay routes via `send_to_room(to_pc, to_room)` (not the
+former peer-wide fanout). Empty/missing `to_room` → `bad_envelope`.
+
+Historical context (pre-bold-refactor): the wire *designed* `session_id` on
+every push message, but it was dropped during
 MVP scoping (`app/lib/protocol/protocol.dart:750` comments it: "1 pairing =
 1 session: no session_id on any message"). The 1:1 assumption broke down once
 multi-session/multi-peer arrived. See `docs/DECISIONS.md` → "Session and

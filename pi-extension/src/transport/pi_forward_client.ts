@@ -5,6 +5,12 @@ import type {
   CrossPcFramePiEnvelope,
   CrossPcFramePiEnvelopeIn,
 } from "../protocol/generated/protocol.generated.js";
+import { crossPcTypes } from "../protocol/generated/protocol.generated.js";
+
+/** Discriminator values derived from the generated `crossPcTypes` registry —
+ *  the single source of truth for cross-PC frame type strings. */
+const PI_ENVELOPE_TYPE = crossPcTypes[0];  // "pi_envelope"
+const PI_ENVELOPE_IN_TYPE = crossPcTypes[1];  // "pi_envelope_in"
 
 /**
  * Plan/25 Wave A wire types — must stay bit-compatible with the relay's
@@ -60,7 +66,7 @@ export class PiForwardClient extends EventEmitter {
   sendEnvelopeToPi(toPc: string, toRoom: string, env: Envelope): void {
     if (this.detached) return;
     const frame: CrossPcFramePiEnvelope = {
-      type: "pi_envelope",
+      type: PI_ENVELOPE_TYPE,
       to_pc: toPc,
       to_room: toRoom,
       envelope: env,
@@ -92,7 +98,7 @@ export class PiForwardClient extends EventEmitter {
     }
     if (!parsed || typeof parsed !== "object") return;
     const o = parsed as Partial<CrossPcFramePiEnvelopeIn>;
-    if (o.type !== "pi_envelope_in") return;
+    if (o.type !== PI_ENVELOPE_IN_TYPE) return;
     if (typeof o.from_pc !== "string" || !o.envelope || typeof o.envelope !== "object") return;
 
     // Cheap shape check — full envelope parse happens downstream in broker_remote.

@@ -1,7 +1,7 @@
 ---
 id: gate-docs-session-id-stale-absent-claim
 kind: story
-stage: implementing
+stage: done
 tags: [documentation]
 parent: null
 depends_on: []

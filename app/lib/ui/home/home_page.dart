@@ -436,41 +436,46 @@ class HomePage extends StatelessWidget {
     HomeItem it,
   ) async {
     final controller = TextEditingController(text: it.room.name ?? '');
-    final result = await showDialog<String?>(
-      context: context,
-      builder: (dCtx) {
-        final colors = dCtx.colors;
-        return AlertDialog(
-          backgroundColor: colors.bg,
-          title: Text('Rename session', style: TextStyle(color: colors.text)),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            style: TextStyle(color: colors.text, fontFamily: kMonoFamily),
-            decoration: InputDecoration(
-              hintText: it.room.cwd ?? 'Session',
-              hintStyle: TextStyle(color: colors.muted),
-              enabledBorder: OutlineInputBorder(
-                borderSide: BorderSide(color: colors.border),
+    String? result;
+    try {
+      result = await showDialog<String?>(
+        context: context,
+        builder: (dCtx) {
+          final colors = dCtx.colors;
+          return AlertDialog(
+            backgroundColor: colors.bg,
+            title: Text('Rename session', style: TextStyle(color: colors.text)),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              style: TextStyle(color: colors.text, fontFamily: kMonoFamily),
+              decoration: InputDecoration(
+                hintText: it.room.cwd ?? 'Session',
+                hintStyle: TextStyle(color: colors.muted),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: colors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: colors.accent),
+                ),
               ),
-              focusedBorder: OutlineInputBorder(
-                borderSide: BorderSide(color: colors.accent),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dCtx).pop(null),
+                child: Text('Cancel', style: TextStyle(color: colors.muted)),
               ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dCtx).pop(null),
-              child: Text('Cancel', style: TextStyle(color: colors.muted)),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(dCtx).pop(controller.text.trim()),
-              child: Text('Save', style: TextStyle(color: colors.accent)),
-            ),
-          ],
-        );
-      },
-    );
+              TextButton(
+                onPressed: () => Navigator.of(dCtx).pop(controller.text.trim()),
+                child: Text('Save', style: TextStyle(color: colors.accent)),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      controller.dispose();
+    }
     if (result == null) return;
     await vm.renameRoom(it.peer.remoteEpk, it.room.roomId, result);
   }
