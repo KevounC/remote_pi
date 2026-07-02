@@ -9,6 +9,54 @@ For the canonical protocol specification, see [PROTOCOL.md](PROTOCOL.md).
 
 ---
 
+## [v0.6.0] — 2026-07-01
+
+Repo-level minor over `v0.5.0`. Ships the cross-component bold-refactor arc
+spanning all four subprojects: canonical-session (wire discriminator + identity
+model + opaque relay targeting), generated-protocol (canonical schema + TS/Dart/
+Rust codegen + cockpit control RPC), reachability-contract (shared state machine
++ per-stack projections), turn-state-machine (algebraic state + late-attach +
+projection consumers), and transcript-event-log (store + projection-derive +
+hydration-replay + cockpit workspace projection). The component releases
+(cockpit-v1.6.0, app-v1.2.0, relay-0.2.0, extension-0.6.0) shipped each
+subproject's slice; this release binds the cross-component work and closes the
+arc.
+
+### Changed
+- **Canonical session identity**: a canonical `session_id` is now required on
+  every session-scoped chat-bearing message, fail-closed at every receiver
+  (pi-extension stamps it via `RemoteSessionIssuer`; app `session_gate.dart`
+  rejects missing/foreign IDs). Restores a designed-then-dropped invariant;
+  closes the cross-session contamination class. Relay remains session-blind.
+- **Generated protocol**: the wire is now defined once in a canonical JSON
+  Schema and projected into TS, Dart, and Rust by codegen. Handwritten mirrors
+  and the `SERVER_TYPES` registry drift class retired; a small documented
+  hand-maintained island remains for control frames not yet in the schema IR.
+- **Cross-PC room targeting**: `pi_envelope` carries a required `to_room`; the
+  relay routes via `send_to_room(to_pc, to_room)` (not the former peer-wide
+  fanout). Empty/missing `to_room` → `bad_envelope`.
+- **Reachability contract**: reconnect backoff and liveness timing projected
+  from a shared `Reachability` contract into the extension, app, and relay.
+- **Transcript event log**: chat history is now a projection from an append-
+  only event log; snapshot/replay payloads map to canonical events.
+- **Turn state machine**: algebraic turn state with terminal-convergence
+  invariants; late-attach and projection-consumers derive from one projection.
+- **Cockpit workspace projection**: workspace-document + agent-session +
+  settings-split projections.
+
+### Fixed
+- Home rename dialog now disposes its `TextEditingController` (lifecycle leak).
+- Cross-PC frame discriminators in `pi_forward_client` now derive from the
+  generated `crossPcTypes` registry instead of hand-maintained literals.
+- Foundation docs (`ARCHITECTURE.md`, `SPEC.md`, `DECISIONS.md`) updated to
+  reflect generated protocol as canonical and `session_id` as required.
+
+### Internal
+- 6-gate release pass: security (1m+1l→backlog) · tests (clean) · cruft (2m→
+  backlog) · refactor (2h-resolved, 4m→backlog; 26 dupes skipped) · docs (2h-
+  resolved, 1m→backlog) · patterns (2 documented). Zero blocking findings
+  remain.
+
 ## [extension-0.6.0] — 2026-07-01
 
 Pi extension minor over `extension-0.5.4`. Ships the pi-extension half of the

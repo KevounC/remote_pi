@@ -1,7 +1,7 @@
 ---
 id: release-v0.6.0
 kind: release
-stage: quality-gate
+stage: released
 tags: []
 parent: null
 depends_on: []
@@ -138,3 +138,22 @@ BINDING CONSISTENCY — release v0.6.0 (epic_cohesion: phased):
     [informational under epic_cohesion: phased] — this is the deliberately-
     deferred to_room sender design story (see extension-0.6.0 release notes);
     it is not done, so it does not bind. Legitimate phased delivery.
+
+## Shipped items
+
+Bodies live on disk (retain-bodies retention). `git show <git ref>:<former active
+path>` recovers any body; under retain-bodies they also remain in
+`.work/releases/v0.6.0/`.
+
+| id | title | kind | git ref |
+|----|-------|------|---------|
+
+## Release metadata
+
+- **Date shipped**: 2026-07-01
+- **Mapping**: tag-based (`v0.6.0`; push is external — operator runs from their machine). Tag-only (no root version file to bump, consistent with v0.5.0).
+- **Total items shipped**: 116 (111 done work items + 5 gate findings resolved/tracked)
+- **Gate finding totals**: security 2 (1m+1l pre-existing→backlog) · tests 0 (clean) · cruft 2 (2m→backlog) · refactor 6 (2h-resolved, 4m→backlog; 26 dupes skipped) · docs 3 (2h-resolved, 1m→backlog) · patterns 2 documented
+- **Pre-existing findings deferred to backlog**: 0 high (all 4 high findings were in-scope and resolved); ~9 medium/low → backlog
+- **Arc significance**: closes the cross-component bold-refactor arc. Component releases (cockpit-v1.6.0, app-v1.2.0, relay-0.2.0, extension-0.6.0) shipped each subproject's slice; this release binds the cross-component work.
+- **External publishing**: `git push origin main v0.6.0` (tag points at the ship commit)
