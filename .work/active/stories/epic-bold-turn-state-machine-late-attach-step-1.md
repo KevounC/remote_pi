@@ -5,10 +5,10 @@ stage: done
 tags: [refactor]
 parent: epic-bold-turn-state-machine-late-attach
 depends_on: [epic-bold-turn-state-machine-algebraic-state]
-release_binding: null
+release_binding: v0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-01
 ---
 
 # Step 1: Put late-attach collection into `TurnSnapshot`

@@ -5,14 +5,14 @@ stage: done
 tags: [bug, app, pi-extension]
 parent: null
 depends_on: []
-release_binding: null
+release_binding: v0.6.0
 gate_origin: null
 archived_atop: unbound
 archived_ref: 3dba904
 status: superseded
 resolved_by: story-fix-mobile-message-send-failures-visible
 created: 2026-06-28
-updated: 2026-06-29
+updated: 2026-07-01
 ---
 
 > **SUPERSEDED 2026-06-29** — resolved by `story-fix-mobile-message-send-failures-visible`

@@ -5,10 +5,10 @@ stage: done
 tags: [refactor]
 parent: epic-bold-relay-typed-actor-registry-split
 depends_on: [epic-bold-relay-typed-actor-registry-split-step-1]
-release_binding: null
+release_binding: v0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-30
+updated: 2026-07-01
 ---
 
 # Step 2: Move room lifecycle and metadata into a room-state store

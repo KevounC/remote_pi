@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension, app, cockpit]
 parent: epic-bold-transcript-event-log-projection-derive
 depends_on: [epic-bold-transcript-event-log-projection-derive-step-5]
-release_binding: null
+release_binding: v0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-30
+updated: 2026-07-01
 ---
 
 # Step 6: Add cross-surface projection fixtures and convergence checks

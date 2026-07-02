@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension, app]
 parent: epic-bold-generated-protocol-schema-source
 depends_on: [epic-bold-generated-protocol-schema-source-step-1]
-release_binding: null
+release_binding: v0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-01
 ---
 
 # Step 2: Port the app↔pi inner message families into the schema

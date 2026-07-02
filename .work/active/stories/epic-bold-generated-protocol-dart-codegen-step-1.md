@@ -5,10 +5,10 @@ stage: done
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: []
 tags: [refactor]
-release_binding: null
+release_binding: v0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-01
 ---
 
 # Step 1: Prove Dart sealed-class generation with a minimal schema IR

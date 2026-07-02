@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension, app, relay, cockpit]
 parent: null
 depends_on: [epic-bold-generated-protocol]
-release_binding: null
+release_binding: v0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-01
 ---
 
 # The turn is a named state machine, not four booleans

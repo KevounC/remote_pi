@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension, app, relay, security, bug]
 parent: epic-bold-canonical-session
 depends_on: [epic-bold-canonical-session-identity-model, epic-bold-generated-protocol]
-release_binding: null
+release_binding: v0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-01
 ---
 
 # Canonical session — wire discriminator (absorbs feature-session-isolation)

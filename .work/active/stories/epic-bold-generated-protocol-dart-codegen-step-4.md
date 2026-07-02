@@ -5,10 +5,10 @@ stage: done
 parent: epic-bold-generated-protocol-dart-codegen
 depends_on: [epic-bold-generated-protocol-dart-codegen-step-3]
 tags: [refactor]
-release_binding: null
+release_binding: v0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-30
+updated: 2026-07-01
 ---
 
 # Step 4: Swap app codec/import surface to generated protocol and retire the hand mirror

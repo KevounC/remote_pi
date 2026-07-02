@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, cockpit, pi-extension]
 parent: epic-bold-generated-protocol-cockpit-control-rpc
 depends_on: [epic-bold-generated-protocol-schema-source]
-release_binding: null
+release_binding: v0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-30
+updated: 2026-07-01
 ---
 
 # Step 1: Add schema-aligned cockpit control command types and event entities in Cockpit

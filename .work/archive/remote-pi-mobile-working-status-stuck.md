@@ -5,14 +5,14 @@ stage: done
 tags: [pi-extension, app, bug]
 parent: null
 depends_on: []
-release_binding: null
+release_binding: v0.6.0
 gate_origin: null
 archived_atop: unbound
 archived_ref: 3dba904
 status: superseded
 resolved_by: story-fix-mobile-working-convergence-on-disconnect
 created: 2026-06-27
-updated: 2026-06-29
+updated: 2026-07-01
 ---
 
 > **SUPERSEDED 2026-06-29** — resolved by `story-fix-mobile-working-convergence-on-disconnect`

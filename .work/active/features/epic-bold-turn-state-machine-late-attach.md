@@ -5,10 +5,10 @@ stage: done
 tags: [refactor, bold, pi-extension, app]
 parent: epic-bold-turn-state-machine
 depends_on: [epic-bold-turn-state-machine-algebraic-state]
-release_binding: null
+release_binding: v0.6.0
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-01
 ---
 
 # Turn — late-attach as the Done(awaitingSync) state
