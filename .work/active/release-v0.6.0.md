@@ -54,7 +54,15 @@ superseded ones.)
 
 ## Gate runs
 
-(populated in Phase 4)
+### Tests gate — 2026-07-01
+
+Invocation: `gate-tests v0.6.0`.
+
+The host invocation did not expose a generic subagent dispatch tool, so the tests gate ran inline rather than in a separate read-only scanner context. Scope audited: 111 bound non-release items and the repo-level cross-component bundle in `/tmp/v060_bundle_clean.txt`.
+
+Method: grep-first extraction of acceptance-criteria checkboxes and lifecycle keywords from bound item bodies, then targeted test-name/test-block mapping across app Flutter tests, cockpit Flutter tests, pi-extension Vitest tests, relay Cargo tests, and protocol/codegen tests. Existing gate findings for `tests`: 0.
+
+Result: no Critical/High release-blocking test coverage gaps found. Lifecycle/state-convergence acceptance criteria are represented by targeted tests for stale Pi SDK/session replacement, reconnect hydration, `working:false` convergence, WebSocket/relay teardown, late attach, session history replay, and room metadata projection. No tautological/gamed tests were accepted as findings in the audited bundle.
 
 ### Binding-consistency warnings
 
